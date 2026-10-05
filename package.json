@@ -1,0 +1,11 @@
+{
+  "name": "evara-timetables",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "npm run dev --workspace=@evara/web",
+    "build": "npm run build --workspace=@evara/web"
+  },
+  "engines": { "node": ">=20" }
+}
