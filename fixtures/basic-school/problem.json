@@ -1,0 +1,25 @@
+{
+  "timeslots": [
+    { "id": "mon-1", "cycleDay": 1, "period": 1, "label": "Monday P1" },
+    { "id": "mon-2", "cycleDay": 1, "period": 2, "label": "Monday P2" }
+  ],
+  "teachers": [
+    { "id": "t-ada", "name": "Ada Teacher", "unavailableTimeslotIds": ["mon-2"] }
+  ],
+  "studentGroups": [
+    { "id": "g-7a", "name": "Year 7A", "size": 24 }
+  ],
+  "rooms": [
+    { "id": "r-101", "name": "Room 101", "capacity": 30 }
+  ],
+  "lessons": [
+    {
+      "id": "l-math-1",
+      "subjectId": "math",
+      "teacherIds": ["t-ada"],
+      "studentGroupIds": ["g-7a"],
+      "requiredCapacity": 24
+    }
+  ],
+  "constraints": []
+}
