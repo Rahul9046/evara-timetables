@@ -12,8 +12,15 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# TypeScript definitions for the types that cross the IPC boundary. Off by default so the
+# solver and the CLI never carry the generator; `evara-typegen` and the desktop crate
+# turn it on. See ADR 0012.
+ts = ["dep:ts-rs"]
+
 [dependencies]
 serde = { workspace = true }
 uuid = { workspace = true }
 time = { workspace = true }
 thiserror = { workspace = true }
+ts-rs = { workspace = true, optional = true }

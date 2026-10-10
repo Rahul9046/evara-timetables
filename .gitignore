@@ -157,8 +157,9 @@ target/
 apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/gen/
 
-# Generated TypeScript bindings (produced by the Rust build)
-packages/domain/src/generated/
+# Generated TypeScript bindings are COMMITTED, not ignored. ADR 0009: a clean
+# checkout must type-check without running Cargo, and a diff must show when a Rust
+# change alters the frontend contract. `npm run types:check` fails on drift.
 
 # Local project files and databases — never commit school data
 *.evara

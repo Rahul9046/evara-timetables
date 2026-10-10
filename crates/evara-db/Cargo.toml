@@ -12,6 +12,11 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# TypeScript definitions for the record and input types that cross the IPC boundary.
+# Off by default so the CLI and the solver never carry the generator. See ADR 0012.
+ts = ["dep:ts-rs", "evara-core/ts"]
+
 [dependencies]
 evara-core = { workspace = true }
 serde = { workspace = true }
@@ -22,6 +27,7 @@ time = { workspace = true }
 rusqlite = { workspace = true }
 refinery = { workspace = true }
 directories = { workspace = true }
+ts-rs = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

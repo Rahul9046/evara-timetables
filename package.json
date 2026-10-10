@@ -18,7 +18,9 @@
     "rust:lint": "cargo lint -- -D warnings",
     "rust:test": "cargo test --workspace --all-features",
     "rust:build": "cargo build --workspace",
-    "check": "npm run rust:fmt && npm run rust:lint && npm run rust:test && npm run typecheck && npm run test:web",
+    "types:generate": "cargo run -q -p evara-desktop --features ts --bin evara-typegen",
+    "types:check": "cargo run -q -p evara-desktop --features ts --bin evara-typegen -- --check",
+    "check": "npm run rust:fmt && npm run rust:lint && npm run rust:test && npm run types:check && npm run typecheck && npm run test:web",
     "review:package": "node scripts/prompt-report.mjs"
   },
   "engines": {

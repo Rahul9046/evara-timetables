@@ -61,8 +61,17 @@ pub use crate::error::{DbError, InternalError, Result};
 pub use crate::meta::ProjectIdentity;
 pub use crate::migrations::supported_schema_version;
 pub use crate::repo::Stamp;
-pub use crate::repo::structure::Structure;
-pub use crate::repo::time_model::TimeModel;
+pub use crate::repo::structure::{
+    AcademicYear, AcademicYearInput, Building, BuildingInput, Campus, CampusInput, Resource,
+    ResourceInput, Room, RoomInput, RoomType, RoomTypeInput, School, SchoolInput, Structure, Term,
+    TermInput,
+};
+pub use crate::repo::time_model::{
+    CalendarDay, CalendarDayInput, CalendarDayKind, Cycle, CycleDay, CycleDayInput, CycleInput,
+    GridCell, GridPreview, MaterialisationCounts, MaterialisationPlan, MaterialisationRequest,
+    Period, PeriodInput, PeriodKind, PeriodStructure, PeriodStructureInput, PlanFingerprint,
+    PlannedSlot, TimeModel, Timeslot, TimeslotInput,
+};
 pub use crate::settings::{MAX_RECENT_PROJECTS, RecentProject, Settings};
 pub use crate::workspace::{PROJECT_EXTENSION, ProjectSummary, Workspace};
 
@@ -316,3 +325,9 @@ mod tests_structure;
 
 #[cfg(test)]
 mod tests_time_model;
+
+#[cfg(test)]
+mod tests_setup;
+
+#[cfg(test)]
+mod tests_walkthrough;

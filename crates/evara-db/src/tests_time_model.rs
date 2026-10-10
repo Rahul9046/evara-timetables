@@ -24,17 +24,21 @@ use crate::{Database, DbError, PROJECT_EXTENSION};
 const APP_VERSION: &str = "0.1.0-test";
 
 /// An open project with a school, a campus and a term already in it.
-struct Project {
+///
+/// `pub(crate)` because Phase 1E's tests ([`crate::tests_setup`]) build on the same
+/// fixture. A second copy of "a school with a campus and an autumn term" would be the
+/// kind of duplication that drifts.
+pub(crate) struct Project {
     _dir: TempDir,
-    workspace: Workspace,
+    pub(crate) workspace: Workspace,
     path: PathBuf,
     school: Uuid,
-    campus: Uuid,
-    term: Uuid,
+    pub(crate) campus: Uuid,
+    pub(crate) term: Uuid,
 }
 
 impl Project {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let dir = TempDir::new().expect("temp dir");
         let mut workspace =
             Workspace::with_settings_at(&dir.path().join("settings.sqlite"), APP_VERSION)
@@ -94,11 +98,11 @@ impl Project {
         }
     }
 
-    fn db(&mut self) -> &mut Database {
+    pub(crate) fn db(&mut self) -> &mut Database {
         self.workspace.open_database_for_test()
     }
 
-    fn cycle(&mut self, name: &str, day_count: i64) -> Uuid {
+    pub(crate) fn cycle(&mut self, name: &str, day_count: i64) -> Uuid {
         let school = self.school;
         self.db()
             .time_model()
@@ -113,7 +117,7 @@ impl Project {
             .id
     }
 
-    fn day(&mut self, cycle: Uuid, ordinal: i64, label: &str) -> Uuid {
+    pub(crate) fn day(&mut self, cycle: Uuid, ordinal: i64, label: &str) -> Uuid {
         self.db()
             .time_model()
             .create_cycle_day(&CycleDayInput {
@@ -126,7 +130,7 @@ impl Project {
             .id
     }
 
-    fn structure(&mut self, name: &str, campus: Option<Uuid>) -> Uuid {
+    pub(crate) fn structure(&mut self, name: &str, campus: Option<Uuid>) -> Uuid {
         let school = self.school;
         self.db()
             .time_model()
@@ -140,7 +144,13 @@ impl Project {
             .id
     }
 
-    fn period(&mut self, structure: Uuid, ordinal: i64, label: &str, kind: PeriodKind) -> Uuid {
+    pub(crate) fn period(
+        &mut self,
+        structure: Uuid,
+        ordinal: i64,
+        label: &str,
+        kind: PeriodKind,
+    ) -> Uuid {
         let starts = format!("{:02}:00", 8 + ordinal);
         let ends = format!("{:02}:50", 8 + ordinal);
         self.db()
@@ -159,7 +169,7 @@ impl Project {
     }
 
     /// A six-day rotation with four periods: deliberately not a Monday-to-Friday week.
-    fn six_day_grid(&mut self) -> (Uuid, Uuid, Vec<Uuid>, Vec<Uuid>) {
+    pub(crate) fn six_day_grid(&mut self) -> (Uuid, Uuid, Vec<Uuid>, Vec<Uuid>) {
         let cycle = self.cycle("Six-day rotation", 6);
         let days: Vec<Uuid> = ["Day A", "Day B", "Day C", "Day D", "Day E", "Day F"]
             .iter()
@@ -181,7 +191,11 @@ impl Project {
         (cycle, structure, days, periods)
     }
 
-    fn slots_by_tuple(&mut self, cycle: Uuid, term: Option<Uuid>) -> HashMap<(Uuid, Uuid), Uuid> {
+    pub(crate) fn slots_by_tuple(
+        &mut self,
+        cycle: Uuid,
+        term: Option<Uuid>,
+    ) -> HashMap<(Uuid, Uuid), Uuid> {
         self.db()
             .time_model()
             .timeslots(cycle, term)
@@ -191,11 +205,42 @@ impl Project {
             .collect()
     }
 
-    fn slots(&mut self, cycle: Uuid, term: Option<Uuid>) -> Vec<Timeslot> {
+    pub(crate) fn slots(&mut self, cycle: Uuid, term: Option<Uuid>) -> Vec<Timeslot> {
         self.db()
             .time_model()
             .timeslots(cycle, term)
             .expect("read slots")
+    }
+
+    /// Closes and reopens the project, so a test can tell persisted state from in-memory
+    /// state.
+    pub(crate) fn reopen(&mut self) {
+        self.workspace.close_project();
+        self.workspace
+            .open_project(&self.path)
+            .expect("reopen the project");
+    }
+
+    /// Renames a cycle day, changing nothing a timeslot's identity depends on.
+    pub(crate) fn relabel_day(&mut self, day: Uuid, label: &str) {
+        let existing = self
+            .db()
+            .time_model()
+            .cycle_day(day)
+            .expect("read")
+            .expect("the day exists");
+        self.db()
+            .time_model()
+            .update_cycle_day(
+                day,
+                &CycleDayInput {
+                    cycle_id: existing.cycle_id,
+                    ordinal: existing.ordinal,
+                    label: label.to_owned(),
+                    weekday_hint: existing.weekday_hint,
+                },
+            )
+            .expect("relabel");
     }
 }
 

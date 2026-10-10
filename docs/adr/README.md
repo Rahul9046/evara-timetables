@@ -17,6 +17,7 @@ tempted to undo it without knowing why.
 | [0009](0009-typescript-type-generation.md) | `ts-rs` for generated TypeScript types | Accepted |
 | [0010](0010-structure-deletion-semantics.md) | RESTRICT ownership, SET NULL classification; opaque driver errors | Accepted |
 | [0011](0011-stable-timeslot-identity.md) | Timeslot logical identity; materialisation never deletes | Accepted |
+| [0012](0012-records-are-the-ipc-contract.md) | Repository records are the IPC contract; no parallel DTO layer | Accepted |
 
 Statuses: **Proposed** (awaiting a decision), **Accepted**, **Superseded by NNNN**,
 **Deprecated**. Accepted records are not edited to reflect a change of mind — a new

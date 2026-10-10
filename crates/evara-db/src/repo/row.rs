@@ -52,6 +52,19 @@ impl FromColumn for Option<Uuid> {
 /// The generated `from_row` reads columns positionally in declaration order, so the
 /// `SELECT` list in the repository must name them in the same order: `id`, then the
 /// declared fields, then `created_at`, `updated_at`, `rev`.
+///
+/// # These types are also the IPC contract
+///
+/// Since Phase 1E they carry `Serialize`, `Deserialize` and — behind the `ts` feature —
+/// `ts_rs::TS`, so the TypeScript the interface uses is *generated from these
+/// declarations* rather than written again by hand. [ADR
+/// 0012](../../../docs/adr/0012-records-are-the-ipc-contract.md) records why the
+/// alternative, a parallel DTO layer in the Tauri crate, was rejected: it would have been
+/// twenty-eight more structs to keep in step by hand, which is the same drift ADR 0001
+/// exists to prevent, merely moved from Rust-to-TypeScript to Rust-to-Rust.
+///
+/// `camelCase` is applied once, here, which is the single mapping point `CLAUDE.md`
+/// requires between `snake_case` Rust and `camelCase` JSON.
 macro_rules! entity {
     (
         $(#[$record_doc:meta])* $record:ident,
@@ -59,7 +72,9 @@ macro_rules! entity {
         { $( $(#[$field_doc:meta])* $field:ident : $ty:ty ),* $(,)? }
     ) => {
         $(#[$record_doc])*
-        #[derive(Debug, Clone, PartialEq, Eq)]
+        #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
         pub struct $record {
             /// Stable identifier.
             pub id: uuid::Uuid,
@@ -73,7 +88,9 @@ macro_rules! entity {
         }
 
         $(#[$input_doc])*
-        #[derive(Debug, Clone, PartialEq, Eq)]
+        #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
         pub struct $input {
             $( $(#[$field_doc])* pub $field: $ty, )*
         }

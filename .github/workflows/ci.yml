@@ -83,6 +83,12 @@ jobs:
       - name: Rust tests
         run: cargo test --workspace --all-features
 
+      - name: Generated TypeScript is current
+        # ADR 0009: without this check, "generated" degrades into "hand-maintained with
+        # extra steps". Fails if the committed output in packages/domain/src/generated/
+        # disagrees with the Rust types it came from.
+        run: npm run types:check
+
       - name: TypeScript typecheck
         run: npm run typecheck
 

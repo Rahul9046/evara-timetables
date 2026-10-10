@@ -23,6 +23,8 @@ use uuid::Uuid;
 use crate::Database;
 use crate::cloud_sync::{self, SyncedFolder};
 use crate::error::{DbError, Result};
+use crate::repo::structure::Structure;
+use crate::repo::time_model::TimeModel;
 use crate::settings::{RecentProject, Settings};
 
 /// Extension of a live, editable Evara project.
@@ -197,6 +199,40 @@ impl Workspace {
     #[cfg(test)]
     pub(crate) fn open_database_for_test(&mut self) -> &mut Database {
         self.open.as_mut().expect("a project must be open")
+    }
+
+    /// The Structure repository for the open project.
+    ///
+    /// This, and [`Workspace::time_model`], are how the application reaches entity data.
+    /// They hand out a repository handle rather than the [`Database`], so no caller
+    /// outside this crate can obtain a connection or write SQL — the rule the connection
+    /// factory depends on.
+    ///
+    /// # Errors
+    ///
+    /// [`DbError::NoProjectOpen`] if nothing is open. Typed rather than a panic or an
+    /// empty result: "you have no project open" is a state the interface must be able to
+    /// explain, and it is reachable simply by closing a project while a screen is still
+    /// mounted.
+    pub fn structure(&mut self) -> Result<Structure<'_>> {
+        Ok(self
+            .open
+            .as_mut()
+            .ok_or(DbError::NoProjectOpen)?
+            .structure())
+    }
+
+    /// The time-model repository for the open project.
+    ///
+    /// # Errors
+    ///
+    /// [`DbError::NoProjectOpen`] if nothing is open.
+    pub fn time_model(&mut self) -> Result<TimeModel<'_>> {
+        Ok(self
+            .open
+            .as_mut()
+            .ok_or(DbError::NoProjectOpen)?
+            .time_model())
     }
 
     /// Removes a project from the recent list. The file itself is untouched.

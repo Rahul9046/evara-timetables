@@ -118,23 +118,44 @@ Also in 1D, fixing a Phase 1C defect: `parse_id` substituted `Uuid::nil()` for a
 stored identifier, so a damaged project read as a valid one in which unrelated rows shared
 the all-zero identifier. It now returns a typed `DbError::CorruptIdentifier`.
 
-**Still to do in Phase 1** — the part of the original 1D scope that is interface work
-rather than persistence:
+**Phase 1E — School Setup ✅ complete.** The interface half of the original 1D scope: a
+nine-section School Setup workflow, and 68 typed Tauri commands behind it. School details,
+campuses and buildings, rooms and room types, resources, academic years and terms, cycles
+and cycle days, bell schedules and periods, calendar mapping, and the timetable grid
+preview.
 
-- UI: the School Setup screens — school details, campuses, terms, cycle, period structure,
-  calendar — and the Tauri commands behind them.
+Three things in it are more than CRUD:
 
-**Closes M1-1, M1-2, M1-15, M1-16** once the setup screens land. The persistence half can
-already define a non-weekly cycle, materialise its grid, close and reopen without loss.
+- **Type generation is wired up**, pulled forward from Phase 2 because forty types had to
+  cross the boundary at once. `ts-rs` generates `packages/domain/src/generated/` from the
+  repository records themselves rather than from a parallel DTO layer — see
+  [adr/0012](adr/0012-records-are-the-ipc-contract.md) — and `npm run types:check` fails
+  the build when the committed output and the Rust disagree.
+- **The grid preview implements a preview/confirm/apply contract.** A preview carries a
+  fingerprint of the plan it reports; a rebuild sends it back and the repository recomputes
+  the plan inside its write transaction, refusing with `ReviewRequired` if it has moved.
+  Releasing stranded slots is a separate guarded call that deletes exactly what the
+  recomputed plan names, which closes the hole a stale orphan list would otherwise open.
+- **Cycle completeness is a domain rule, not a screen's arithmetic.**
+  `evara_core::time::CycleCoverage` is the first thing to live in `evara-core`; the
+  interface asks it over IPC rather than counting rows itself.
+
+190 Rust tests, 147 frontend tests.
+
+**Closes M1-1, M1-2, M1-15, M1-16.**
 
 ---
 
 ## Phase 2 — Resources
 
 - Migration `0002`: the People group and `subject`.
-- Type generation (`ts-rs`) wired into the build, plus the typed `src/ipc/` wrappers.
-- Generic CRUD conventions in `evara-db`: list/get/create/update/soft-delete with `rev`
-  checking, and one reusable table + form shell in the UI.
+- ~~Type generation (`ts-rs`) wired into the build, plus the typed `src/ipc/` wrappers.~~
+  Done in Phase 1E.
+- ~~One reusable table + form shell in the UI.~~ Done in Phase 1E —
+  `app/ui/CrudPanel.tsx` takes a declarative spec and the People screens should use it.
+- Remaining from this item: `rev` checking on update, for optimistic concurrency. Phase 1E
+  exposes `rev` to the interface but no command takes it as a precondition yet, so a
+  second window can still overwrite the first's edit.
 - Screens: Teachers, Subjects, Rooms, Student Groups, Year Levels.
 - The `availability` table and an availability grid editor shared by teachers, rooms and
   groups.

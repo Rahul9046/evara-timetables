@@ -1,12 +1,17 @@
 /**
- * Phase 1B application shell.
+ * The application shell.
  *
- * Infrastructure UI, not the real timetable interface. Its only job is to exercise the
- * project lifecycle end to end: create, open, close, recent projects, and the advisory
- * cloud-folder warning. The real chrome arrives with the features it serves.
+ * Two states, and the project decides which: with nothing open there is a start screen,
+ * and with a project open there is the School Setup workflow under a title bar. The
+ * Phase 1B shell proved the lifecycle worked; this is the first version with something to
+ * do once a project is open.
+ *
+ * The shell holds no rules. It opens and closes projects, and renders whichever of the
+ * two states applies.
  */
 import { useCallback, useEffect, useState } from "react";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+
 import {
   closeProject,
   createProject,
@@ -20,6 +25,8 @@ import {
   type Project,
   type RecentProject,
 } from "../ipc/project";
+import { SchoolSetup } from "./setup/SchoolSetup";
+import { Banner } from "./ui/Shell";
 
 export function App() {
   const [project, setProject] = useState<Project | null>(null);
@@ -87,22 +94,15 @@ export function App() {
 
   if (!ready) {
     return (
-      <main className="shell">
+      <main className="startShell">
         <p>Starting…</p>
       </main>
     );
   }
 
-  return (
-    <main className="shell">
-      {project ? (
-        <OpenProject
-          project={project}
-          busy={busy}
-          onClose={() => run(closeProject)}
-          error={error}
-        />
-      ) : (
+  if (!project) {
+    return (
+      <main className="startShell">
         <StartScreen
           recents={recents}
           busy={busy}
@@ -112,8 +112,70 @@ export function App() {
           onOpenRecent={(path) => run(() => openProject(path))}
           onForget={(path) => run(() => forgetRecentProject(path))}
         />
+      </main>
+    );
+  }
+
+  return (
+    <div className="appShell">
+      <TitleBar
+        project={project}
+        busy={busy}
+        error={error}
+        onClose={() => run(closeProject)}
+        onDismissError={() => setError(null)}
+      />
+      {/* Keyed by project so switching projects resets every section's state rather
+          than showing the previous project's selections against the new one. */}
+      <main className="appMain">
+        <SchoolSetup key={project.projectId} />
+      </main>
+    </div>
+  );
+}
+
+function TitleBar(props: {
+  project: Project;
+  busy: boolean;
+  error: string | null;
+  onClose: () => void;
+  onDismissError: () => void;
+}) {
+  const { project, busy, error, onClose, onDismissError } = props;
+
+  return (
+    <header className="titleBar">
+      <div className="titleBarMain">
+        <span className="eyebrow">PROJECT</span>
+        <h1 title={project.path}>{project.displayName}</h1>
+        <span className="titleBarMeta">
+          {project.folder} · schema v{project.schemaVersion}
+        </span>
+      </div>
+
+      <div className="titleBarActions">
+        <button type="button" className="secondary" onClick={onClose} disabled={busy}>
+          Close project
+        </button>
+      </div>
+
+      {project.syncedFolder && (
+        <Banner tone="warning">
+          <strong>This project is stored in {project.syncedFolder}.</strong> A live Evara
+          project is a database written continuously, and sync clients can copy its files
+          mid-write and corrupt it. Keeping it in a local folder is safer.
+        </Banner>
       )}
-    </main>
+
+      {error && (
+        <div className="titleBarError">
+          <Banner tone="error">{error}</Banner>
+          <button type="button" className="linkish" onClick={onDismissError}>
+            Dismiss
+          </button>
+        </div>
+      )}
+    </header>
   );
 }
 
@@ -132,7 +194,10 @@ function StartScreen(props: {
     <section className="panel">
       <span className="eyebrow">OPEN SOURCE · LOCAL FIRST</span>
       <h1>Evara Timetables</h1>
-      <p>Create a school project, or open one you already have. Everything stays on this machine.</p>
+      <p>
+        Create a school project, or open one you already have. Everything stays on this
+        machine.
+      </p>
 
       <div className="actions">
         <button type="button" onClick={onNew} disabled={busy}>
@@ -143,7 +208,7 @@ function StartScreen(props: {
         </button>
       </div>
 
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <Banner tone="error">{error}</Banner>}
 
       <h2 className="sectionHead">Recent projects</h2>
       {recents.length === 0 ? (
@@ -175,54 +240,6 @@ function StartScreen(props: {
           ))}
         </ul>
       )}
-    </section>
-  );
-}
-
-function OpenProject(props: {
-  project: Project;
-  busy: boolean;
-  error: string | null;
-  onClose: () => void;
-}) {
-  const { project, busy, error, onClose } = props;
-
-  return (
-    <section className="panel">
-      <span className="eyebrow">PROJECT OPEN</span>
-      <h1>{project.displayName}</h1>
-
-      {project.syncedFolder && (
-        <p className="warning" role="status">
-          <strong>This project is stored in {project.syncedFolder}.</strong> A live Evara
-          project is a database that is written continuously, and sync clients can copy its
-          files mid-write and corrupt it. Keeping it in a local folder is safer.
-        </p>
-      )}
-
-      {error && <p className="error" role="alert">{error}</p>}
-
-      <dl>
-        <dt>Location</dt>
-        <dd title={project.path}>{project.folder}</dd>
-        <dt>Project ID</dt>
-        <dd className="mono">{project.projectId}</dd>
-        <dt>Schema</dt>
-        <dd>v{project.schemaVersion}</dd>
-        <dt>Origin</dt>
-        <dd>{project.createdHere ? "Created on this installation" : "Created elsewhere"}</dd>
-      </dl>
-
-      <p className="muted">
-        No school data can be entered yet — structure, people and timetables arrive in the
-        phases after this one.
-      </p>
-
-      <div className="actions">
-        <button type="button" className="secondary" onClick={onClose} disabled={busy}>
-          Close project
-        </button>
-      </div>
     </section>
   );
 }

@@ -26,8 +26,10 @@
 
 use std::collections::HashMap;
 
+use evara_core::time::CycleCoverage;
 use rusqlite::types::{ToSql, ToSqlOutput};
 use rusqlite::{Row, Transaction};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::row::{FromColumn, entity, opt_text, text};
@@ -57,30 +59,50 @@ impl<'a> TimeModel<'a> {
 /// Typed rather than stringly, because `is_teaching` on the materialised grid is derived
 /// from it and a mistyped comparison would silently mark a whole column of the timetable
 /// unschedulable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+// The JSON and TypeScript spelling is the *stored* spelling, so the schema's CHECK
+// values, the Rust variants, the wire format and the generated TypeScript union are all
+// one vocabulary. The renames below are a second copy of the list in `stored_as!`, which
+// `kinds_match_their_stored_spelling` exists to catch if the two ever drift. Deliberately
+// a plain comment: it is a note to a maintainer, not something to publish into the
+// generated TypeScript a frontend reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum PeriodKind {
     /// Lessons may be scheduled into it.
+    #[serde(rename = "TEACHING")]
     Teaching,
     /// Break, lunch, recess.
+    #[serde(rename = "BREAK")]
     Break,
     /// Form time, roll call, assembly.
+    #[serde(rename = "REGISTRATION")]
     Registration,
     /// Anything else the school names.
+    #[serde(rename = "OTHER")]
     Other,
 }
 
 /// What a calendar date is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+// Spelled as stored, for the reason above. Note `PD` rather than
+// `PROFESSIONAL_DEVELOPMENT`: the column's CHECK says `PD`, and the wire format follows
+// the column rather than the other way round.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum CalendarDayKind {
     /// A normal teaching day.
+    #[serde(rename = "SCHOOL")]
     School,
     /// Closed.
+    #[serde(rename = "HOLIDAY")]
     Holiday,
     /// Examinations.
+    #[serde(rename = "EXAM")]
     Exam,
     /// A whole-school event.
+    #[serde(rename = "EVENT")]
     Event,
     /// Staff professional development.
+    #[serde(rename = "PD")]
     ProfessionalDevelopment,
 }
 
@@ -91,6 +113,12 @@ pub enum CalendarDayKind {
 macro_rules! stored_as {
     ($ty:ty, $entity:expr, { $($variant:path => $text:literal),* $(,)? }) => {
         impl $ty {
+            /// Every variant, in declaration order.
+            ///
+            /// The interface renders a picker from this rather than hardcoding a list that
+            /// would quietly fall behind when a kind is added.
+            pub const ALL: &'static [Self] = &[$($variant,)*];
+
             /// The value as stored.
             #[must_use]
             pub const fn as_str(self) -> &'static str {
@@ -404,6 +432,33 @@ impl TimeModel<'_> {
     /// RESTRICT: the user removes those deliberately.
     pub fn delete_cycle(&mut self, id: Uuid) -> Result<()> {
         self.db.write(|tx| delete(tx, "cycle", "cycle", id))
+    }
+
+    /// Which of a cycle's declared positions actually have a day.
+    ///
+    /// Reads the ordinals and hands them to [`CycleCoverage::of`], which holds the rule.
+    /// The rule is in `evara-core` rather than in this query because "is this cycle
+    /// finished?" is a question about the model, and the interface must not be the only
+    /// place that knows the answer.
+    ///
+    /// # Errors
+    ///
+    /// [`DbError::NotFound`] if there is no such cycle. Reported rather than returning an
+    /// empty coverage, which would read as "declared 0 days" and look deliberately empty.
+    pub fn cycle_coverage(&self, cycle_id: Uuid) -> Result<CycleCoverage> {
+        let declared = self
+            .cycle(cycle_id)?
+            .ok_or(DbError::NotFound { entity: "cycle" })?
+            .day_count;
+
+        self.db.read(|conn| {
+            let mut stmt =
+                conn.prepare("SELECT ordinal FROM cycle_day WHERE cycle_id = ? ORDER BY ordinal")?;
+            let ordinals: Vec<i64> = stmt
+                .query_map([text(cycle_id)], |row| row.get(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(CycleCoverage::of(declared, &ordinals))
+        })
     }
 }
 
@@ -975,7 +1030,9 @@ const TIMESLOT_COLUMNS: &str = "id, school_id, cycle_id, cycle_day_id, period_id
 /// blocks the deletion of a day or a period, so an orphan can never be found by deleting
 /// first and rematerialising afterwards. Orphan-hood is a property of a *proposal*, and
 /// this struct is how a caller states one. See ADR 0011 §4.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct MaterialisationRequest {
     /// The cycle whose days form one axis of the grid.
     pub cycle_id: Uuid,
@@ -1018,7 +1075,9 @@ impl MaterialisationRequest {
 }
 
 /// One logical slot in a plan.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct PlannedSlot {
     /// The slot's stable identifier.
     ///
@@ -1037,7 +1096,9 @@ pub struct PlannedSlot {
 }
 
 /// How many slots a plan touches, for a confirmation prompt.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct MaterialisationCounts {
     /// Slots that already exist and keep their identifiers.
     pub preserved: usize,
@@ -1055,7 +1116,9 @@ pub struct MaterialisationCounts {
 ///
 /// The orphan list is the point of the type: a caller can see that rematerialising would
 /// strand slots *before* anything is removed, and nothing in this module removes them.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct MaterialisationPlan {
     /// Slots that already exist and are still wanted. Identifiers preserved.
     pub preserved: Vec<PlannedSlot>,
@@ -1067,7 +1130,113 @@ pub struct MaterialisationPlan {
     pub refreshed: usize,
 }
 
+/// An opaque summary of what a plan would do, so a confirmation can be proved current.
+///
+/// # Why a fingerprint rather than passing the plan back
+///
+/// [ADR 0011](../../../docs/adr/0011-stable-timeslot-identity.md) §5 settled that
+/// [`TimeModel::apply_materialisation`] recomputes the plan inside its own transaction,
+/// because a plan made earlier describes a world that may have moved on. That makes
+/// applying *safe* — it can never act on tuples that no longer exist — but on its own it
+/// does not make applying *what the user agreed to*. A human shown "12 new slots, nothing
+/// orphaned" who clicks Apply a minute after someone deleted a period would silently get
+/// a different outcome.
+///
+/// So the caller sends back a fingerprint of the plan it displayed, the repository
+/// recomputes the plan inside the transaction and compares, and a mismatch is
+/// [`DbError::ReviewRequired`] with nothing written. The comparison has to happen inside
+/// the transaction to mean anything; doing it in the command handler would be a
+/// check-then-act race, and a scheduling decision in the wrong layer besides.
+///
+/// # What counts as a change
+///
+/// Which tuples would be created, which slots would be preserved, and which would be
+/// orphaned. **Not** `ordinal`: it is a derived projection that ADR 0011 §1 says is
+/// expected to change, and a renumbering alters no slot's fate. Treating it as material
+/// would make routine reordering demand a pointless second confirmation.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct PlanFingerprint(String);
+
+impl PlanFingerprint {
+    /// The fingerprint as it travels to the interface and back.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Builds one from an arbitrary string.
+    ///
+    /// Test-only, and deliberately so: outside a test the only legitimate source of a
+    /// fingerprint is [`MaterialisationPlan::fingerprint`], and a public constructor
+    /// would let a caller fabricate the agreement the guard exists to check. (It would
+    /// still be safe — the apply path recomputes the plan regardless — but it would make
+    /// the staleness check trivially bypassable, which is worse than useless.)
+    #[cfg(test)]
+    pub(crate) fn from_str_for_test(value: &str) -> Self {
+        Self(value.to_owned())
+    }
+}
+
+impl std::fmt::Display for PlanFingerprint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// FNV-1a, 64-bit.
+///
+/// Spelled out rather than taken from `DefaultHasher` because this value crosses the IPC
+/// boundary and comes back: it has to mean the same thing on both sides of a round trip,
+/// and `DefaultHasher`'s output is explicitly not guaranteed stable between Rust releases.
+/// FNV is four lines and fixed forever. It is not a security primitive and nothing here
+/// treats it as one — a forged fingerprint can only cause a spurious re-review, never an
+/// unreviewed write, because the apply path recomputes the plan regardless.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
 impl MaterialisationPlan {
+    /// A fingerprint of this plan, to send to a human and receive back on confirmation.
+    ///
+    /// Deterministic for a given set of created tuples, preserved slots and orphans,
+    /// regardless of the order they happen to come out of the database in.
+    #[must_use]
+    pub fn fingerprint(&self) -> PlanFingerprint {
+        let term = |id: Option<Uuid>| id.map_or_else(|| String::from("-"), |t| t.to_string());
+
+        // Created slots have no identifier yet, so they are keyed by the logical tuple
+        // that identifies them. Preserved and orphaned slots have one, and it is the
+        // thing the user is being asked about.
+        let mut lines: Vec<String> =
+            Vec::with_capacity(self.created.len() + self.preserved.len() + self.orphaned.len());
+        for slot in &self.created {
+            lines.push(format!(
+                "c:{}:{}:{}",
+                slot.cycle_day_id,
+                slot.period_id,
+                term(slot.term_id)
+            ));
+        }
+        for (tag, slots) in [("p", &self.preserved), ("o", &self.orphaned)] {
+            for slot in slots {
+                lines.push(format!(
+                    "{tag}:{}",
+                    slot.id
+                        .map_or_else(|| String::from("?"), |id| id.to_string())
+                ));
+            }
+        }
+        lines.sort_unstable();
+
+        PlanFingerprint(format!("{:016x}", fnv1a(lines.join("\n").as_bytes())))
+    }
+
     /// Whether applying this proposal would strand any slot.
     #[must_use]
     pub fn would_orphan(&self) -> bool {
@@ -1090,6 +1259,138 @@ impl MaterialisationPlan {
     #[must_use]
     pub fn orphaned_ids(&self) -> Vec<Uuid> {
         self.orphaned.iter().filter_map(|slot| slot.id).collect()
+    }
+}
+
+/// One cell of the grid preview: a `(cycle day, period)` pair and whether it exists.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct GridCell {
+    /// Which day of the cycle.
+    pub cycle_day_id: Uuid,
+    /// Which period of the bell schedule.
+    pub period_id: Uuid,
+    /// The materialised slot, or `None` when the grid has never been built here.
+    ///
+    /// `None` is what "missing timeslot" means, and it is the difference between a grid
+    /// the solver can use and one it cannot.
+    pub timeslot_id: Option<Uuid>,
+    /// The stored slot's derived order, when the slot exists.
+    pub ordinal: Option<i64>,
+    /// Whether lessons could be scheduled here, from the period's kind.
+    ///
+    /// Reported for cells that do not exist yet as well, so the preview can distinguish a
+    /// missing teaching slot from a missing break.
+    pub is_teaching: bool,
+}
+
+/// The state of one grid, for the Timetable Grid Preview screen.
+///
+/// A read-only projection. It answers, in one round trip, every question the screen asks:
+/// what the axes are, which cells exist, which do not, what rebuilding would do, and what
+/// rebuilding would strand. Assembling it here rather than in the command handler keeps
+/// the queries in the crate that owns SQL and keeps the handler a translation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct GridPreview {
+    /// The cycle forming one axis.
+    pub cycle_id: Uuid,
+    /// The bell schedule forming the other.
+    pub period_structure_id: Uuid,
+    /// The term, or `None` for a year-wide grid.
+    pub term_id: Option<Uuid>,
+    /// The cycle's days, in `ordinal` order. The axis, and the only day identity there is.
+    pub days: Vec<CycleDay>,
+    /// The bell schedule's periods, in `ordinal` order.
+    pub periods: Vec<Period>,
+    /// Every `(day, period)` pair, in `(day.ordinal, period.ordinal)` order.
+    pub cells: Vec<GridCell>,
+    /// Whether the cycle itself is finished, and which positions are missing if not.
+    pub coverage: CycleCoverage,
+    /// What a rebuild would preserve, create and strand.
+    pub counts: MaterialisationCounts,
+    /// Slots a rebuild would strand. Never touched by anything in this projection.
+    pub orphaned: Vec<PlannedSlot>,
+    /// Fingerprint of the plan these counts came from.
+    ///
+    /// The screen sends it back with a rebuild or an orphan release, which is what proves
+    /// the confirmation belongs to the figures that were displayed. See
+    /// [`PlanFingerprint`].
+    pub fingerprint: PlanFingerprint,
+}
+
+impl GridPreview {
+    /// Whether the grid is fully materialised and the cycle behind it is finished.
+    ///
+    /// Three things have to hold, and the screen should say which one does not: the cycle
+    /// has every declared day, the bell schedule has at least one period, and no cell is
+    /// missing. A grid with no periods is trivially "not missing anything", which is why
+    /// the period check is explicit rather than implied by the cell count.
+    #[must_use]
+    pub fn is_complete(&self) -> bool {
+        self.coverage.is_complete()
+            && !self.periods.is_empty()
+            && self.cells.iter().all(|cell| cell.timeslot_id.is_some())
+    }
+}
+
+impl TimeModel<'_> {
+    /// The state of one grid: axes, existing and missing cells, and what a rebuild would
+    /// do.
+    ///
+    /// Writes nothing. The plan inside it is a snapshot, which is exactly why the
+    /// [`PlanFingerprint`] travels with it.
+    ///
+    /// # Errors
+    ///
+    /// As [`TimeModel::plan_materialisation`]: [`DbError::NotFound`] for an unknown cycle,
+    /// bell schedule or term, [`DbError::Invalid`] if the cycle and the bell schedule
+    /// belong to different schools.
+    pub fn grid_preview(&mut self, request: &MaterialisationRequest) -> Result<GridPreview> {
+        let coverage = self.cycle_coverage(request.cycle_id)?;
+        let days = self.cycle_days(request.cycle_id)?;
+        let periods = self.periods(request.period_structure_id)?;
+        let plan = self.plan_materialisation(request)?;
+
+        // Scoped to this bell schedule's periods, per ADR 0011 §2: a school with two
+        // campuses on different schedules has two grids over the same cycle, and one must
+        // not show the other's slots.
+        let wanted: HashMap<Uuid, PeriodKind> = periods.iter().map(|p| (p.id, p.kind)).collect();
+        let existing: HashMap<(Uuid, Uuid), Timeslot> = self
+            .timeslots(request.cycle_id, request.term_id)?
+            .into_iter()
+            .filter(|slot| wanted.contains_key(&slot.period_id))
+            .map(|slot| ((slot.cycle_day_id, slot.period_id), slot))
+            .collect();
+
+        let mut cells = Vec::with_capacity(days.len() * periods.len());
+        for day in &days {
+            for period in &periods {
+                let slot = existing.get(&(day.id, period.id));
+                cells.push(GridCell {
+                    cycle_day_id: day.id,
+                    period_id: period.id,
+                    timeslot_id: slot.map(|s| s.id),
+                    ordinal: slot.map(|s| s.ordinal),
+                    is_teaching: period.kind == PeriodKind::Teaching,
+                });
+            }
+        }
+
+        Ok(GridPreview {
+            cycle_id: request.cycle_id,
+            period_structure_id: request.period_structure_id,
+            term_id: request.term_id,
+            days,
+            periods,
+            coverage,
+            counts: plan.counts(),
+            orphaned: plan.orphaned.clone(),
+            fingerprint: plan.fingerprint(),
+            cells,
+        })
     }
 }
 
@@ -1137,39 +1438,75 @@ impl TimeModel<'_> {
         &mut self,
         request: &MaterialisationRequest,
     ) -> Result<MaterialisationPlan> {
+        self.db.write(|tx| apply(tx, request, None))
+    }
+
+    /// [`TimeModel::apply_materialisation`], but only if the plan is still the one a human
+    /// reviewed.
+    ///
+    /// `reviewed` is the [`MaterialisationPlan::fingerprint`] of the plan that was shown.
+    /// The plan is recomputed inside the write transaction and compared against it, so
+    /// there is no window between the check and the write.
+    ///
+    /// Prefer this over [`TimeModel::apply_materialisation`] anywhere a person pressed a
+    /// button: the unreviewed form is for the CLI and for tests, which have no preview to
+    /// go stale.
+    ///
+    /// # Errors
+    ///
+    /// - [`DbError::ReviewRequired`] if the grid moved since the preview. **Nothing is
+    ///   written**; the caller re-reads the plan and asks again.
+    /// - Otherwise as [`TimeModel::apply_materialisation`].
+    pub fn apply_materialisation_reviewed(
+        &mut self,
+        request: &MaterialisationRequest,
+        reviewed: &PlanFingerprint,
+    ) -> Result<MaterialisationPlan> {
+        self.db.write(|tx| apply(tx, request, Some(reviewed)))
+    }
+
+    /// Deletes exactly the slots this proposal strands, once a human has agreed to lose
+    /// them.
+    ///
+    /// The guarded counterpart to [`TimeModel::delete_timeslots`], and the one the
+    /// interface uses. It differs in the way that matters: it recomputes the plan inside
+    /// the write transaction, refuses unless the plan still matches `reviewed`, and then
+    /// deletes **the orphans that plan names** rather than a list of identifiers supplied
+    /// from outside.
+    ///
+    /// That closes a real hole. `delete_timeslots` cannot verify orphan-hood — ADR 0011 §4
+    /// explains why it is a property of a proposal, not of a row — so handing it
+    /// identifiers captured from an earlier preview could delete a slot that has since
+    /// become wanted again. Here the identifiers and the agreement are checked against the
+    /// same snapshot.
+    ///
+    /// Deliberately **not** combined with materialisation. Creating and destroying stay
+    /// separate calls so no flag can turn the safe one into the destructive one.
+    ///
+    /// Returns the identifiers removed, in plan order. An empty result means the proposal
+    /// stranded nothing — not a failure.
+    ///
+    /// # Errors
+    ///
+    /// - [`DbError::ReviewRequired`] if the grid moved since the preview. Nothing is
+    ///   deleted.
+    /// - [`DbError::StillReferenced`] if anything — a future timetable entry — refers to
+    ///   one of the slots. Nothing is deleted: the whole call rolls back, so no subset
+    ///   disappears.
+    pub fn release_orphans(
+        &mut self,
+        request: &MaterialisationRequest,
+        reviewed: &PlanFingerprint,
+    ) -> Result<Vec<Uuid>> {
         self.db.write(|tx| {
-            let mut plan = plan(tx, request)?;
-            let context = grid_context(tx, request)?;
-            let teaching = teaching_periods(tx, request.period_structure_id)?;
+            let plan = plan(tx, request)?;
+            require_unchanged(&plan, reviewed)?;
 
-            for slot in &mut plan.created {
-                let stamp = Stamp::new();
-                tx.execute(
-                    "INSERT INTO timeslot
-                         (id, school_id, cycle_id, cycle_day_id, period_id, campus_id,
-                          term_id, ordinal, is_teaching, created_at, updated_at, rev)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        text(stamp.id),
-                        text(context.school_id),
-                        text(request.cycle_id),
-                        text(slot.cycle_day_id),
-                        text(slot.period_id),
-                        opt_text(context.campus_id),
-                        opt_text(slot.term_id),
-                        slot.ordinal,
-                        *teaching.get(&slot.period_id).unwrap_or(&false),
-                        &stamp.created_at,
-                        &stamp.updated_at,
-                        stamp.rev,
-                    ),
-                )
-                .map_err(|error| translate(error, "timeslot"))?;
-                slot.id = Some(stamp.id);
+            let ids = plan.orphaned_ids();
+            for id in &ids {
+                delete(tx, "timeslot", "timeslot", *id)?;
             }
-
-            plan.refreshed = refresh_preserved(tx, request, &context, &teaching, &plan.preserved)?;
-            Ok(plan)
+            Ok(ids)
         })
     }
 
@@ -1233,6 +1570,74 @@ impl TimeModel<'_> {
             Ok(())
         })
     }
+}
+
+/// Refuses to proceed when the recomputed plan is not the one that was reviewed.
+///
+/// Called **inside** the write transaction that is about to act, which is the whole point:
+/// a comparison made before the transaction opened could be invalidated before the write
+/// lands.
+fn require_unchanged(plan: &MaterialisationPlan, reviewed: &PlanFingerprint) -> Result<()> {
+    let current = plan.fingerprint();
+    if current == *reviewed {
+        return Ok(());
+    }
+    Err(DbError::ReviewRequired {
+        reviewed: reviewed.as_str().to_owned(),
+        current: current.as_str().to_owned(),
+    })
+}
+
+/// Creates the missing slots and refreshes the surviving ones, inside a caller's
+/// transaction.
+///
+/// Shared by [`TimeModel::apply_materialisation`] and
+/// [`TimeModel::apply_materialisation_reviewed`] so there is exactly one implementation of
+/// cases A and B. `reviewed` is the only difference between them, and it is checked after
+/// the plan is computed and before anything is written.
+///
+/// Never performs case C: orphans are reported in the returned plan and left alone.
+fn apply(
+    tx: &Transaction<'_>,
+    request: &MaterialisationRequest,
+    reviewed: Option<&PlanFingerprint>,
+) -> Result<MaterialisationPlan> {
+    let mut plan = plan(tx, request)?;
+    if let Some(reviewed) = reviewed {
+        require_unchanged(&plan, reviewed)?;
+    }
+
+    let context = grid_context(tx, request)?;
+    let teaching = teaching_periods(tx, request.period_structure_id)?;
+
+    for slot in &mut plan.created {
+        let stamp = Stamp::new();
+        tx.execute(
+            "INSERT INTO timeslot
+                 (id, school_id, cycle_id, cycle_day_id, period_id, campus_id,
+                  term_id, ordinal, is_teaching, created_at, updated_at, rev)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                text(stamp.id),
+                text(context.school_id),
+                text(request.cycle_id),
+                text(slot.cycle_day_id),
+                text(slot.period_id),
+                opt_text(context.campus_id),
+                opt_text(slot.term_id),
+                slot.ordinal,
+                *teaching.get(&slot.period_id).unwrap_or(&false),
+                &stamp.created_at,
+                &stamp.updated_at,
+                stamp.rev,
+            ),
+        )
+        .map_err(|error| translate(error, "timeslot"))?;
+        slot.id = Some(stamp.id);
+    }
+
+    plan.refreshed = refresh_preserved(tx, request, &context, &teaching, &plan.preserved)?;
+    Ok(plan)
 }
 
 /// Computes the plan for one grid against one proposal.

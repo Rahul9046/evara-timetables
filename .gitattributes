@@ -1,0 +1,58 @@
+# Line endings, pinned.
+#
+# Evara is developed on Windows and macOS and built on both plus Linux. Without this file
+# every contributor's `core.autocrlf` decides what lands in a commit, which produces diffs
+# that are nothing but line endings and makes `npm run types:check` — a byte comparison
+# against generated output — fail for reasons that have nothing to do with the types.
+#
+# LF in the repository, native in the working tree where a tool needs it.
+
+# Everything Git detects as text is normalised to LF on commit.
+* text=auto eol=lf
+
+# Explicit for the file types we actually ship, so a new tool's guess cannot change them.
+*.rs      text eol=lf
+*.ts      text eol=lf
+*.tsx     text eol=lf
+*.js      text eol=lf
+*.mjs     text eol=lf
+*.json    text eol=lf
+*.toml    text eol=lf
+*.sql     text eol=lf
+*.css     text eol=lf
+*.html    text eol=lf
+*.md      text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+.gitignore      text eol=lf
+.gitattributes  text eol=lf
+
+# Lock files are generated; normalising them avoids a spurious whole-file diff.
+Cargo.lock        text eol=lf
+package-lock.json text eol=lf
+
+# Binary. Marked explicitly so Git never tries to merge or normalise them — a "fixed" PNG
+# is a corrupt PNG, and the Tauri icons are required build inputs.
+*.png   binary
+*.ico   binary
+*.icns  binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.pdf   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+
+# A live project is a SQLite database. It should never be committed at all — .gitignore
+# covers that — but if one ever is, it must not be line-ending-mangled into corruption.
+*.evaraproj binary
+*.evara     binary
+*.sqlite    binary
+*.db        binary
+
+# Keep generated output out of pull-request diffs by default. It is still committed and
+# still checked; it is simply not what a reviewer should read first.
+packages/domain/src/generated/** linguist-generated=true

@@ -43,6 +43,10 @@ serde_json = "1"
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "v7", "serde"] }
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
+# TypeScript definitions generated from the Rust DTOs — ADR 0009 and ADR 0012.
+# `uuid-impl` maps `Uuid` to `string`, matching how serde writes it; `no-serde-warnings`
+# silences a lint about `serde(default)`, which we use deliberately on optional inputs.
+ts-rs = { version = "12", features = ["uuid-impl", "no-serde-warnings"] }
 
 # Persistence. SQLite is statically bundled rather than taken from the host so every
 # install runs an identical, known engine version — a desktop app cannot rely on

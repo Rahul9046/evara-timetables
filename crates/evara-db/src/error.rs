@@ -255,6 +255,26 @@ pub enum DbError {
         message: String,
     },
 
+    /// The project changed between a preview and the confirmation of it.
+    ///
+    /// Raised by the reviewed materialisation calls when the plan recomputed inside the
+    /// write transaction no longer matches the plan the caller was shown. Separate from
+    /// [`DbError::Invalid`] because the interface's response is specific: re-read the
+    /// plan and ask again, rather than report a bad value.
+    ///
+    /// The fingerprints are opaque and are carried for diagnostics only; nothing should
+    /// branch on their content.
+    #[error(
+        "the timetable grid changed since it was last previewed, so nothing was applied; \
+         review the new plan and confirm again"
+    )]
+    ReviewRequired {
+        /// Fingerprint the caller was shown.
+        reviewed: String,
+        /// Fingerprint computed at the moment of applying.
+        current: String,
+    },
+
     /// Schema migration failed. Nothing was applied.
     #[error("migrating the project failed; no changes were applied")]
     Migration(#[source] InternalError),

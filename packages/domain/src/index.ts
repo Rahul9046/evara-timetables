@@ -15,25 +15,57 @@
  * Hand-written code is allowed here only for things that have no Rust counterpart:
  * type guards, discriminated-union helpers and display formatting.
  *
- * Type generation is wired up in Phase 2, together with the first entities. Until then
- * `./generated/` is empty and this module exports only the IPC envelope below.
+ * Type generation was wired up in Phase 1E. `./generated/` now holds the whole IPC
+ * contract — forty types, written by `npm run types:generate` and verified by
+ * `npm run types:check`, which CI runs. See
+ * [ADR 0009](../../../docs/adr/0009-typescript-type-generation.md) and
+ * [ADR 0012](../../../docs/adr/0012-records-are-the-ipc-contract.md).
  */
 
-/**
- * Build and version facts reported by the backend.
- *
- * Mirrors `AppInfo` in `apps/desktop/src-tauri/src/commands/mod.rs`. This is the one
- * hand-written mirror in the codebase, and it exists only so Phase 0 can prove the IPC
- * round trip before the generator is in place. Phase 2 replaces it with generated output.
- */
-export interface AppInfo {
-  /** Application version, from the Rust crate manifest. */
-  readonly version: string;
-  /** Whether the backend is a debug build. */
-  readonly debug: boolean;
-  /** Roadmap phase the codebase has reached. */
-  readonly phase: string;
-}
+export type {
+  AcademicYear,
+  AcademicYearInput,
+  AppInfo,
+  Building,
+  BuildingInput,
+  CalendarDay,
+  CalendarDayInput,
+  CalendarDayKind,
+  Campus,
+  CampusInput,
+  Cycle,
+  CycleCoverage,
+  CycleDay,
+  CycleDayInput,
+  CycleInput,
+  GridCell,
+  GridPreview,
+  MaterialisationCounts,
+  MaterialisationPlan,
+  MaterialisationRequest,
+  Period,
+  PeriodInput,
+  PeriodKind,
+  PeriodStructure,
+  PeriodStructureInput,
+  PlanFingerprint,
+  PlannedSlot,
+  Resource,
+  ResourceInput,
+  Room,
+  RoomInput,
+  RoomType,
+  RoomTypeInput,
+  School,
+  SchoolInput,
+  SetupError,
+  Term,
+  TermInput,
+  Timeslot,
+  TimeslotInput,
+} from './generated/index';
+
+import type { AppInfo } from './generated/index';
 
 /** Narrows an unknown IPC payload to {@link AppInfo}. */
 export function isAppInfo(value: unknown): value is AppInfo {

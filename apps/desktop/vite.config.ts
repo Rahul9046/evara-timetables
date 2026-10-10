@@ -20,5 +20,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     include: ["src/**/*.test.{ts,tsx}"],
+    // Unmounts rendered components between tests. See src/test-setup.ts for why this is
+    // not automatic here.
+    setupFiles: ["./src/test-setup.ts"],
   },
 });
