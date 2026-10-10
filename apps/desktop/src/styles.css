@@ -750,6 +750,69 @@ button:focus-visible,
   border-color: var(--bad);
 }
 
+/* ---- combobox ----------------------------------------------------------- */
+
+/* The list is absolutely positioned, so the wrapper is the thing it hangs off. */
+.combobox {
+  position: relative;
+  min-width: 0;
+}
+
+.comboboxList {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  /* Roughly nine rows before it scrolls: enough to browse, short enough to stay put. */
+  max-height: 272px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 10px 28px rgb(24 33 47 / 12%);
+}
+
+.comboboxList[hidden] {
+  display: none;
+}
+
+.comboboxOption {
+  padding: 7px 9px;
+  border-radius: 7px;
+  font-size: 13px;
+  line-height: 1.35;
+  cursor: default;
+  /* Long zone names wrap rather than being clipped; the identifier matters. */
+  overflow-wrap: anywhere;
+}
+
+/* One highlight, driven by aria-activedescendant rather than focus, because focus never
+   leaves the input. Hover sets the same state, so mouse and keyboard cannot disagree
+   about which row Enter would take. */
+.comboboxOption--active {
+  background: var(--info-bg);
+  color: var(--accent);
+}
+
+.comboboxOption[aria-selected="true"] {
+  font-weight: 600;
+}
+
+.comboboxOption[aria-selected="true"]::after {
+  content: " ✓";
+  color: var(--accent);
+}
+
+.comboboxEmpty {
+  padding: 9px;
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+
 .checkboxRow {
   display: flex;
   align-items: center;

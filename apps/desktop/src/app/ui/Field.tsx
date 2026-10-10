@@ -13,6 +13,7 @@
  * rather than in each form is the only way it stays true of all of them.
  */
 import type { Draft, Problems } from "../validation";
+import { Combobox } from "./Combobox";
 
 /** One option of a select. */
 export interface Choice {
@@ -35,6 +36,24 @@ export type FieldSpec =
       hint?: string;
       required?: boolean;
       /** Label for the null option. Omit to make the field non-nullable. */
+      emptyLabel?: string;
+      choices: readonly Choice[];
+    }
+  /**
+   * A `select` with a search box, for when the list is too long to scroll.
+   *
+   * Same contract as `select` — the stored value is `Choice.value`, never the label —
+   * but typing filters instead of jumping to the first matching initial. Use it past
+   * roughly thirty options; below that a native `select` is faster and more familiar.
+   */
+  | {
+      kind: "combobox";
+      key: string;
+      label: string;
+      hint?: string;
+      required?: boolean;
+      placeholder?: string;
+      /** Shown when the query matches nothing. */
       emptyLabel?: string;
       choices: readonly Choice[];
     };
@@ -97,6 +116,21 @@ export function Field(props: {
               value={asText}
               placeholder={spec.placeholder}
               onChange={(e) => onChange(spec.key, e.currentTarget.value)}
+            />
+          ) : spec.kind === "combobox" ? (
+            <Combobox
+              id={id}
+              value={asText}
+              options={spec.choices}
+              disabled={disabled}
+              placeholder={spec.placeholder}
+              emptyLabel={spec.emptyLabel}
+              aria-invalid={error ? true : undefined}
+              aria-errormessage={errorId}
+              aria-describedby={describedBy}
+              className={error ? "invalid" : undefined}
+              // Only an explicit selection reaches the draft. See Combobox for why.
+              onSelect={(value) => onChange(spec.key, value)}
             />
           ) : spec.kind === "select" ? (
             <select
