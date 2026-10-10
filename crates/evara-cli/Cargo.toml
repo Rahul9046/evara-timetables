@@ -1,0 +1,26 @@
+[package]
+name = "evara-cli"
+description = "Headless Evara: solve fixtures, benchmark the solver, inspect and migrate projects."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "evara"
+path = "src/main.rs"
+
+[dependencies]
+evara-core = { workspace = true }
+evara-constraints = { workspace = true }
+evara-solver = { workspace = true }
+evara-db = { workspace = true }
+evara-project = { workspace = true }
+evara-report = { workspace = true }
+evara-integrations = { workspace = true }

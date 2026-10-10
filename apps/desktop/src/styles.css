@@ -1,0 +1,1126 @@
+/*
+ * Base styling and design tokens, carried over from the apps/web prototype.
+ *
+ * The prototype's timetable-grid rules (.grid, .lesson, .period, .stats, .bottom) were
+ * deliberately dropped along with the demo markup they styled. The real *lesson* timetable
+ * is designed in Phase 7, against real data and real interaction requirements.
+ *
+ * Phase 1E adds the School Setup chrome below: a navigation shell, the shared table and
+ * form vocabulary, and the timeslot grid preview. It extends the existing tokens rather
+ * than introducing a second palette — one visual language, so nine sections read as one
+ * application.
+ */
+
+:root {
+  --bg: #f5f7fa;
+  --surface: #ffffff;
+  --border: #e2e6ec;
+  --border-subtle: #edf0f4;
+  --text: #18212f;
+  --text-muted: #647084;
+  --text-faint: #8993a2;
+  --accent: #5965d8;
+  --ok: #26845c;
+
+  --radius: 14px;
+  --radius-sm: 10px;
+
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #11151c;
+    --surface: #171c25;
+    --border: #262d3a;
+    --border-subtle: #1e242e;
+    --text: #e8ecf2;
+    --text-muted: #9aa5b6;
+    --text-faint: #6f7b8c;
+    --accent: #8b94ea;
+    --ok: #4cbb8a;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  /* A desktop shell should not rubber-band or select chrome like a web page. */
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+h1 {
+  font-size: 32px;
+  letter-spacing: -1px;
+  margin: 6px 0 8px;
+}
+
+h2,
+h3 {
+  margin: 0;
+}
+
+p {
+  color: var(--text-muted);
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, "Cascadia Code", Consolas, monospace;
+  font-size: 0.92em;
+}
+
+.eyebrow {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1.4px;
+  color: var(--accent);
+}
+
+button {
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--text);
+  color: var(--surface);
+  padding: 11px 16px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px;
+}
+
+.ok {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+/* The start screen: one centred panel, as the Phase 1B shell was. */
+.startShell {
+  height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  overflow: auto;
+}
+
+.startShell > .panel {
+  max-width: 560px;
+  width: 100%;
+}
+
+.startShell dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 16px;
+  margin: 18px 0 0;
+  font-size: 14px;
+}
+
+.startShell dt {
+  color: var(--text-faint);
+}
+
+.startShell dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+
+/* ---- Phase 1B: project lifecycle ---------------------------------------- */
+
+.actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+
+button.secondary {
+  background: transparent;
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+button.linkish {
+  background: none;
+  color: var(--text-faint);
+  padding: 6px 8px;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+button.linkish:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.sectionHead {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  margin: 28px 0 10px;
+}
+
+.muted {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+}
+
+.error,
+.warning {
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 14px;
+  margin: 16px 0 0;
+  line-height: 1.45;
+}
+
+.error {
+  background: color-mix(in srgb, #c0392b 12%, transparent);
+  color: #c0392b;
+}
+
+/* Advisory, not an error: the project opened fine. Styled to inform, not alarm. */
+.warning {
+  background: color-mix(in srgb, #b7791f 14%, transparent);
+  color: #8a5a00;
+}
+
+@media (prefers-color-scheme: dark) {
+  .error { color: #ff8b7d; }
+  .warning { color: #f0c479; }
+}
+
+.recents {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.recents li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.recents li:last-child {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.recentOpen {
+  flex: 1;
+  background: none;
+  color: inherit;
+  text-align: left;
+  padding: 12px 6px;
+  font-weight: 400;
+  display: block;
+  min-width: 0;
+}
+
+.recentOpen strong {
+  display: block;
+  font-size: 14px;
+}
+
+.recentOpen span {
+  display: block;
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A missing project stays listed so it can be reopened later or removed deliberately. */
+.recents li.missing .recentOpen strong {
+  text-decoration: line-through;
+  color: var(--text-faint);
+}
+
+
+/* ======================================================================== *
+ * Phase 1E — School Setup
+ *
+ * Extends the tokens above rather than introducing a second palette, so nine
+ * sections read as one application. The only new values are the few semantic
+ * ones below, defined for both colour schemes in one place.
+ * ======================================================================== */
+
+:root {
+  --warn: #8a5a00;
+  --warn-bg: color-mix(in srgb, #b7791f 14%, transparent);
+  --bad: #c0392b;
+  --bad-bg: color-mix(in srgb, #c0392b 12%, transparent);
+  --ok-bg: color-mix(in srgb, #26845c 12%, transparent);
+  --info-bg: color-mix(in srgb, #5965d8 10%, transparent);
+  --nav-width: 268px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --warn: #f0c479;
+    --bad: #ff8b7d;
+  }
+}
+
+/* Chrome should not be selectable; the data the user typed should be. */
+.appShell,
+.appShell input,
+.appShell textarea,
+.appShell select {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.appShell {
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+}
+
+/* ---- title bar ---------------------------------------------------------- */
+
+.titleBar {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px 16px;
+  align-items: center;
+}
+
+.titleBarMain {
+  min-width: 0;
+}
+
+.titleBar h1 {
+  font-size: 19px;
+  letter-spacing: -0.3px;
+  margin: 1px 0 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.titleBarMeta {
+  display: block;
+  font-size: 12px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.titleBarActions {
+  display: flex;
+  gap: 8px;
+}
+
+.titleBar .banner,
+.titleBarError {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.titleBarError {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.titleBarError .banner {
+  flex: 1;
+}
+
+.appMain {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ---- the setup shell ---------------------------------------------------- */
+
+.setup {
+  height: 100%;
+  display: grid;
+  grid-template-columns: var(--nav-width) 1fr;
+  min-height: 0;
+}
+
+.setupNav {
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+  overflow-y: auto;
+  padding: 16px 12px 24px;
+}
+
+.setupNavHead {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 0 8px;
+  margin-bottom: 10px;
+}
+
+.setupNav ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.navItem {
+  width: 100%;
+  background: none;
+  color: inherit;
+  font-weight: 400;
+  text-align: left;
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.navItem:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.navItem--on,
+.navItem--on:hover {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.navItem--on .navLabel {
+  color: var(--accent);
+}
+
+.navIndex {
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+  background: var(--border-subtle);
+  border-radius: 999px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  margin-top: 1px;
+}
+
+.navItem--on .navIndex {
+  background: var(--accent);
+  color: var(--surface);
+}
+
+.navText {
+  min-width: 0;
+}
+
+.navLabel {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.navBlurb {
+  display: block;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  margin-top: 2px;
+  line-height: 1.3;
+}
+
+.setupBody {
+  overflow-y: auto;
+  padding: 24px 28px 64px;
+  min-width: 0;
+}
+
+/* ---- a section ---------------------------------------------------------- */
+
+.section {
+  max-width: 1040px;
+}
+
+.sectionIntro {
+  margin-bottom: 22px;
+}
+
+.sectionIntro h2 {
+  font-size: 24px;
+  letter-spacing: -0.5px;
+}
+
+.sectionIntro p {
+  margin: 6px 0 0;
+  max-width: 68ch;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.section hr {
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  margin: 30px 0;
+}
+
+.subPanel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-bottom: 18px;
+}
+
+.subPanel > h3 {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.subPanel > .muted {
+  margin: 4px 0 12px;
+  max-width: 76ch;
+}
+
+.crudPanel {
+  margin-bottom: 8px;
+}
+
+.panelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.panelHead h3 {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.panelHead button {
+  padding: 8px 13px;
+  font-size: 13px;
+}
+
+/* ---- banners ------------------------------------------------------------ */
+
+.banner {
+  border-radius: var(--radius-sm);
+  padding: 11px 13px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  margin: 0 0 14px;
+}
+
+.banner--error {
+  background: var(--bad-bg);
+  color: var(--bad);
+}
+
+.banner--warning {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.banner--ok {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.banner--info {
+  background: var(--info-bg);
+  color: var(--accent);
+}
+
+/* ---- empty and loading states ------------------------------------------ */
+
+.emptyState {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 26px 22px;
+  text-align: center;
+  background: var(--surface);
+}
+
+.emptyState h3 {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.emptyState p {
+  margin: 0 auto 16px;
+  max-width: 58ch;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.emptyState button {
+  padding: 9px 15px;
+  font-size: 13px;
+}
+
+.loading {
+  font-size: 13.5px;
+  color: var(--text-faint);
+  padding: 18px 2px;
+}
+
+/* ---- parent picker ------------------------------------------------------ */
+
+.picker {
+  margin-bottom: 16px;
+}
+
+.pickerLabel {
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 7px;
+}
+
+.pickerOptions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.chip {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--border);
+  padding: 7px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.chip--on {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: none;
+}
+
+.chipDetail {
+  font-size: 11.5px;
+  opacity: 0.72;
+  font-weight: 500;
+}
+
+.chipBadge {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.8;
+}
+
+/* ---- forms -------------------------------------------------------------- */
+
+.entityForm {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+}
+
+.entityForm fieldset {
+  border: 0;
+  margin: 0;
+  padding: 16px 18px 18px;
+}
+
+.entityForm legend {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 0;
+  margin-bottom: 12px;
+}
+
+.entityForm fieldset:disabled {
+  opacity: 0.65;
+}
+
+.fieldGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 14px 18px;
+}
+
+.field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.field--inline {
+  justify-content: flex-end;
+}
+
+.field label {
+  font-size: 12.5px;
+  font-weight: 650;
+  margin-bottom: 5px;
+}
+
+.requiredMark {
+  color: var(--bad);
+}
+
+.field input,
+.field select,
+.field textarea {
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+.field textarea {
+  resize: vertical;
+}
+
+.field input:focus-visible,
+.field select:focus-visible,
+.field textarea:focus-visible,
+button:focus-visible,
+.navItem:focus-visible,
+.chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.field input.invalid,
+.field select.invalid,
+.field textarea.invalid {
+  border-color: var(--bad);
+}
+
+.checkboxRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  font-size: 13.5px;
+  margin: 0;
+  padding: 8px 0;
+}
+
+.checkboxRow input {
+  width: auto;
+  accent-color: var(--accent);
+}
+
+.hint {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  line-height: 1.45;
+  margin: 5px 0 0;
+}
+
+.fieldError {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--bad);
+  margin: 5px 0 0;
+  line-height: 1.4;
+}
+
+.rangeRow {
+  display: flex;
+  gap: 14px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.rangeRow .field {
+  max-width: 180px;
+}
+
+/* ---- tables ------------------------------------------------------------- */
+
+.tableScroll {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.dataTable,
+.gridTable {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13.5px;
+}
+
+.dataTable th,
+.dataTable td {
+  text-align: left;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+.dataTable thead th {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  background: var(--bg);
+}
+
+.dataTable tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.dataTable tbody tr.editing {
+  background: var(--info-bg);
+}
+
+.dataTable .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.dataTable .rowActions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.absent {
+  color: var(--text-faint);
+}
+
+.yes {
+  color: var(--ok);
+  font-weight: 650;
+}
+
+.no {
+  color: var(--text-faint);
+}
+
+.kind {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.kind--teaching {
+  color: var(--ok);
+  font-weight: 650;
+}
+
+button.danger {
+  background: var(--bad);
+  color: #fff;
+}
+
+button.linkish.danger {
+  background: none;
+  color: var(--bad);
+}
+
+/* ---- facts and counts --------------------------------------------------- */
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+  margin: 0 0 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+}
+
+.facts dt {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.facts dd {
+  margin: 4px 0 0;
+  font-size: 14px;
+}
+
+.counts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 14px;
+  margin: 0;
+}
+
+.counts dt {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.counts dd {
+  margin: 3px 0 0;
+  font-size: 24px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
+}
+
+.counts dd.bad {
+  color: var(--bad);
+}
+
+.counts dd.new {
+  color: var(--accent);
+}
+
+.counts--plan {
+  margin-bottom: 16px;
+}
+
+.counts .hint {
+  margin-top: 2px;
+}
+
+/* ---- the grid preview --------------------------------------------------- */
+
+.gridPickers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  margin-bottom: 4px;
+}
+
+.gridTable th,
+.gridTable td {
+  border: 1px solid var(--border-subtle);
+  padding: 7px 9px;
+  vertical-align: top;
+}
+
+.gridTable thead th,
+.gridTable tbody th {
+  background: var(--bg);
+  text-align: left;
+  min-width: 112px;
+}
+
+.gridTable tbody th {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+
+.axisLabel {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.axisDetail {
+  display: block;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  font-weight: 500;
+  margin-top: 1px;
+}
+
+.gridTable th button.linkish {
+  padding: 3px 0 0;
+  font-size: 10.5px;
+}
+
+.gridTable th button.linkish[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.gridTable .excluded {
+  background: var(--warn-bg);
+}
+
+.slot {
+  text-align: center;
+  font-size: 11px;
+}
+
+.slot code {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.slot--present {
+  background: var(--ok-bg);
+}
+
+.slot--missing {
+  background: transparent;
+}
+
+.slot--nonteaching code {
+  opacity: 0.55;
+}
+
+.slot--excluded {
+  background: var(--warn-bg);
+  opacity: 0.55;
+}
+
+.missingMark {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.orphanList,
+.planList {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  font-size: 13px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.orphanList li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.orphanList code {
+  color: var(--text-faint);
+  flex: none;
+}
+
+.planList li {
+  padding: 4px 0;
+  line-height: 1.5;
+}
+
+/* ---- confirmation dialogue --------------------------------------------- */
+
+dialog.confirm {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  padding: 20px 22px;
+  max-width: 540px;
+  width: calc(100vw - 48px);
+  box-shadow: 0 24px 60px rgb(0 0 0 / 28%);
+}
+
+dialog.confirm::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+
+dialog.confirm h3 {
+  font-size: 17px;
+  margin-bottom: 10px;
+}
+
+.confirmBody {
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.confirmBody p {
+  margin: 0 0 10px;
+  color: var(--text);
+}
+
+.confirmBody .muted {
+  color: var(--text-muted);
+}
+
+/* ---- utilities ---------------------------------------------------------- */
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* A narrow window collapses the sidebar into a scrolling strip above the content
+   rather than squeezing the content to nothing. */
+@media (max-width: 860px) {
+  .setup {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .setupNav {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    max-height: 184px;
+  }
+
+  .setupBody {
+    padding: 18px 16px 48px;
+  }
+}

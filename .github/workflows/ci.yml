@@ -1,0 +1,104 @@
+# Continuous integration.
+#
+# Only GitHub-hosted runners and open-source actions — no paid services, in line with the
+# project's open-source constraints. Windows and macOS are first-class because they are
+# the shipping targets; Linux is not built.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: short
+
+jobs:
+  # Formatting, lints and licence policy. Platform-independent, so run once and cheaply.
+  static:
+    name: Format, lint and licences
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+
+      - name: Install Linux build dependencies
+        # Needed to type-check the Tauri crate on Linux even though we do not ship it.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo lint -- -D warnings
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: Licence and advisory policy
+        run: cargo deny check licenses bans sources advisories
+
+  # The real matrix: the platforms Evara ships on.
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Rust tests
+        run: cargo test --workspace --all-features
+
+      - name: Generated TypeScript is current
+        # ADR 0009: without this check, "generated" degrades into "hand-maintained with
+        # extra steps". Fails if the committed output in packages/domain/src/generated/
+        # disagrees with the Rust types it came from.
+        run: npm run types:check
+
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Frontend tests
+        run: npm run test:web
+
+      - name: Frontend production build
+        run: npm run build:vite --workspace=@evara/desktop
+
+      - name: Build the Tauri application
+        # Compiles and links the real desktop binary without producing installers, which
+        # is the check that matters until Phase 11 sets up bundling and signing.
+        run: cargo build --package evara-desktop --locked

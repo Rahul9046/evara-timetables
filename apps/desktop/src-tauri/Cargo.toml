@@ -1,0 +1,69 @@
+[package]
+name = "evara-desktop"
+description = "Evara Timetables desktop application."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+# The package has two binaries since Phase 1E — the app and the type generator — and
+# `tauri dev` shells out to a bare `cargo run`. Without this it fails with "could not
+# determine which binary to run" before the window ever opens.
+default-run = "evara-desktop"
+
+[lints]
+workspace = true
+
+[features]
+# Enabled by `evara-typegen` so the IPC DTOs defined in this crate — the setup error
+# contract — are generated alongside the ones from `evara-db`. Off in a release build:
+# the application never needs the generator at runtime. See ADR 0012.
+ts = ["dep:ts-rs", "evara-db/ts", "evara-core/ts"]
+
+# The library holds the app; main.rs is a two-line shim. This is the Tauri 2 layout and
+# it keeps the application testable and buildable for mobile targets later.
+[lib]
+name = "evara_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# The TypeScript generator. It lives in this package rather than in a crate of its own
+# because the error contract it generates is defined here, and because a `staticlib` /
+# `cdylib` library cannot be linked into a binary in another package on Windows MSVC — the
+# attempt loses the default C runtime and fails with dozens of unresolved CRT symbols. A
+# bin inside the package links exactly as `evara-desktop` itself does.
+#
+# `required-features` keeps it out of an ordinary `cargo build` and out of `tauri build`,
+# so the shipped bundle never contains it.
+[[bin]]
+name = "evara-typegen"
+path = "src/bin/typegen.rs"
+required-features = ["ts"]
+
+[[bin]]
+name = "evara-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+# Native file dialogs for New/Open Project.
+tauri-plugin-dialog = "2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Identifiers cross the IPC boundary as strings; the commands take them as `Uuid` so a
+# malformed one is rejected at the boundary rather than deep inside a query.
+uuid = { workspace = true }
+ts-rs = { workspace = true, optional = true }
+
+# Command handlers delegate into these. Phase 0 wires the dependency graph only;
+# no command does real work yet.
+evara-core = { workspace = true }
+evara-constraints = { workspace = true }
+evara-solver = { workspace = true }
+evara-db = { workspace = true }
+evara-project = { workspace = true }
+evara-report = { workspace = true }

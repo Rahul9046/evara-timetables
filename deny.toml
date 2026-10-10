@@ -1,0 +1,61 @@
+# cargo-deny configuration.
+#
+# Evara is Apache-2.0 and ships as a binary, so every compiled-in dependency must be
+# permissively licensed. This file is the enforcement point: CI fails on a licence that
+# is not on the allow list, which is how an incidental GPL/AGPL transitive dependency
+# gets caught before it reaches a release rather than after.
+
+[graph]
+all-features = true
+
+[licenses]
+# SPDX expressions. Add a licence only after checking it permits binary redistribution
+# under Apache-2.0 without imposing copyleft or an attribution burden we cannot meet.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "CC0-1.0",
+    "Unicode-3.0",
+    "MPL-2.0",         # file-level copyleft only; acceptable when not modified
+    "BSL-1.0",
+    "Unlicense",
+]
+confidence-threshold = 0.9
+# Deliberately empty: a per-crate licence exception must be argued for in review.
+exceptions = []
+# The allow list is a forward-looking policy, so entries no dependency happens to use
+# today are expected and must not add noise to every CI run.
+unused-allowed-license = "allow"
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Our own crates are path dependencies with no version requirement, which otherwise reads
+# as a wildcard. External wildcards stay denied.
+allow-wildcard-paths = true
+# Nothing is banned outright yet. Candidates if they ever appear transitively:
+# an HTTP client or TLS stack in the core crates, which would contradict offline-first.
+deny = []
+
+[advisories]
+yanked = "deny"
+# Security vulnerabilities always fail the build — that default is not relaxed anywhere.
+#
+# "Unmaintained" is scoped to crates we actually choose. We must never knowingly add an
+# unmaintained direct dependency, but we cannot fix Tauri's transitive tree: today that
+# means proc-macro-error 1.0.4, reached only through glib/gtk, which is Tauri's *Linux*
+# backend. It is a build-time proc macro, it is not compiled on Windows or macOS, and no
+# upgrade exists. Failing CI over it would train people to ignore this check.
+unmaintained = "workspace"
+ignore = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
