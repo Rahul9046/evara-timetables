@@ -1,0 +1,88 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/evara-core",
+    "crates/evara-db",
+    "crates/evara-constraints",
+    "crates/evara-solver",
+    "crates/evara-project",
+    "crates/evara-report",
+    "crates/evara-integrations",
+    "crates/evara-cli",
+    "apps/desktop/src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# Tracks the highest MSRV among our dependencies (refinery 0.10 needs 1.92; Tauri 2.12
+# needs 1.90). Nobody compiles Evara with an older toolchain — we ship the binary — so a
+# conservative MSRV only blocks security updates in the dependency tree.
+rust-version = "1.92"
+license = "Apache-2.0"
+repository = "https://github.com/Rahul9046/evara-timetables"
+authors = ["Evara Timetables contributors"]
+# Nothing here goes to crates.io; these crates exist only inside this workspace.
+publish = false
+
+# Dependency versions live here so every crate stays in step.
+# Phase 0 keeps this list minimal: nothing is depended on until the phase that needs it.
+[workspace.dependencies]
+# Internal crates
+evara-core = { path = "crates/evara-core" }
+evara-db = { path = "crates/evara-db" }
+evara-constraints = { path = "crates/evara-constraints" }
+evara-solver = { path = "crates/evara-solver" }
+evara-project = { path = "crates/evara-project" }
+evara-report = { path = "crates/evara-report" }
+evara-integrations = { path = "crates/evara-integrations" }
+
+# Third party — all MIT / Apache-2.0 / BSD / ISC (see deny.toml)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
+time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
+
+# Persistence. SQLite is statically bundled rather than taken from the host so every
+# install runs an identical, known engine version — a desktop app cannot rely on
+# whatever SQLite happens to sit on a user's machine.
+rusqlite = { version = "0.37", features = ["bundled", "functions"] }
+refinery = { version = "0.10", features = ["rusqlite-bundled"] }
+tempfile = "3"
+# Platform application-data directories for the settings database.
+directories = "6"
+
+# Lints are declared once and inherited by every crate via `[lints] workspace = true`,
+# so `cargo clippy` enforces them even when a contributor forgets `-D warnings`.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Scheduling code is full of deliberate numeric conversions; these fire constantly and
+# are better handled by review than by a blanket allow/deny at each site.
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+# Our docs are prose-heavy and full of proper nouns (SQLite, Tauri, PowerSchool,
+# TypeScript, UUIDv7). Backticking each one hurts readability more than it helps.
+doc_markdown = "allow"
+
+[profile.release]
+# A timetable solver is CPU-bound; prefer whole-program optimisation over build speed.
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+# Keeps iteration bearable while still letting the solver run at a usable speed in dev.
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2

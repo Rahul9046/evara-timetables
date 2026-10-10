@@ -147,3 +147,34 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# Rust / Cargo
+target/
+**/target/
+*.pdb
+
+# Tauri
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+
+# Generated TypeScript bindings (produced by the Rust build)
+packages/domain/src/generated/
+
+# Local project files and databases — never commit school data
+*.evara
+!fixtures/**/*.evara
+*.evaraproj
+*.evaraproj-wal
+*.evaraproj-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm
+
+# Solver benchmark output
+bench-results/
+
+# Local prompt-run transcripts (kept on disk, never committed)
+docs/prompt-runs/

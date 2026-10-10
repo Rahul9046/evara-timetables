@@ -1,0 +1,3 @@
+[alias]
+# Used by the npm scripts and CI so the exact lint invocation lives in one place.
+lint = "clippy --workspace --all-targets --all-features"
