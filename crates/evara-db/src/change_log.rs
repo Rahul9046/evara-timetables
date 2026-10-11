@@ -159,6 +159,8 @@ pub const TRACKED_TABLES: &[&str] = &[
     "period",
     "timeslot",
     "calendar_day",
+    // V5 — buildings shared across campuses.
+    "building_campus",
 ];
 
 /// Installs the change-log triggers for one table.

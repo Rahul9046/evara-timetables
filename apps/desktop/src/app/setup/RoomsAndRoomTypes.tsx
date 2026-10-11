@@ -12,13 +12,14 @@
  * rather than as a disabled placeholder. A room with no type is a normal state, not an
  * incomplete one.
  *
- * A building choice is restricted to buildings on the room's own campus, because the
+ * A building choice is restricted to buildings available to the room's own campus — its
+ * own and any shared with it — because the
  * schema refuses the cross-campus case with a trigger. Showing an option that is
  * guaranteed to fail is not a choice.
  */
 import { useCallback, useMemo, useState } from "react";
 
-import type { Building, Campus, Room, RoomType, School } from "@evara/domain";
+import type { BuildingWithCampuses, Campus, Room, RoomType, School } from "@evara/domain";
 import {
   createRoom,
   createRoomType,
@@ -59,7 +60,7 @@ export function RoomsAndRoomTypes(props: { school: School }) {
     () => (campusId ? listBuildings(campusId) : Promise.resolve([])),
     [campusId],
   );
-  const buildings = useList<Building>(loadBuildings);
+  const buildings = useList<BuildingWithCampuses>(loadBuildings);
 
   const roomTypeSpec = useMemo<CrudSpec<RoomType, Parameters<typeof createRoomType>[0]>>(
     () => ({
@@ -105,9 +106,13 @@ export function RoomsAndRoomTypes(props: { school: School }) {
   );
 
   const roomSpec = useMemo<CrudSpec<Room, Parameters<typeof createRoom>[0]>>(() => {
+    // Buildings *available to* this campus, which since ADR 0013 includes any shared
+    // with it. Offering anything else would be offering a room a building its own campus
+    // does not have, which the schema refuses anyway.
     const buildingChoices: Choice[] = (buildings.items ?? []).map((b) => ({
-      value: b.id,
-      label: b.name,
+      value: b.building.id,
+      label:
+        b.campusIds.length > 1 ? `${b.building.name} (shared)` : b.building.name,
     }));
     const typeChoices: Choice[] = (roomTypes.items ?? []).map((t) => ({
       value: t.id,
@@ -153,7 +158,7 @@ export function RoomsAndRoomTypes(props: { school: School }) {
           hint:
             buildingChoices.length === 0
               ? "This campus has no buildings. A room does not need one."
-              : "Optional, and only buildings on this campus are offered.",
+              : "Optional. Only buildings available to this campus are offered, shared ones included.",
         },
         {
           kind: "select",

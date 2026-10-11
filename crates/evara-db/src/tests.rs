@@ -182,6 +182,8 @@ fn the_schema_contains_exactly_the_phases_shipped_so_far() {
             // V1 — bootstrap.
             "app_meta".to_owned(),
             "building".to_owned(),
+            // V5 — buildings shared across campuses.
+            "building_campus".to_owned(),
             // V4 — Structure, time part.
             "calendar_day".to_owned(),
             "campus".to_owned(),

@@ -30,8 +30,9 @@
 #![allow(clippy::needless_pass_by_value)]
 
 use evara_db::{
-    AcademicYear, AcademicYearInput, Building, BuildingInput, Campus, CampusInput, Resource,
-    ResourceInput, Room, RoomInput, RoomType, RoomTypeInput, School, SchoolInput, Term, TermInput,
+    AcademicYear, AcademicYearInput, Building, BuildingInput, BuildingWithCampuses, Campus,
+    CampusInput, Resource, ResourceInput, Room, RoomInput, RoomType, RoomTypeInput, School,
+    SchoolInput, Term, TermInput,
 };
 use tauri::State;
 use uuid::Uuid;
@@ -117,14 +118,21 @@ pub fn setup_campus_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<
 
 // -------------------------------------------------------------------------- building
 
-/// Creates a building on a campus.
+/// Creates a building on a campus, optionally shared with others.
+///
+/// `shared_campus_ids` names the *additional* campuses. The building and every association
+/// are written in one transaction, so a half-shared building is never persisted — see
+/// [ADR 0013](../../../../docs/adr/0013-buildings-shared-across-campuses.md).
 #[tauri::command]
 pub fn setup_building_create(
     state: State<'_, AppState>,
     input: BuildingInput,
+    shared_campus_ids: Vec<Uuid>,
 ) -> SetupResult<Building> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.create_building(&input)?)
+    Ok(ws
+        .structure()?
+        .create_building(&input, &shared_campus_ids)?)
 }
 
 /// One building by identifier.
@@ -134,17 +142,30 @@ pub fn setup_building_get(state: State<'_, AppState>, id: Uuid) -> SetupResult<O
     Ok(ws.structure()?.building(id)?)
 }
 
-/// Every building on one campus.
+/// Every building available to one campus, shared ones included.
+///
+/// Each entry carries the full set of campuses that building serves, so the listing can
+/// mark a shared building without a call per row.
 #[tauri::command]
 pub fn setup_building_list(
     state: State<'_, AppState>,
     campus_id: Uuid,
-) -> SetupResult<Vec<Building>> {
+) -> SetupResult<Vec<BuildingWithCampuses>> {
     let mut ws = workspace(&state)?;
     Ok(ws.structure()?.buildings(campus_id)?)
 }
 
-/// Replaces a building's details.
+/// Every campus one building serves.
+#[tauri::command]
+pub fn setup_building_campuses(
+    state: State<'_, AppState>,
+    building_id: Uuid,
+) -> SetupResult<Vec<Uuid>> {
+    let mut ws = workspace(&state)?;
+    Ok(ws.structure()?.building_campuses(building_id)?)
+}
+
+/// Replaces a building's details. Its home campus never changes.
 #[tauri::command]
 pub fn setup_building_update(
     state: State<'_, AppState>,
@@ -155,11 +176,41 @@ pub fn setup_building_update(
     Ok(ws.structure()?.update_building(id, &input)?)
 }
 
+/// Shares an existing building with another campus.
+///
+/// The same campus cannot be associated twice; a repeat is refused rather than ignored, so
+/// a screen working from a stale share set finds out instead of believing a success.
+#[tauri::command]
+pub fn setup_building_share(
+    state: State<'_, AppState>,
+    building_id: Uuid,
+    campus_id: Uuid,
+) -> SetupResult<()> {
+    let mut ws = workspace(&state)?;
+    Ok(ws.structure()?.share_building(building_id, campus_id)?)
+}
+
+/// Stops sharing a building with a campus.
+///
+/// Refused while rooms on that campus are still in the building, and refused outright for
+/// the campus the building was created on. Nothing is detached or deleted either way — a
+/// withdrawn share is reversible, so it must not take rooms with it.
+#[tauri::command]
+pub fn setup_building_unshare(
+    state: State<'_, AppState>,
+    building_id: Uuid,
+    campus_id: Uuid,
+) -> SetupResult<()> {
+    let mut ws = workspace(&state)?;
+    Ok(ws.structure()?.unshare_building(building_id, campus_id)?)
+}
+
 /// Deletes a building, detaching its rooms rather than deleting them.
 ///
 /// A room's `building_id` is an optional classification, so ADR 0010 makes it `SET NULL`
 /// — through a real repository update, so each affected room's revision stays truthful.
-/// The rooms themselves survive; they simply stop naming a building.
+/// The rooms themselves survive; they simply stop naming a building. Its campus
+/// associations are removed the same way, one change-log entry each.
 #[tauri::command]
 pub fn setup_building_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
     let mut ws = workspace(&state)?;

@@ -415,10 +415,13 @@ fn a_campus_that_still_owns_buildings_cannot_be_deleted() {
     project
         .db()
         .structure()
-        .create_building(&BuildingInput {
-            campus_id: campus,
-            name: "Science Block".to_owned(),
-        })
+        .create_building(
+            &BuildingInput {
+                campus_id: campus,
+                name: "Science Block".to_owned(),
+            },
+            &[],
+        )
         .expect("create building");
 
     let outcome = project.db().structure().delete_campus(campus);
@@ -523,10 +526,13 @@ fn deleting_a_building_detaches_its_rooms() {
     let block = project
         .db()
         .structure()
-        .create_building(&BuildingInput {
-            campus_id: campus,
-            name: "Science Block".to_owned(),
-        })
+        .create_building(
+            &BuildingInput {
+                campus_id: campus,
+                name: "Science Block".to_owned(),
+            },
+            &[],
+        )
         .expect("create building");
 
     let mut input = room(campus, "S1");
@@ -644,10 +650,13 @@ fn a_room_cannot_sit_in_a_building_on_another_campus() {
     let block = project
         .db()
         .structure()
-        .create_building(&BuildingInput {
-            campus_id: annexe.id,
-            name: "Far Block".to_owned(),
-        })
+        .create_building(
+            &BuildingInput {
+                campus_id: annexe.id,
+                name: "Far Block".to_owned(),
+            },
+            &[],
+        )
         .expect("create building");
 
     let mut input = room(main, "X1");
@@ -804,10 +813,13 @@ fn change_log_follows_a_row_through_update_and_delete() {
     let block = project
         .db()
         .structure()
-        .create_building(&BuildingInput {
-            campus_id: campus,
-            name: "Block A".to_owned(),
-        })
+        .create_building(
+            &BuildingInput {
+                campus_id: campus,
+                name: "Block A".to_owned(),
+            },
+            &[],
+        )
         .expect("create");
     project
         .db()
@@ -931,10 +943,13 @@ fn structure_survives_closing_and_reopening_the_project() {
     let block = project
         .db()
         .structure()
-        .create_building(&BuildingInput {
-            campus_id: campus,
-            name: "Science Block".to_owned(),
-        })
+        .create_building(
+            &BuildingInput {
+                campus_id: campus,
+                name: "Science Block".to_owned(),
+            },
+            &[],
+        )
         .expect("create building");
     let lab = project
         .db()
@@ -1071,10 +1086,13 @@ fn a_malformed_optional_reference_is_an_error_not_some_nil() {
     let block = project
         .db()
         .structure()
-        .create_building(&BuildingInput {
-            campus_id: campus,
-            name: "Block A".to_owned(),
-        })
+        .create_building(
+            &BuildingInput {
+                campus_id: campus,
+                name: "Block A".to_owned(),
+            },
+            &[],
+        )
         .expect("create building");
 
     let mut input = room(campus, "A1");
@@ -1085,14 +1103,19 @@ fn a_malformed_optional_reference_is_an_error_not_some_nil() {
         .create_room(&input)
         .expect("create room");
 
-    // Both ends are damaged to the *same* text, so the file stays referentially consistent
+    // Every end is damaged to the *same* text, so the file stays referentially consistent
     // and the corruption is purely in the format. `foreign_keys` cannot be turned off
     // inside a transaction — SQLite ignores it there — so enforcement is deferred to commit
-    // instead, which lets the two statements disagree in between.
+    // instead, which lets the statements disagree in between.
+    //
+    // `building_campus` is updated too, not for this assertion's sake but because V5 gave
+    // `building.id` a third referrer: leaving it behind fails the deferred check at commit,
+    // and the fixture blows up before the test can read anything.
     corrupt(
         project.db(),
         "PRAGMA defer_foreign_keys = ON;\n\
          UPDATE building SET id = 'xxxx';\n\
+         UPDATE building_campus SET building_id = 'xxxx';\n\
          UPDATE room SET building_id = 'xxxx';",
     );
 

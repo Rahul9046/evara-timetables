@@ -14,6 +14,7 @@
  */
 import type { Draft, Problems } from "../validation";
 import { Combobox } from "./Combobox";
+import { MultiCombobox } from "./MultiCombobox";
 
 /** One option of a select. */
 export interface Choice {
@@ -56,6 +57,24 @@ export type FieldSpec =
       /** Shown when the query matches nothing. */
       emptyLabel?: string;
       choices: readonly Choice[];
+    }
+  /**
+   * A searchable multi-select. The draft holds a `string[]` of chosen values.
+   *
+   * Use it where the model has a real many-to-many — the campuses a building serves, say
+   * — never as a shortcut for several booleans.
+   */
+  | {
+      kind: "multicombobox";
+      key: string;
+      label: string;
+      hint?: string;
+      placeholder?: string;
+      /** Shown when the query matches nothing. */
+      emptyLabel?: string;
+      /** Shown in place of chips when nothing is chosen. */
+      noneLabel?: string;
+      choices: readonly Choice[];
     };
 
 /** Renders one field of a form. */
@@ -64,7 +83,7 @@ export function Field(props: {
   draft: Draft;
   problems: Problems;
   disabled: boolean;
-  onChange: (key: string, value: string | boolean) => void;
+  onChange: (key: string, value: string | boolean | string[]) => void;
   /** Prefix for element ids, so two forms on one screen do not collide. */
   idPrefix: string;
 }) {
@@ -116,6 +135,21 @@ export function Field(props: {
               value={asText}
               placeholder={spec.placeholder}
               onChange={(e) => onChange(spec.key, e.currentTarget.value)}
+            />
+          ) : spec.kind === "multicombobox" ? (
+            <MultiCombobox
+              id={id}
+              values={Array.isArray(value) ? value : []}
+              options={spec.choices}
+              disabled={disabled}
+              placeholder={spec.placeholder}
+              emptyLabel={spec.emptyLabel}
+              noneLabel={spec.noneLabel}
+              aria-invalid={error ? true : undefined}
+              aria-errormessage={errorId}
+              aria-describedby={describedBy}
+              className={error ? "invalid" : undefined}
+              onChange={(values) => onChange(spec.key, values)}
             />
           ) : spec.kind === "combobox" ? (
             <Combobox
@@ -202,7 +236,7 @@ export function EntityForm(props: {
   problems: Problems;
   busy: boolean;
   submitLabel: string;
-  onChange: (key: string, value: string | boolean) => void;
+  onChange: (key: string, value: string | boolean | string[]) => void;
   onSubmit: () => void;
   onCancel: () => void;
 }) {

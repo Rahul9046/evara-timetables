@@ -28,6 +28,7 @@ export type {
   AppInfo,
   Building,
   BuildingInput,
+  BuildingWithCampuses,
   CalendarDay,
   CalendarDayInput,
   CalendarDayKind,

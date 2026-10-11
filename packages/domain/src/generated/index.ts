@@ -9,6 +9,7 @@ export type { AcademicYearInput } from "./AcademicYearInput";
 export type { AppInfo } from "./AppInfo";
 export type { Building } from "./Building";
 export type { BuildingInput } from "./BuildingInput";
+export type { BuildingWithCampuses } from "./BuildingWithCampuses";
 export type { CalendarDay } from "./CalendarDay";
 export type { CalendarDayInput } from "./CalendarDayInput";
 export type { CalendarDayKind } from "./CalendarDayKind";
