@@ -91,6 +91,30 @@ describe("field primitives", () => {
     it("accepts a leap day in a leap year and rejects it otherwise", () => {
       expect(isoDate("2028-02-29", "D")).toBeNull();
       expect(isoDate("2027-02-29", "D")).toMatch(/not a real date/);
+      // Divisible by 100 but not by 400, which is the rule usually left out.
+      expect(isoDate("2100-02-29", "D")).toMatch(/not a real date/);
+      expect(isoDate("2000-02-29", "D")).toBeNull();
+    });
+
+    it("names the display format, never an example date", () => {
+      // The field shows and accepts `DD/MM/YYYY`, so a message quoting `2027-09-01`
+      // would tell the user to type something the field will not take.
+      const message = isoDate("not a date", "D") ?? "";
+      expect(message).toMatch(/DD\/MM\/YYYY/);
+      expect(message).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+    });
+
+    it("says a date is impossible even when it arrives in the display format", () => {
+      // The date field passes text it could not parse straight through rather than
+      // guessing, so this is the message the user actually sees for `31/02/2026`.
+      expect(isoDate("31/02/2026", "D")).toMatch(/not a real date/);
+      expect(isoDate("29/02/2027", "D")).toMatch(/not a real date/);
+      expect(isoDate("01/13/2027", "D")).toMatch(/not a real date/);
+    });
+
+    it("complains about the format for a half-typed date", () => {
+      expect(isoDate("01/09/202", "D")).toMatch(/date like/);
+      expect(isoDate("01/09/", "D")).toMatch(/date like/);
     });
   });
 

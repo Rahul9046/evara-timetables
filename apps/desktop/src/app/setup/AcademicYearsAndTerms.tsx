@@ -8,6 +8,11 @@
  *
  * Dates are plain `YYYY-MM-DD` text. Nothing in scheduling reads them; they exist so the
  * calendar section can say which term a mapped date falls in.
+ *
+ * That is the storage form and it is what the IPC contract carries. People read and type
+ * `DD/MM/YYYY`, so the four date fields are `kind: "date"` — a text box with a calendar,
+ * see `ui/DateInput` — and the tables and the year picker below render through
+ * {@link toDisplay}. The conversion lives at those two edges and nowhere in between.
  */
 import { useCallback, useMemo, useState } from "react";
 
@@ -22,10 +27,21 @@ import {
   updateAcademicYear,
   updateTerm,
 } from "../../ipc/setup";
+import { toDisplay } from "../dates";
 import { CrudPanel, type CrudSpec } from "../ui/CrudPanel";
 import { number, text, validateAcademicYear, validateTerm } from "../validation";
 import { ParentPicker } from "./ParentPicker";
 import { useList } from "./useList";
+
+/**
+ * One stored date, read the way a person reads it.
+ *
+ * `dateTime` keeps the canonical `YYYY-MM-DD` in the markup, so the cell stays
+ * machine-readable to anything that parses the page even though the text is `DD/MM/YYYY`.
+ */
+function DateCell(props: { iso: string }) {
+  return <time dateTime={props.iso}>{toDisplay(props.iso)}</time>;
+}
 
 export function AcademicYearsAndTerms(props: { school: School }) {
   const { school } = props;
@@ -42,8 +58,8 @@ export function AcademicYearsAndTerms(props: { school: School }) {
       describe: (row) => row.name,
       columns: [
         { header: "Name", render: (row) => row.name },
-        { header: "Starts", render: (row) => <time>{row.startsOn}</time> },
-        { header: "Ends", render: (row) => <time>{row.endsOn}</time> },
+        { header: "Starts", render: (row) => <DateCell iso={row.startsOn} /> },
+        { header: "Ends", render: (row) => <DateCell iso={row.endsOn} /> },
       ],
       fields: [
         {
@@ -90,8 +106,8 @@ export function AcademicYearsAndTerms(props: { school: School }) {
       columns: [
         { header: "Position", numeric: true, render: (row) => row.ordinal },
         { header: "Name", render: (row) => row.name },
-        { header: "Starts", render: (row) => <time>{row.startsOn}</time> },
-        { header: "Ends", render: (row) => <time>{row.endsOn}</time> },
+        { header: "Starts", render: (row) => <DateCell iso={row.startsOn} /> },
+        { header: "Ends", render: (row) => <DateCell iso={row.endsOn} /> },
       ],
       fields: [
         {
@@ -162,7 +178,7 @@ export function AcademicYearsAndTerms(props: { school: School }) {
           years.items?.map((year) => ({
             id: year.id,
             label: year.name,
-            detail: `${year.startsOn} → ${year.endsOn}`,
+            detail: `${toDisplay(year.startsOn)} → ${toDisplay(year.endsOn)}`,
           })) ?? null
         }
         error={years.error}

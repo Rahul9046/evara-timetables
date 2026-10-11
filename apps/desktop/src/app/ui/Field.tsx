@@ -14,6 +14,7 @@
  */
 import type { Draft, Problems } from "../validation";
 import { Combobox } from "./Combobox";
+import { DateInput } from "./DateInput";
 import { MultiCombobox } from "./MultiCombobox";
 
 /** One option of a select. */
@@ -151,6 +152,20 @@ export function Field(props: {
               className={error ? "invalid" : undefined}
               onChange={(values) => onChange(spec.key, values)}
             />
+          ) : spec.kind === "date" ? (
+            <DateInput
+              id={id}
+              value={asText}
+              label={spec.label}
+              disabled={disabled}
+              aria-invalid={error ? true : undefined}
+              aria-errormessage={errorId}
+              aria-describedby={describedBy}
+              className={error ? "invalid" : undefined}
+              // The draft keeps the storage form, `YYYY-MM-DD`. See DateInput for what
+              // reaches it while a date is half typed, and why.
+              onChange={(value) => onChange(spec.key, value)}
+            />
           ) : spec.kind === "combobox" ? (
             <Combobox
               id={id}
@@ -182,9 +197,9 @@ export function Field(props: {
           ) : (
             <input
               {...shared}
-              // `text` for times and dates on purpose: the native pickers disagree
-              // across platforms about format and locale, and the model wants a literal
-              // `HH:MM` or `YYYY-MM-DD`. The placeholder and the validator say which.
+              // `text` for times on purpose: the native picker disagrees across
+              // platforms about format and locale, and the model wants a literal
+              // `HH:MM`. The placeholder and the validator say so.
               type="text"
               inputMode={spec.kind === "number" ? "numeric" : undefined}
               value={asText}
@@ -209,12 +224,18 @@ export function Field(props: {
   );
 }
 
+/**
+ * The placeholder for the plain inputs this renderer still draws itself.
+ *
+ * `date` is absent on purpose: a date field is a {@link DateInput}, which owns its own
+ * placeholder because the placeholder *is* the format contract — it says `DD/MM/YYYY`
+ * rather than an example date, so there is no day, month or year to read the order off
+ * backwards.
+ */
 function placeholderFor(spec: FieldSpec): string | undefined {
   switch (spec.kind) {
     case "time":
       return "09:30";
-    case "date":
-      return "2027-09-01";
     case "text":
       return spec.placeholder;
     default:

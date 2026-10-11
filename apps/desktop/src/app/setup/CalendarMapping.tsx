@@ -34,7 +34,9 @@ import {
   listTerms,
   updateCalendarDay,
 } from "../../ipc/setup";
+import { toDisplay } from "../dates";
 import { CrudPanel, type CrudSpec } from "../ui/CrudPanel";
+import { DateInput } from "../ui/DateInput";
 import { Banner, Panel } from "../ui/Shell";
 import { text, textOrNull, validateCalendarDay } from "../validation";
 import { Absent } from "./CampusesAndBuildings";
@@ -125,10 +127,16 @@ export function CalendarMapping(props: { school: School }) {
     return {
       noun: "date",
       plural: "dates",
-      title: activeFrom && activeTo ? `Dates from ${activeFrom} to ${activeTo}` : "Dates",
-      describe: (row) => row.date,
+      title:
+        activeFrom && activeTo
+          ? `Dates from ${toDisplay(activeFrom)} to ${toDisplay(activeTo)}`
+          : "Dates",
+      describe: (row) => toDisplay(row.date),
       columns: [
-        { header: "Date", render: (row) => <time>{row.date}</time> },
+        {
+          header: "Date",
+          render: (row) => <time dateTime={row.date}>{toDisplay(row.date)}</time>,
+        },
         {
           header: "Cycle day",
           render: (row) =>
@@ -249,23 +257,16 @@ export function CalendarMapping(props: { school: School }) {
         <div className="rangeRow">
           <div className="field">
             <label htmlFor="cal-from">From</label>
-            <input
+            <DateInput
               id="cal-from"
-              type="text"
-              placeholder={defaultFrom || "2027-09-01"}
+              label="From"
               value={from}
-              onChange={(e) => setFrom(e.currentTarget.value)}
+              onChange={setFrom}
             />
           </div>
           <div className="field">
             <label htmlFor="cal-to">To</label>
-            <input
-              id="cal-to"
-              type="text"
-              placeholder={defaultTo || "2028-07-20"}
-              value={to}
-              onChange={(e) => setTo(e.currentTarget.value)}
-            />
+            <DateInput id="cal-to" label="To" value={to} onChange={setTo} />
           </div>
           {(defaultFrom || defaultTo) && (from || to) && (
             <button
@@ -280,6 +281,11 @@ export function CalendarMapping(props: { school: School }) {
             </button>
           )}
         </div>
+        {(defaultFrom || defaultTo) && !from && !to && (
+          <p className="hint">
+            {`Showing the academic year: ${toDisplay(defaultFrom)} to ${toDisplay(defaultTo)}. Enter a range above to narrow it.`}
+          </p>
+        )}
         {yearItems !== null && yearItems.length === 0 && (
           <Banner tone="info">
             No academic year exists yet, so there is no default range. Add one in Academic
