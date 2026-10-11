@@ -124,6 +124,13 @@ campuses and buildings, rooms and room types, resources, academic years and term
 and cycle days, bell schedules and periods, calendar mapping, and the timetable grid
 preview.
 
+> **Amended later: the workflow is now eight sections.** The Resources step was removed
+> from School Setup. Nothing schedules against a resource until constraints arrive, so it
+> was configuration with no effect on anything the user could see, sitting among eight
+> steps that each feed the grid. Only the screen went: the `resource` table, its
+> repository, its Tauri commands and its generated types are untouched, and Phase 2 below
+> still owns resource scheduling.
+
 Three things in it are more than CRUD:
 
 - **Type generation is wired up**, pulled forward from Phase 2 because forty types had to

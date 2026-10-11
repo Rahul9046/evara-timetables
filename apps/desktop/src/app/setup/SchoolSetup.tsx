@@ -1,7 +1,7 @@
 /**
- * The School Setup workflow: navigation, and the nine sections behind it.
+ * The School Setup workflow: navigation, and the eight sections behind it.
  *
- * ## Why a sidebar of nine sections rather than one long form
+ * ## Why a sidebar of eight sections rather than one long form
  *
  * The brief asks not to put all configuration on one enormous screen, and the model
  * agrees: the entities fall into natural pairs — a campus and its buildings, a cycle and
@@ -16,7 +16,7 @@
  * ## Everything except School Details needs a school
  *
  * There is exactly one school per project and it owns everything else, so until it exists
- * the only thing to do is create it. Rather than letting eight sections each discover
+ * the only thing to do is create it. Rather than letting seven sections each discover
  * that, the shell holds the school record and shows the first-run state once.
  */
 import { useCallback, useState, type ReactNode } from "react";
@@ -30,7 +30,6 @@ import { CampusesAndBuildings } from "./CampusesAndBuildings";
 import { CyclesAndCycleDays } from "./CyclesAndCycleDays";
 import { GridPreviewSection } from "./GridPreviewSection";
 import { PeriodStructuresAndPeriods } from "./PeriodStructuresAndPeriods";
-import { Resources } from "./Resources";
 import { RoomsAndRoomTypes } from "./RoomsAndRoomTypes";
 import { SchoolDetails } from "./SchoolDetails";
 import { useValue } from "./useList";
@@ -47,11 +46,17 @@ interface Section {
 }
 
 /**
- * The nine sections, in setup order.
+ * The eight sections, in setup order.
  *
  * Exported so a test can assert the list rather than the rendering: the set of sections
  * and their order is a product decision, and a silently dropped one would otherwise only
  * be noticed by someone looking for it.
+ *
+ * Resources had a section here and no longer does. Nothing schedules against a resource
+ * until constraints arrive, so configuring them was work with no effect on anything the
+ * user could see, sitting in the middle of a workflow whose every other step feeds the
+ * grid. The `resource` table, its repository and its commands are all still there
+ * ([ROADMAP](../../../../../docs/ROADMAP.md) Phase 2 owns them) — only the step is gone.
  */
 export const SECTIONS: readonly Section[] = [
   {
@@ -74,13 +79,6 @@ export const SECTIONS: readonly Section[] = [
     blurb: "Teaching spaces and their kinds",
     needsSchool: true,
     render: (school) => <RoomsAndRoomTypes school={school} />,
-  },
-  {
-    id: "resources",
-    label: "Resources",
-    blurb: "Shared equipment a lesson may need",
-    needsSchool: true,
-    render: (school) => <Resources school={school} />,
   },
   {
     id: "years",

@@ -1,7 +1,7 @@
 /**
  * Choosing which parent row a child collection belongs to.
  *
- * Five of the nine sections edit a parent-child pair — campus and buildings, campus and
+ * Five of the eight sections edit a parent-child pair — campus and buildings, campus and
  * rooms, year and terms, cycle and days, bell schedule and periods — because that is how
  * the model is shaped: `buildings(campus_id)`, `terms(academic_year_id)` and the rest are
  * scoped reads, not whole-table ones.

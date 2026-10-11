@@ -7,7 +7,7 @@
  *
  * Phase 1E adds the School Setup chrome below: a navigation shell, the shared table and
  * form vocabulary, and the timeslot grid preview. It extends the existing tokens rather
- * than introducing a second palette — one visual language, so nine sections read as one
+ * than introducing a second palette — one visual language, so eight sections read as one
  * application.
  */
 
@@ -272,7 +272,7 @@ button.linkish:hover:not(:disabled) {
 /* ======================================================================== *
  * Phase 1E — School Setup
  *
- * Extends the tokens above rather than introducing a second palette, so nine
+ * Extends the tokens above rather than introducing a second palette, so eight
  * sections read as one application. The only new values are the few semantic
  * ones below, defined for both colour schemes in one place.
  * ======================================================================== */
