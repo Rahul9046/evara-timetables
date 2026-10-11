@@ -21,6 +21,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use evara_core::branding::{LogoFormat, LogoImage};
 use evara_core::calendar::WorkingDays;
 use rusqlite::types::ToSql;
 use rusqlite::{OptionalExtension, Transaction};
@@ -289,6 +290,173 @@ impl Structure<'_> {
             )
             .map_err(|_| DbError::NotFound { entity: "school" })
         })
+    }
+}
+
+// ------------------------------------------------------------------------ school logo
+
+const SCHOOL_LOGO_COLUMNS: &str =
+    "id, school_id, media_type, bytes, width, height, created_at, updated_at, rev";
+
+entity! {
+    /// A school's own logo, as stored in the project.
+    ///
+    /// Absent means the school has no custom logo and the interface shows Evara's own --
+    /// see [`Structure::school_logo`]. There is no "disabled" state and no second row to
+    /// choose between: `UNIQUE (school_id)` makes this strictly one per school.
+    SchoolLogo,
+    /// Values for setting a school's logo. Validated before anything is written.
+    SchoolLogoInput,
+    {
+        /// Owning school.
+        school_id: Uuid,
+        /// The format, read from the file's own header rather than any filename.
+        media_type: String,
+        /// The image, byte for byte as uploaded.
+        ///
+        /// Stored unaltered on purpose. Re-encoding would need a decoder, would lose
+        /// transparency or sharpness depending on what it chose, and would mean the file a
+        /// user gets back out of an export is not the file they put in.
+        bytes: Vec<u8>,
+        /// Width in pixels, measured from the header at upload.
+        width: i64,
+        /// Height in pixels, measured from the header at upload.
+        height: i64,
+    }
+}
+
+impl Structure<'_> {
+    /// The school's logo, or `None` when it uses Evara's.
+    ///
+    /// **`None` is the ordinary case, not a failure.** A new project has no row here, and
+    /// neither does a project upgraded from a schema older than V8. Both mean the same
+    /// thing, and the caller falls back to the Evara logo.
+    ///
+    /// # Errors
+    ///
+    /// Propagates a read failure.
+    pub fn school_logo(&self) -> Result<Option<SchoolLogo>> {
+        self.db.read(|conn| {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {SCHOOL_LOGO_COLUMNS} FROM school_logo LIMIT 1"
+            ))?;
+            let mut rows = stmt.query_map([], SchoolLogo::from_row)?;
+            rows.next().transpose().map_err(DbError::from)
+        })
+    }
+
+    /// Sets or replaces the school's logo.
+    ///
+    /// The bytes are inspected first by [`LogoImage::inspect`], which decides the format
+    /// from the content and measures it against the product's limits. Nothing a caller
+    /// says about the file is believed: there is no filename parameter, and a declared
+    /// media type would be another thing to disbelieve.
+    ///
+    /// Replacing is an update of the existing row rather than a delete and re-insert, so
+    /// the logo keeps its identity and its `rev` tells the truth about how many times it
+    /// has changed.
+    ///
+    /// # Errors
+    ///
+    /// [`DbError::Invalid`] if the bytes are not an acceptable image, carrying the
+    /// specific reason. [`DbError::NotFound`] if no school exists yet.
+    pub fn set_school_logo(&mut self, school_id: Uuid, bytes: &[u8]) -> Result<SchoolLogo> {
+        let image = LogoImage::inspect(bytes).map_err(|error| DbError::Invalid {
+            message: error.to_string(),
+        })?;
+        let media_type = image.format.media_type().to_owned();
+        let width = i64::from(image.width);
+        let height = i64::from(image.height);
+
+        let existing = self.db.read(|conn| {
+            conn.query_row(
+                "SELECT id FROM school_logo WHERE school_id = ?",
+                [text(school_id)],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(DbError::from)
+        })?;
+
+        // Replacing is an update so the row keeps its identity and its `rev` stays
+        // truthful; a first upload is an insert.
+        if let Some(raw) = existing {
+            let id = parse_id_text("school_logo.id", &raw)?;
+            self.db.write(|tx| {
+                update(
+                    tx,
+                    "school logo",
+                    "school_logo",
+                    id,
+                    "media_type = ?, bytes = ?, width = ?, height = ?",
+                    &[&media_type, &bytes, &width, &height],
+                )?;
+                Ok(())
+            })?;
+        } else {
+            let stamp = Stamp::new();
+            self.db.write(|tx| {
+                tx.execute(
+                    "INSERT INTO school_logo
+                         (id, school_id, media_type, bytes, width, height,
+                          created_at, updated_at, rev)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        text(stamp.id),
+                        text(school_id),
+                        &media_type,
+                        bytes,
+                        width,
+                        height,
+                        &stamp.created_at,
+                        &stamp.updated_at,
+                        stamp.rev,
+                    ),
+                )
+                .map_err(|error| translate(error, "school logo"))?;
+                Ok(())
+            })?;
+        }
+
+        self.school_logo()?.ok_or(DbError::NotFound {
+            entity: "school logo",
+        })
+    }
+
+    /// Removes the school's logo, restoring the Evara fallback.
+    ///
+    /// Removing one that is not there succeeds. "There is no custom logo" is the state the
+    /// caller asked for, and it is already true -- reporting `NotFound` would make the
+    /// interface guard a button for no reason.
+    ///
+    /// # Errors
+    ///
+    /// Propagates a write failure.
+    pub fn clear_school_logo(&mut self) -> Result<()> {
+        let existing = self.db.read(|conn| {
+            conn.query_row("SELECT id FROM school_logo LIMIT 1", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .optional()
+            .map_err(DbError::from)
+        })?;
+
+        let Some(raw) = existing else {
+            return Ok(());
+        };
+        let id = parse_id_text("school_logo.id", &raw)?;
+        self.db
+            .write(|tx| delete(tx, "school logo", "school_logo", id))
+    }
+
+    /// The format of a stored logo, or `None` if the project names one this build cannot read.
+    ///
+    /// A row written by a future build that supports more formats is reported as
+    /// unreadable rather than guessed at or mislabelled, so the interface can fall back to
+    /// the Evara logo instead of handing a WebView bytes it will not render.
+    #[must_use]
+    pub fn logo_format(logo: &SchoolLogo) -> Option<LogoFormat> {
+        LogoFormat::from_media_type(&logo.media_type)
     }
 }
 

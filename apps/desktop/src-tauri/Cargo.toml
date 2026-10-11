@@ -65,5 +65,6 @@ evara-core = { workspace = true }
 evara-constraints = { workspace = true }
 evara-solver = { workspace = true }
 evara-db = { workspace = true }
+base64 = { workspace = true }
 evara-project = { workspace = true }
 evara-report = { workspace = true }

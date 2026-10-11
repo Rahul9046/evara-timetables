@@ -199,6 +199,8 @@ fn the_schema_contains_exactly_the_phases_shipped_so_far() {
             "room_campus".to_owned(),
             "room_type".to_owned(),
             "school".to_owned(),
+            // V8 — the school's own logo.
+            "school_logo".to_owned(),
             "term".to_owned(),
             "timeslot".to_owned(),
         ],

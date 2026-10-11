@@ -264,6 +264,13 @@ repository rules in `evara-db` rather than schema constraints.
 school (id, name, timezone, locale, working_days INTEGER DEFAULT 31,
         created_at, updated_at, rev)
 
+-- A school's own logo, or no row at all when it uses Evara's. The image is a BLOB in
+-- the project so it travels with the file; no absolute path to an external image is
+-- ever stored. Format and dimensions are read from the bytes' own header by
+-- evara_core::branding, never from a filename. ADR 0016.
+school_logo (id, school_id -> school, media_type, bytes BLOB, width, height,
+             UNIQUE(school_id))
+
 campus (id, school_id -> school, name, code, address, UNIQUE(school_id, code))
 campus_travel (from_campus_id, to_campus_id, minutes, PRIMARY KEY(from, to))
 -- campus_id is the HOME campus: the one the building was created on. Immutable, always

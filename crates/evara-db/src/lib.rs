@@ -64,7 +64,7 @@ pub use crate::repo::Stamp;
 pub use crate::repo::structure::{
     AcademicYear, AcademicYearInput, Building, BuildingInput, BuildingWithCampuses, Campus,
     CampusInput, Resource, ResourceInput, Room, RoomInput, RoomType, RoomTypeInput,
-    RoomWithCampuses, School, SchoolInput, Structure, Term, TermInput,
+    RoomWithCampuses, School, SchoolInput, SchoolLogo, Structure, Term, TermInput,
 };
 pub use crate::repo::time_model::{
     CalendarDay, CalendarDayInput, CalendarDayKind, Cycle, CycleDay, CycleDayInput, CycleInput,
@@ -343,3 +343,6 @@ mod tests_working_days;
 
 #[cfg(test)]
 mod tests_cycle_day_limit;
+
+#[cfg(test)]
+mod tests_school_logo;

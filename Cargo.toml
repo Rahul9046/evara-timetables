@@ -56,6 +56,11 @@ refinery = { version = "0.10", features = ["rusqlite-bundled"] }
 tempfile = "3"
 # Platform application-data directories for the settings database.
 directories = "6"
+# Base64, for the one place binary data crosses the IPC boundary: a school logo. JSON has
+# no byte-array type, and serde would otherwise write a 2 MiB image as ~12 MB of decimal
+# numbers. Already in the tree as a transitive dependency of tauri, so this adds no new
+# crate and no new licence. Apache-2.0 OR MIT.
+base64 = "0.23"
 
 # Lints are declared once and inherited by every crate via `[lints] workspace = true`,
 # so `cargo clippy` enforces them even when a contributor forgets `-D warnings`.

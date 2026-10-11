@@ -26,7 +26,16 @@ const getSchool = vi.fn<() => Promise<School | null>>();
 const createSchool = vi.fn();
 const updateSchool = vi.fn();
 
+const getSchoolLogo = vi.fn();
+const getSchoolLogoLimits = vi.fn();
+const setSchoolLogo = vi.fn();
+const clearSchoolLogo = vi.fn();
+
 vi.mock("../../ipc/setup", () => ({
+  getSchoolLogo: () => getSchoolLogo(),
+  getSchoolLogoLimits: () => getSchoolLogoLimits(),
+  setSchoolLogo: (id: string, data: string) => setSchoolLogo(id, data),
+  clearSchoolLogo: () => clearSchoolLogo(),
   getSchool: () => getSchool(),
   createSchool: (input: unknown) => createSchool(input),
   updateSchool: (id: string, input: unknown) => updateSchool(id, input),
@@ -51,6 +60,18 @@ function school(overrides: Partial<School> = {}): School {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // School Details renders the logo panel, which reads both of these on mount. Neither is
+  // what these tests are about; `null` is the ordinary "this school uses the Evara logo"
+  // answer. See SchoolLogoPanel.test.tsx for the panel's own behaviour.
+  getSchoolLogo.mockResolvedValue(null);
+  getSchoolLogoLimits.mockResolvedValue({
+    maxBytes: 2 * 1024 * 1024,
+    maxEdge: 2048,
+    minEdge: 16,
+    mediaTypes: ["image/png", "image/jpeg", "image/webp"],
+  });
+  setSchoolLogo.mockResolvedValue(null);
+  clearSchoolLogo.mockResolvedValue(undefined);
   getSchool.mockResolvedValue(null);
   createSchool.mockResolvedValue(school());
   updateSchool.mockResolvedValue(school());

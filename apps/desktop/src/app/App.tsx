@@ -26,6 +26,7 @@ import {
   type RecentProject,
 } from "../ipc/project";
 import { SchoolSetup } from "./setup/SchoolSetup";
+import { LogoMark, evaraBrand, resolveLogo, useSchoolLogo } from "./branding";
 import { Banner } from "./ui/Shell";
 
 export function App() {
@@ -142,9 +143,15 @@ function TitleBar(props: {
   onDismissError: () => void;
 }) {
   const { project, busy, error, onClose, onDismissError } = props;
+  const { logo } = useSchoolLogo();
 
   return (
     <header className="titleBar">
+      {/* A school-specific view, so the school's own logo when it has one. `schoolLogo`
+          is undefined until it has been read, which resolves to the Evara mark -- the
+          same thing a school without a logo gets, so nothing flickers between two
+          different images on load. */}
+      <LogoMark className="titleBarLogo" logo={resolveLogo(logo)} size={36} />
       <div className="titleBarMain">
         <span className="eyebrow">PROJECT</span>
         <h1 title={project.path}>{project.displayName}</h1>
@@ -192,6 +199,9 @@ function StartScreen(props: {
 
   return (
     <section className="panel">
+      {/* The application's own branding area. Always Evara's mark, whatever project was
+          last open -- a school's logo never stands in for the product's. */}
+      <LogoMark className="startLogo" logo={evaraBrand()} size={64} />
       <span className="eyebrow">OPEN SOURCE · LOCAL FIRST</span>
       <h1>Evara Timetables</h1>
       <p>

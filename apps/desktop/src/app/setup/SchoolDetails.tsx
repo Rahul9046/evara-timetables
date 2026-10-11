@@ -30,6 +30,7 @@ import {
   timezoneName,
   timezoneOptions,
 } from "./timezones";
+import { SchoolLogoPanel } from "./SchoolLogoPanel";
 import { useValue } from "./useList";
 import {
   MONDAY_TO_FRIDAY,
@@ -232,6 +233,11 @@ export function SchoolDetails(props: { onChanged: () => void }) {
               Edit details
             </button>
           </div>
+
+          {/* Outside the details form on purpose: a logo is uploaded and removed
+              immediately rather than being part of a draft that is saved or cancelled,
+              and it is optional in a way the other fields are not. */}
+          <SchoolLogoPanel school={school} />
         </>
       )}
     </div>

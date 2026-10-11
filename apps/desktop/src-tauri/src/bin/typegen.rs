@@ -153,6 +153,7 @@ fn write_all() -> (Vec<Generated>, Vec<String>) {
     };
     use evara_desktop_lib::commands::AppInfo;
     use evara_desktop_lib::commands::error::SetupError;
+    use evara_desktop_lib::commands::structure::{LogoLimits, SchoolLogoView};
 
     let (files, mut errors, required) = contract![
         // Static structure.
@@ -202,6 +203,11 @@ fn write_all() -> (Vec<Generated>, Vec<String>) {
         // Interface contracts defined with the command handlers.
         AppInfo,
         SetupError,
+        // Binary is the one exception to "records are the IPC contract" — see
+        // `SchoolLogoView`. `SchoolLogo` itself is deliberately absent: its `Vec<u8>` has
+        // no business crossing as JSON.
+        SchoolLogoView,
+        LogoLimits,
     ];
 
     errors.extend(check_dependencies_are_listed(&files, &required));
