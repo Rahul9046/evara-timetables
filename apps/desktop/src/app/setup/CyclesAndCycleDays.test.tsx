@@ -1,18 +1,24 @@
 /**
- * Cycles and Cycle Days, after "Calendar weeks spanned" was retired.
+ * Cycles and Cycle Days, after two fields were retired from its forms.
  *
- * The point of this file is the pair of claims that make removing a field safe:
+ * "Calendar weeks spanned" (`weekCount`) and "This is the school's default cycle"
+ * (`isDefault`) are both gone from the forms and the table. Each leaves the same pair of
+ * claims to make good:
  *
- * 1. the user is never asked for `weekCount` again, on the forms or in the table, and
- * 2. **no existing cycle record changes because of that.** The column is `NOT NULL CHECK
- *    (week_count >= 1)` and `CycleInput` still carries it, so an edit has to send a value;
+ * 1. the user is never asked for it again, on either form or in the table, and
+ * 2. **no existing cycle record changes because of that.** Both columns are still
+ *    `NOT NULL` and `CycleInput` still carries both, so every save has to send a value;
  *    the value it sends is the row's own.
  *
- * The second is the one worth a test. A field removed from a form usually takes its value
- * with it, and here that would silently rewrite every cycle a user touched.
+ * The second is the one worth testing. A field removed from a form usually takes its value
+ * with it, and here that would silently rewrite every cycle a user touched -- demoting a
+ * school's default cycle, in the case of `isDefault`, with nothing on screen to show it.
+ *
+ * `isDefault` has a third claim of its own: a new cycle is never promoted to default. The
+ * old form ticked the box automatically for the first cycle in a project.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import type { Cycle, CycleCoverage, CycleDay, School } from "@evara/domain";
@@ -168,10 +174,13 @@ describe("the weeks-spanned field", () => {
 
     expect(screen.queryByLabelText(/Calendar weeks spanned/)).toBeNull();
     expect(screen.queryByLabelText(/weeks/i)).toBeNull();
-    // The fields that remain.
+    // The only fields that remain.
     expect(screen.getByLabelText(/Cycle name/)).toBeTruthy();
     expect(screen.getByLabelText(/Days in the cycle/)).toBeTruthy();
-    expect(screen.getByLabelText(/default cycle/)).toBeTruthy();
+    // Two, not three: the name and the day count. The day count is a text input with
+    // `inputMode="numeric"`, so it carries the textbox role as well -- see ui/Field.
+    expect(screen.getAllByRole("textbox")).toHaveLength(2);
+    expect(screen.queryByRole("checkbox")).toBeNull();
   });
 
   it("is not on the edit form either", async () => {
@@ -200,7 +209,7 @@ describe("the weeks-spanned field", () => {
 });
 
 describe("what the forms still do", () => {
-  it("creates a cycle with a name, a day count and a default flag", async () => {
+  it("creates a cycle from just a name and a day count", async () => {
     await shown();
     await userEvent.click(screen.getByRole("button", { name: "Add cycle" }));
 
@@ -241,17 +250,109 @@ describe("what the forms still do", () => {
     expect(await screen.findByText(/Cycle name is required/)).toBeTruthy();
     expect(createCycle).not.toHaveBeenCalled();
   });
+});
 
-  it("still sets the default-cycle flag", async () => {
+describe("the default-cycle checkbox", () => {
+  it("is not on the new-cycle form", async () => {
+    await shown();
+    await userEvent.click(screen.getByRole("button", { name: "Add cycle" }));
+
+    expect(screen.queryByLabelText(/default cycle/)).toBeNull();
+    expect(screen.queryByLabelText(/default/i)).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+  });
+
+  it("is not on the edit form either", async () => {
+    await shown();
+    await userEvent.click(screen.getByRole("button", { name: "Edit Two-week rotation" }));
+
+    expect(screen.queryByLabelText(/default/i)).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+  });
+
+  it("takes its helper text with it", async () => {
+    await shown();
+    await userEvent.click(screen.getByRole("button", { name: "Add cycle" }));
+
+    expect(screen.queryByText(/At most one cycle can be the default/)).toBeNull();
+    expect(screen.queryByText(/clears the previous one/)).toBeNull();
+  });
+
+  it("is gone from the table, along with the DEFAULT column", async () => {
+    await shown();
+
+    expect(screen.queryByRole("columnheader", { name: "Default" })).toBeNull();
+    expect(
+      screen.getAllByRole("columnheader").map((header) => header.textContent),
+    ).toEqual(["Name", "Days", "Actions"]);
+  });
+
+  it("leaves no default badge on the cycle picker", async () => {
+    listCycles.mockResolvedValue([cycle({ isDefault: true })]);
+    render(<CyclesAndCycleDays school={SCHOOL} />);
+    await screen.findByRole("button", { name: "Edit Two-week rotation" });
+
+    const picker = await screen.findByRole("group", { name: "Cycle" });
+    expect(within(picker).queryByText("default")).toBeNull();
+  });
+});
+
+describe("the stored default flag", () => {
+  it("is never set on a cycle being created", async () => {
     await shown();
     await userEvent.click(screen.getByRole("button", { name: "Add cycle" }));
 
     await userEvent.type(screen.getByLabelText(/Cycle name/), "Weekly");
-    await userEvent.click(screen.getByLabelText(/default cycle/));
     await userEvent.click(screen.getByRole("button", { name: "Add cycle" }));
 
     await waitFor(() => expect(createCycle).toHaveBeenCalled());
-    expect(sent(createCycle)).toMatchObject({ isDefault: true });
+    expect(sent(createCycle)).toMatchObject({ isDefault: false });
+  });
+
+  it("is still false for the very first cycle in a project", async () => {
+    // The old form ticked the box automatically here, which is the behaviour requirement
+    // 7 forbids: nothing may acquire a default nobody chose.
+    listCycles.mockResolvedValue([]);
+    render(<CyclesAndCycleDays school={SCHOOL} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Add cycle" }));
+
+    await userEvent.type(screen.getByLabelText(/Cycle name/), "Weekly");
+    await userEvent.click(screen.getByRole("button", { name: "Add cycle" }));
+
+    await waitFor(() => expect(createCycle).toHaveBeenCalled());
+    expect(sent(createCycle)).toMatchObject({ isDefault: false });
+  });
+
+  it("is preserved when a cycle that is the default is edited", async () => {
+    listCycles.mockResolvedValue([cycle({ isDefault: true })]);
+    render(<CyclesAndCycleDays school={SCHOOL} />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Edit Two-week rotation" }),
+    );
+
+    await userEvent.clear(screen.getByLabelText(/Cycle name/));
+    await userEvent.type(screen.getByLabelText(/Cycle name/), "Fortnight");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(updateCycle).toHaveBeenCalled());
+    // Still the default. Sending `false` here would demote the school's default cycle
+    // because somebody corrected a typo in its name.
+    expect(sent(updateCycle)).toMatchObject({ isDefault: true });
+  });
+
+  it("is preserved when a cycle that is not the default is edited", async () => {
+    listCycles.mockResolvedValue([cycle({ isDefault: false })]);
+    render(<CyclesAndCycleDays school={SCHOOL} />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Edit Two-week rotation" }),
+    );
+
+    await userEvent.clear(screen.getByLabelText(/Cycle name/));
+    await userEvent.type(screen.getByLabelText(/Cycle name/), "Fortnight");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(updateCycle).toHaveBeenCalled());
+    expect(sent(updateCycle)).toMatchObject({ isDefault: false });
   });
 });
 
@@ -272,6 +373,8 @@ describe("existing cycle records", () => {
       // The row's own 2, not a 1 invented by the form. This is the assertion that keeps
       // "do not silently change existing cycle records" true.
       weekCount: 2,
+      // Likewise: the fixture cycle is the default, and editing its name must not change
+      // that. "the stored default flag" below covers this on its own.
       isDefault: true,
     });
   });

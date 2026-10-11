@@ -514,6 +514,108 @@ fn only_one_cycle_may_be_the_default() {
     );
 }
 
+/// The interface no longer offers the flag, so it must survive an edit that ignores it.
+///
+/// School Setup stopped asking for "the school's default cycle". `CycleInput` still
+/// carries `is_default`, so the form reads the stored value and sends it straight back --
+/// which means every edit of the school's default cycle now takes the clear-then-set path
+/// through `clear_default_cycle`, standing the cycle down and immediately promoting it
+/// again.
+///
+/// The value that comes out has to be the value that went in. If it did not, correcting a
+/// typo in a cycle's name would quietly demote the school's default with nothing on screen
+/// to show it.
+#[test]
+fn editing_the_default_cycle_leaves_it_the_default() {
+    let mut project = Project::new();
+    let school = project.school;
+
+    let created = project
+        .db()
+        .time_model()
+        .create_cycle(&CycleInput {
+            school_id: school,
+            name: "Rotation".to_owned(),
+            day_count: 6,
+            week_count: 2,
+            is_default: true,
+        })
+        .expect("create");
+    assert!(created.is_default);
+
+    let edited = project
+        .db()
+        .time_model()
+        .update_cycle(
+            created.id,
+            &CycleInput {
+                school_id: school,
+                name: "Six-day rotation".to_owned(),
+                day_count: 6,
+                // Both of these are read from the row and sent back unchanged, which is
+                // exactly what the form now does.
+                week_count: 2,
+                is_default: true,
+            },
+        )
+        .expect("update");
+
+    assert_eq!(edited.name, "Six-day rotation");
+    assert!(
+        edited.is_default,
+        "an edit that merely carries the flag through must not demote the cycle"
+    );
+    assert_eq!(edited.week_count, 2);
+
+    // Through a fresh read, so this is the stored row rather than the returned one.
+    let stored = project
+        .db()
+        .time_model()
+        .cycle(created.id)
+        .expect("read")
+        .expect("still there");
+    assert!(stored.is_default);
+
+    // Two revisions, not one: `clear_default_cycle` stands this very cycle down before the
+    // update promotes it again, and both writes go through the revision contract. Harmless
+    // -- the stored flag is unchanged and the change feed is truthful about both writes --
+    // but worth pinning, because it is now the only path the flag is ever exercised by.
+    assert_eq!(stored.rev, 3);
+}
+
+/// A cycle created without the flag does not acquire it, even as the only cycle.
+///
+/// The old form ticked its checkbox automatically for the first cycle in a project. The
+/// repository never did, and this is what keeps that true from below: a school with one
+/// cycle and no default is a legal, ordinary state.
+#[test]
+fn the_first_cycle_is_not_made_the_default_by_the_repository() {
+    let mut project = Project::new();
+    let school = project.school;
+
+    let only = project
+        .db()
+        .time_model()
+        .create_cycle(&CycleInput {
+            school_id: school,
+            name: "Weekly".to_owned(),
+            day_count: 5,
+            week_count: 1,
+            is_default: false,
+        })
+        .expect("create");
+
+    assert!(!only.is_default);
+    assert_eq!(only.rev, 1, "and no second write to promote it");
+
+    let cycles = project.db().time_model().cycles().expect("list");
+    assert_eq!(cycles.len(), 1);
+    assert!(
+        cycles.iter().all(|cycle| !cycle.is_default),
+        "a school may have cycles and no default at all"
+    );
+}
+
 /// The school-wide bucket and each campus are separate, matching the unique index.
 #[test]
 fn a_default_period_structure_is_per_campus() {

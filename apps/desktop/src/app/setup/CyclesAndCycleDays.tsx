@@ -19,6 +19,19 @@
  * {@link CoveragePanel}: it names the positions that have no day, and the answer comes
  * from `evara_core::time::CycleCoverage` over IPC rather than from a count done here.
  *
+ * ## Neither `weekCount` nor `isDefault` is asked for
+ *
+ * `cycle.is_default` was "the school's default cycle", offered as a checkbox and used to
+ * pre-select a cycle on the Timetable Grid Preview. It is no longer collected: a default
+ * is only worth having once something has to choose a cycle *without* asking, and nothing
+ * does — the grid screen now requires the choice to be made. Picking a cycle on the user's
+ * behalf from a flag they set once, months earlier, is how the wrong grid gets rebuilt.
+ *
+ * The column and the IPC contract are unchanged, so {@link CrudSpec.toDraft} carries the
+ * stored flag through an edit untouched and sends `false` for a new cycle. **No existing
+ * cycle record changes, and nothing is promoted to default automatically** — the old form
+ * did exactly that for the first cycle in a project.
+ *
  * ## `weekCount` is no longer asked for
  *
  * "Calendar weeks spanned" was display-and-grouping only, and nothing was ever grouped by
@@ -113,10 +126,6 @@ export function CyclesAndCycleDays(props: { school: School }) {
       columns: [
         { header: "Name", render: (row) => row.name },
         { header: "Days", numeric: true, render: (row) => row.dayCount },
-        {
-          header: "Default",
-          render: (row) => (row.isDefault ? <span className="yes">Yes</span> : <Absent />),
-        },
       ],
       fields: [
         {
@@ -134,21 +143,18 @@ export function CyclesAndCycleDays(props: { school: School }) {
           min: 1,
           hint: "The intended length: 1, 5, 6, 10 — whatever the school actually repeats. There is no assumption of a five-day week.",
         },
-        {
-          kind: "checkbox",
-          key: "isDefault",
-          label: "This is the school's default cycle",
-          hint: "At most one cycle can be the default. Setting this clears the previous one.",
-        },
       ],
       validate: validateCycle,
       toDraft: (row) => ({
         name: row?.name ?? "",
         dayCount: row ? String(row.dayCount) : "5",
-        // Carried in the draft without a field to render it, so an edit sends the value
-        // back exactly as it was read. There is no input that can change it.
+        // Both of these are carried in the draft with no field to render them, so an edit
+        // sends each value back exactly as it was read and no input can change either.
         weekCount: row ? String(row.weekCount) : "1",
-        isDefault: row ? row.isDefault : (cycles.items?.length ?? 0) === 0,
+        // `false` for a new cycle, not "true if this is the first one". The old form made
+        // the first cycle the default automatically; nothing does that now, because
+        // nothing in the application should acquire a default nobody chose.
+        isDefault: row ? row.isDefault : false,
       }),
       toInput: (draft) => ({
         schoolId: school.id,
@@ -282,7 +288,6 @@ export function CyclesAndCycleDays(props: { school: School }) {
             id: cycle.id,
             label: cycle.name,
             detail: `${cycle.dayCount} ${cycle.dayCount === 1 ? "day" : "days"}`,
-            isDefault: cycle.isDefault,
           })) ?? null
         }
         error={cycles.error}
