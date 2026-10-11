@@ -86,8 +86,16 @@ export function GridPreviewSection(_props: { school: School }) {
   }, []);
   const terms = useList<Term>(loadTerms);
 
-  // Default to the school's own default cycle and schedule: they are what the user means.
-  const effectiveCycleId = cycleId ?? pick(cycles.items, (c) => c.isDefault);
+  // The cycle must be chosen. It used to default to the school's default cycle, falling
+  // back to whichever cycle happened to be first; both are gone. A rebuild writes the
+  // timetable grid, and "which grid" is not a question to answer on the user's behalf from
+  // a flag set once months ago — a school with a year-wide cycle and a per-term one would
+  // have had one of them picked for it, silently, and in whatever order the list arrived.
+  //
+  // The bell schedule still defaults to the school's default schedule. That flag is still
+  // collected in Bell Schedules and Periods, so it is a current, deliberate statement
+  // rather than a leftover.
+  const effectiveCycleId = cycleId;
   const effectiveStructureId = structureId ?? pick(structures.items, (s) => s.isDefault);
 
   const request: MaterialisationRequest | null = useMemo(() => {
@@ -215,10 +223,8 @@ export function GridPreviewSection(_props: { school: School }) {
             id="grid-cycle"
             label="Cycle"
             value={effectiveCycleId ?? ""}
-            options={cycles.items.map((c) => ({
-              value: c.id,
-              label: c.isDefault ? `${c.name} (default)` : c.name,
-            }))}
+            emptyLabel="Choose a cycle"
+            options={cycles.items.map((c) => ({ value: c.id, label: c.name }))}
             onChange={(value) => {
               setCycleId(value);
               setWithoutDays([]);
@@ -255,6 +261,12 @@ export function GridPreviewSection(_props: { school: School }) {
           A term-scoped grid and a year-wide grid are different grids. Build a per-term one
           only if the bell schedule changes during the year.
         </p>
+        {effectiveCycleId === null && (
+          <p className="hint">
+            Choose a cycle to see its grid. Nothing is selected for you: a rebuild writes
+            the grid for whichever cycle is named here.
+          </p>
+        )}
       </Panel>
 
       {message && <Banner tone={message.tone}>{message.text}</Banner>}

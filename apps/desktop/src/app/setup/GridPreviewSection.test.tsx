@@ -12,6 +12,14 @@
  *   error the user cannot act on
  * - the fingerprint the screen confirms with is the one the preview handed it
  *
+ * ## The cycle has to be chosen before there is a grid to test
+ *
+ * This screen used to pre-select the school's default cycle, falling back to whichever
+ * cycle came first. Both are gone: a rebuild writes the grid for whichever cycle is named
+ * here, and that is not a choice to make on a user's behalf. So every test below goes
+ * through {@link showGrid}, which renders and then picks one. The bell schedule still
+ * defaults, because that flag is still collected on its own screen.
+ *
  * `invoke` is mocked; there is no Tauri runtime under Vitest.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -42,6 +50,8 @@ const CYCLE = {
   name: "Six-day rotation",
   dayCount: 2,
   weekCount: 1,
+  // Still stored, and deliberately still `true`: the point is that this screen no longer
+  // reads it. `the cycle selector` below asserts nothing is selected on load regardless.
   isDefault: true,
   createdAt: "2027-01-01T00:00:00.000Z",
   updatedAt: "2027-01-01T00:00:00.000Z",
@@ -159,10 +169,20 @@ beforeEach(() => {
   invoke.mockReset();
 });
 
+/**
+ * Renders the screen and chooses the cycle, which it no longer chooses for itself.
+ *
+ * Returns once the grid has been asked for, so a caller can assert on it immediately.
+ */
+async function showGrid() {
+  render(<GridPreviewSection school={SCHOOL} />);
+  await userEvent.selectOptions(await screen.findByLabelText("Cycle"), "cycle-1");
+}
+
 describe("the grid preview", () => {
   it("shows the axes, and marks every cell that has no slot", async () => {
     route(BASE);
-    render(<GridPreviewSection school={SCHOOL} />);
+    await showGrid();
 
     expect(await screen.findByText("Day A")).toBeTruthy();
     expect(screen.getByText("Day B")).toBeTruthy();
@@ -173,7 +193,7 @@ describe("the grid preview", () => {
 
   it("says the grid is not finished when cells are missing", async () => {
     route(BASE);
-    render(<GridPreviewSection school={SCHOOL} />);
+    await showGrid();
 
     const status = bannerAround(await screen.findByText(/This grid is not finished/i));
     expect(status.textContent).toMatch(/2 of 2 cells have no slot/);
@@ -209,7 +229,7 @@ describe("the grid preview", () => {
           counts: { preserved: 2, created: 0, orphaned: 0, refreshed: 0 },
         }),
     });
-    render(<GridPreviewSection school={SCHOOL} />);
+    await showGrid();
 
     const status = bannerAround(await screen.findByText(/This grid is not finished/i));
     expect(status.textContent).toMatch(/cycle itself is incomplete/);
@@ -218,6 +238,8 @@ describe("the grid preview", () => {
 
   it("tells the user what to add first when there is no cycle or schedule", async () => {
     route({ ...BASE, setup_cycle_list: [], setup_period_structure_list: [] });
+    // Rendered directly rather than through `showGrid`: there is no cycle to choose, and
+    // the empty state replaces the pickers entirely.
     render(<GridPreviewSection school={SCHOOL} />);
 
     const empty = await screen.findByText(/Not enough defined yet/i);
@@ -226,10 +248,63 @@ describe("the grid preview", () => {
   });
 });
 
+describe("the cycle selector", () => {
+  it("starts with nothing chosen, and shows no grid until one is", async () => {
+    route(BASE);
+    render(<GridPreviewSection school={SCHOOL} />);
+
+    const select = (await screen.findByLabelText("Cycle")) as HTMLSelectElement;
+    // The fixture cycle is the stored default and is the only cycle there is. Neither
+    // fact may select it: this screen writes the grid for whichever cycle is named.
+    expect(select.value).toBe("");
+    expect(screen.getByText(/Choose a cycle to see its grid/)).toBeTruthy();
+    expect(screen.queryByText("Day A")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Rebuild/i })).toBeNull();
+
+    // And no preview was even asked for.
+    const asked = invoke.mock.calls.map((call) => call[0] as string);
+    expect(asked).not.toContain("setup_grid_preview");
+  });
+
+  it("offers an unchosen option, and no cycle is labelled as a default", async () => {
+    route({
+      ...BASE,
+      setup_cycle_list: [CYCLE, { ...CYCLE, id: "cycle-2", name: "Weekly", isDefault: false }],
+    });
+    render(<GridPreviewSection school={SCHOOL} />);
+
+    const select = (await screen.findByLabelText("Cycle")) as HTMLSelectElement;
+    const options = [...select.options].map((option) => option.textContent);
+    expect(options).toEqual(["Choose a cycle", "Six-day rotation", "Weekly"]);
+    // The stored flag is still `true` on the first of these.
+    expect(select.textContent).not.toMatch(/default/i);
+  });
+
+  it("shows the grid once a cycle is chosen", async () => {
+    route(BASE);
+    render(<GridPreviewSection school={SCHOOL} />);
+
+    await userEvent.selectOptions(await screen.findByLabelText("Cycle"), "cycle-1");
+
+    expect(await screen.findByText("Day A")).toBeTruthy();
+    expect(screen.queryByText(/Choose a cycle to see its grid/)).toBeNull();
+  });
+
+  it("still defaults the bell schedule, whose flag is still collected", async () => {
+    route(BASE);
+    render(<GridPreviewSection school={SCHOOL} />);
+
+    // Deliberately unchanged by this fix. Bell Schedules and Periods still asks for its
+    // default, so pre-selecting it is a current statement rather than a leftover.
+    const bells = (await screen.findByLabelText("Bell schedule")) as HTMLSelectElement;
+    expect(bells.value).toBe("bells-1");
+  });
+});
+
 describe("rebuilding", () => {
   it("confirms first, stating plainly that nothing will be deleted", async () => {
     route(BASE);
-    render(<GridPreviewSection school={SCHOOL} />);
+    await showGrid();
 
     await userEvent.click(await screen.findByRole("button", { name: /Rebuild Timetable Grid/i }));
 
@@ -251,7 +326,7 @@ describe("rebuilding", () => {
         refreshed: 0,
       }),
     });
-    render(<GridPreviewSection school={SCHOOL} />);
+    await showGrid();
 
     await userEvent.click(await screen.findByRole("button", { name: /Rebuild Timetable Grid/i }));
     const dialog = await screen.findByRole("dialog");
@@ -289,7 +364,7 @@ describe("rebuilding", () => {
           counts: { preserved: 2, created: 0, orphaned: 0, refreshed: 0 },
         }),
     });
-    render(<GridPreviewSection school={SCHOOL} />);
+    await showGrid();
 
     const button = await screen.findByRole("button", { name: /Rebuild Timetable Grid/i });
     expect(button).toHaveProperty("disabled", true);
@@ -308,7 +383,7 @@ describe("rebuilding", () => {
         throw { kind: "reviewRequired", message: "the grid changed" };
       },
     });
-    render(<GridPreviewSection school={SCHOOL} />);
+    await showGrid();
 
     await userEvent.click(await screen.findByRole("button", { name: /Rebuild Timetable Grid/i }));
     const dialog = await screen.findByRole("dialog");
@@ -327,7 +402,7 @@ describe("rebuilding", () => {
         throw { kind: "failed", message: "The project could not be updated." };
       },
     });
-    render(<GridPreviewSection school={SCHOOL} />);
+    await showGrid();
 
     await userEvent.click(await screen.findByRole("button", { name: /Rebuild Timetable Grid/i }));
     const dialog = await screen.findByRole("dialog");
@@ -358,7 +433,7 @@ describe("stranded slots", () => {
 
   it("warns that a rebuild will not remove them", async () => {
     route(WITH_ORPHANS);
-    render(<GridPreviewSection school={SCHOOL} />);
+    await showGrid();
 
     const warning = bannerAround(await screen.findByText(/would be stranded by this proposal/i));
     expect(warning.textContent).toMatch(/it never deletes/i);
@@ -367,7 +442,7 @@ describe("stranded slots", () => {
 
   it("lists which slots they are, not just how many", async () => {
     route(WITH_ORPHANS);
-    render(<GridPreviewSection school={SCHOOL} />);
+    await showGrid();
 
     expect(await screen.findByText("slot-9")).toBeTruthy();
     expect(screen.getByText(/Day B \(position 2\) · P1/)).toBeTruthy();
@@ -375,7 +450,7 @@ describe("stranded slots", () => {
 
   it("requires its own confirmation, separate from the rebuild", async () => {
     route(WITH_ORPHANS);
-    render(<GridPreviewSection school={SCHOOL} />);
+    await showGrid();
 
     await userEvent.click(
       await screen.findByRole("button", { name: /Delete 1 stranded slot…/i }),
@@ -392,7 +467,7 @@ describe("stranded slots", () => {
 
   it("deletes nothing if the confirmation is cancelled", async () => {
     route(WITH_ORPHANS);
-    render(<GridPreviewSection school={SCHOOL} />);
+    await showGrid();
 
     await userEvent.click(
       await screen.findByRole("button", { name: /Delete 1 stranded slot…/i }),
@@ -408,7 +483,7 @@ describe("stranded slots", () => {
 
   it("releases with the reviewed fingerprint once confirmed", async () => {
     route({ ...WITH_ORPHANS, setup_grid_release_orphans: () => ["slot-9"] });
-    render(<GridPreviewSection school={SCHOOL} />);
+    await showGrid();
 
     await userEvent.click(
       await screen.findByRole("button", { name: /Delete 1 stranded slot…/i }),
@@ -432,7 +507,7 @@ describe("stranded slots", () => {
         throw { kind: "reviewRequired", message: "the grid changed" };
       },
     });
-    render(<GridPreviewSection school={SCHOOL} />);
+    await showGrid();
 
     await userEvent.click(
       await screen.findByRole("button", { name: /Delete 1 stranded slot…/i }),
@@ -456,7 +531,7 @@ describe("stranded slots", () => {
         };
       },
     });
-    render(<GridPreviewSection school={SCHOOL} />);
+    await showGrid();
 
     await userEvent.click(
       await screen.findByRole("button", { name: /Delete 1 stranded slot…/i }),
@@ -470,7 +545,7 @@ describe("stranded slots", () => {
 
   it("offers no release panel when nothing would be stranded", async () => {
     route(BASE);
-    render(<GridPreviewSection school={SCHOOL} />);
+    await showGrid();
 
     await screen.findByText("Day A");
     expect(screen.queryByText(/Stranded slots/i)).toBeNull();
@@ -481,7 +556,7 @@ describe("stranded slots", () => {
 describe("previewing a removal", () => {
   it("asks the backend what the grid would be without an excluded day", async () => {
     route(BASE);
-    render(<GridPreviewSection school={SCHOOL} />);
+    await showGrid();
 
     await screen.findByText("Day A");
     const row = screen.getByText("Day A").closest("th");
@@ -499,7 +574,7 @@ describe("previewing a removal", () => {
 
   it("says plainly that an excluded preview is a proposal, not the current state", async () => {
     route(BASE);
-    render(<GridPreviewSection school={SCHOOL} />);
+    await showGrid();
 
     await screen.findByText("Day A");
     const row = screen.getByText("Day A").closest("th");
