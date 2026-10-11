@@ -604,11 +604,35 @@ impl TimeModel<'_> {
     }
 }
 
-/// Refuses an ordinal outside the cycle's declared length.
+/// Refuses an ordinal outside `1..=day_count`.
 ///
 /// ADR 0011 Q4: `day_count` is the declared length and the rows need not be complete, but
-/// a day beyond the declared end is a contradiction rather than an intermediate state.
+/// a day outside the declared range is a contradiction rather than an intermediate state.
+///
+/// # Both ends, and why the lower one is here rather than only in the schema
+///
+/// `cycle_day.ordinal` carries `CHECK (ordinal >= 1)`, so position 0 could never be
+/// stored. What it could do was arrive as *"that cycle day has a value the project does
+/// not allow"* — which is what [`translate`] makes of any `CHECK` failure, because it
+/// cannot tell which constraint fired. True, and useless: it names no field and suggests
+/// no fix, and the form has nowhere to attach it.
+///
+/// So the range is checked here, in full, before the insert. The `CHECK` stays as the
+/// backstop it always was; this is what makes the refusal say something a user can act
+/// on. Belt and braces is the right arrangement for a rule whose violation would put a
+/// day in a cycle that has no such position.
 fn check_ordinal_within_cycle(tx: &Transaction<'_>, cycle_id: Uuid, ordinal: i64) -> Result<()> {
+    // Independent of the cycle, so it is worth saying before the lookup: a position is a
+    // place in the rotation, counted from 1, and 0 or a negative is not a short cycle but
+    // a nonsensical request.
+    if ordinal < 1 {
+        return Err(DbError::Invalid {
+            message: format!(
+                "a cycle day's position counts from 1, so there is no position {ordinal}"
+            ),
+        });
+    }
+
     let declared: Option<i64> = tx
         .query_row(
             "SELECT day_count FROM cycle WHERE id = ?",

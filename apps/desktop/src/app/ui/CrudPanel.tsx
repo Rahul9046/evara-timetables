@@ -73,6 +73,22 @@ export interface CrudSpec<T extends { id: string }, I> {
    * meeting a foreign-key failure.
    */
   readonly blockedBy?: string | null;
+  /**
+   * Why nothing more can be *added* right now, if nothing can.
+   *
+   * Deliberately not {@link blockedBy}: that hides the table, which is wrong when the
+   * reason adding is unavailable is precisely that the collection is already complete.
+   * The rows stay, the Add button is disabled, and this says why.
+   *
+   * Shown as visible text beside the button as well as on its `title`. A disabled button
+   * is not focusable, so a tooltip alone is unreachable by keyboard and by touch — which
+   * would make the explanation invisible to exactly the users most likely to need it.
+   *
+   * The caller decides this from an authoritative answer, never from a rule reimplemented
+   * in the view layer. `CyclesAndCycleDays` reads `CycleCoverage.missingOrdinals`, which
+   * `evara_core::time` computed.
+   */
+  readonly addBlockedBy?: string | null;
 }
 
 /** Renders an editable collection. */
@@ -254,6 +270,8 @@ export function CrudPanel<T extends { id: string }, I>(props: {
     );
   }
 
+  const addBlocked = spec.addBlockedBy ?? null;
+
   return (
     <div className="crudPanel">
       <PanelHead
@@ -264,7 +282,8 @@ export function CrudPanel<T extends { id: string }, I>(props: {
             : {
                 label: `Add ${spec.noun}`,
                 onClick: () => openForm(null),
-                disabled: busy || rows === null,
+                disabled: busy || rows === null || addBlocked !== null,
+                blockedBy: addBlocked,
               }
         }
       />
@@ -292,7 +311,15 @@ export function CrudPanel<T extends { id: string }, I>(props: {
         editing ? null : (
           <EmptyState
             title={`No ${spec.plural} yet`}
-            action={{ label: `Add ${spec.noun}`, onClick: () => openForm(null) }}
+            action={{
+              label: `Add ${spec.noun}`,
+              onClick: () => openForm(null),
+              // Unreachable for a cycle, whose `day_count` is at least 1 and so always
+              // leaves a free position when there are no rows. Guarded anyway, so a
+              // future caller cannot end up with an empty state offering a button the
+              // panel head would have refused.
+              disabled: addBlocked !== null,
+            }}
           >
             {spec.emptyHint}
           </EmptyState>
@@ -347,13 +374,34 @@ export function CrudPanel<T extends { id: string }, I>(props: {
 
 function PanelHead(props: {
   title: string;
-  action?: { label: string; onClick: () => void; disabled?: boolean };
+  action?: {
+    label: string;
+    onClick: () => void;
+    disabled?: boolean;
+    /** Why the action is unavailable. Shown as text and as the button's `title`. */
+    blockedBy?: string | null;
+  };
 }) {
+  const blockedBy = props.action?.blockedBy ?? null;
+
   return (
     <div className="panelHead">
       <h3>{props.title}</h3>
+      {blockedBy !== null && (
+        // `role="note"` rather than `status`: this is a standing explanation of why the
+        // button is disabled, not an announcement of something that just happened, and a
+        // live region would interrupt a screen reader every time the list is re-read.
+        <p className="panelNote" role="note">
+          {blockedBy}
+        </p>
+      )}
       {props.action && (
-        <button type="button" onClick={props.action.onClick} disabled={props.action.disabled}>
+        <button
+          type="button"
+          onClick={props.action.onClick}
+          disabled={props.action.disabled}
+          title={blockedBy ?? undefined}
+        >
           {props.action.label}
         </button>
       )}
