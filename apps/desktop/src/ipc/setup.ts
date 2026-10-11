@@ -35,6 +35,7 @@ import type {
   CycleDayInput,
   CycleInput,
   GridPreview,
+  LogoLimits,
   MaterialisationPlan,
   MaterialisationRequest,
   NonWorkingInstructionalDay,
@@ -52,6 +53,7 @@ import type {
   RoomWithCampuses,
   School,
   SchoolInput,
+  SchoolLogoView,
   SetupError,
   Term,
   TermInput,
@@ -119,6 +121,48 @@ export function getSchool(): Promise<School | null> {
 /** Replaces the school's details. */
 export function updateSchool(id: string, input: SchoolInput): Promise<School> {
   return invoke<School>("setup_school_update", { id, input });
+}
+
+// ---------------------------------------------------------------------- school logo
+
+/**
+ * The school's logo, or `null` when it uses Evara's.
+ *
+ * Separate from {@link getSchool} on purpose: the image is up to 2 MiB, and `getSchool` is
+ * called by almost every screen. Nothing pays for the bytes unless it is going to show
+ * them.
+ */
+export function getSchoolLogo(): Promise<SchoolLogoView | null> {
+  return invoke<SchoolLogoView | null>("setup_school_logo_get");
+}
+
+/**
+ * Sets or replaces the school's logo from base64-encoded image bytes.
+ *
+ * No filename is sent and none is wanted. The backend decides the format from the content
+ * — `evara_core::branding` — so a `.png` holding a JPEG is stored as a JPEG and a `.png`
+ * holding something else is refused.
+ */
+export function setSchoolLogo(
+  schoolId: string,
+  dataBase64: string,
+): Promise<SchoolLogoView> {
+  return invoke<SchoolLogoView>("setup_school_logo_set", { schoolId, dataBase64 });
+}
+
+/** Removes the school's logo, restoring the Evara one. Removing nothing succeeds. */
+export function clearSchoolLogo(): Promise<void> {
+  return invoke<void>("setup_school_logo_clear");
+}
+
+/**
+ * The limits a logo must satisfy.
+ *
+ * Fetched rather than hardcoded because `evara_core::branding` is the authority on every
+ * one of these numbers, and a duplicated limit is a limit that drifts.
+ */
+export function getSchoolLogoLimits(): Promise<LogoLimits> {
+  return invoke<LogoLimits>("setup_school_logo_limits");
 }
 
 // --------------------------------------------------------------------------- campus

@@ -163,6 +163,8 @@ pub const TRACKED_TABLES: &[&str] = &[
     "building_campus",
     // V6 — rooms shared across campuses.
     "room_campus",
+    // V8 — the school's own logo.
+    "school_logo",
 ];
 
 /// Installs the change-log triggers for one table.

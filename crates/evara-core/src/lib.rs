@@ -24,10 +24,14 @@
 //! interface because it is a question about the model, and a scheduling rule in the view
 //! layer is an architecture bug.
 //!
+//! [`branding::LogoImage`] decides whether an uploaded school logo is one the project
+//! will carry, reading the bytes' own header rather than a filename or an extension.
+//!
 //! [`calendar::WorkingDays`] joins it: which weekdays a school normally teaches on. The
 //! two modules are deliberately separate, because a cycle position and a weekday are
 //! different kinds of thing and only one of them schedules anything — see the
 //! [`calendar`] header.
 
+pub mod branding;
 pub mod calendar;
 pub mod time;

@@ -29,11 +29,15 @@
 // borrowed. See `project.rs` for the same note.
 #![allow(clippy::needless_pass_by_value)]
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use evara_core::branding::{LogoFormat, MAX_BYTES, MAX_EDGE, MIN_EDGE};
 use evara_db::{
     AcademicYear, AcademicYearInput, Building, BuildingInput, BuildingWithCampuses, Campus,
     CampusInput, Resource, ResourceInput, Room, RoomInput, RoomType, RoomTypeInput,
-    RoomWithCampuses, School, SchoolInput, Term, TermInput,
+    RoomWithCampuses, School, SchoolInput, SchoolLogo, Term, TermInput,
 };
+use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
 
@@ -69,6 +73,157 @@ pub fn setup_school_update(
 ) -> SetupResult<School> {
     let mut ws = workspace(&state)?;
     Ok(ws.structure()?.update_school(id, &input)?)
+}
+
+// ------------------------------------------------------------------------ school logo
+
+/// A school logo as the interface needs it: ready to put in an `<img>`.
+///
+/// # The one place a DTO is not the repository record
+///
+/// [ADR 0012](../../../../../docs/adr/0012-records-are-the-ipc-contract.md) says repository
+/// records *are* the IPC contract, and nothing here contradicts that lightly. The exception
+/// is binary: `SchoolLogo.bytes` is a `Vec<u8>`, and JSON has no byte array, so serde would
+/// write a 2 MiB image as a list of decimal numbers roughly six times its size. Sending the
+/// record as it stands would make the largest allowed logo about 12 MB of text to parse.
+///
+/// So the bytes cross as base64 inside a `data:` URL, which is both compact and exactly
+/// what `<img src>` wants — the frontend never decodes anything. Everything else about the
+/// row travels unchanged.
+///
+/// A future report or export in Rust uses [`SchoolLogo`] directly and never sees this type;
+/// raw bytes are what those want anyway.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct SchoolLogoView {
+    /// `data:image/png;base64,...`, ready to use as an image source.
+    pub data_url: String,
+    /// The stored media type, for a download or an export that needs to name the format.
+    pub media_type: String,
+    /// Width in pixels.
+    pub width: i64,
+    /// Height in pixels.
+    pub height: i64,
+    /// Size of the stored image in bytes, before base64.
+    pub byte_size: i64,
+    /// When the logo last changed, ISO-8601 UTC.
+    pub updated_at: String,
+}
+
+impl SchoolLogoView {
+    /// Renders a stored logo for the interface.
+    ///
+    /// Returns `None` when the stored media type is one this build cannot name — a row
+    /// written by a future version, or a damaged one. The caller then shows the Evara logo,
+    /// which is the same thing it does for a school that never uploaded one. Handing a
+    /// WebView a `data:` URL with a type it will not render would produce a broken image
+    /// icon and no explanation.
+    fn render(logo: &SchoolLogo) -> Option<Self> {
+        let format = LogoFormat::from_media_type(&logo.media_type)?;
+        let encoded = BASE64.encode(&logo.bytes);
+        Some(Self {
+            data_url: format!("data:{};base64,{encoded}", format.media_type()),
+            media_type: logo.media_type.clone(),
+            width: logo.width,
+            height: logo.height,
+            byte_size: i64::try_from(logo.bytes.len()).unwrap_or(i64::MAX),
+            updated_at: logo.updated_at.clone(),
+        })
+    }
+}
+
+/// What the interface may accept, so it does not have to restate the rules.
+///
+/// Sent rather than hardcoded in TypeScript because `evara_core::branding` is the authority
+/// on all four numbers, and a duplicated limit is a limit that drifts. The frontend uses
+/// these for its file picker's `accept` list, its hint text, and the instant check it does
+/// before sending anything over IPC.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct LogoLimits {
+    /// Largest accepted file, in bytes.
+    pub max_bytes: i64,
+    /// Largest accepted edge, in pixels.
+    pub max_edge: i64,
+    /// Smallest accepted edge, in pixels.
+    pub min_edge: i64,
+    /// Accepted media types, in the order the interface should list them.
+    pub media_types: Vec<String>,
+}
+
+/// The school's logo, or `null` when it uses Evara's.
+///
+/// `null` is the ordinary case: a new project, a project upgraded from a schema older than
+/// V8, and a school that removed its logo all return it.
+#[tauri::command]
+pub fn setup_school_logo_get(state: State<'_, AppState>) -> SetupResult<Option<SchoolLogoView>> {
+    let mut ws = workspace(&state)?;
+    Ok(ws
+        .structure()?
+        .school_logo()?
+        .as_ref()
+        .and_then(SchoolLogoView::render))
+}
+
+/// Sets or replaces the school's logo from base64-encoded image bytes.
+///
+/// No filename is taken and none is wanted: the format is decided from the content by
+/// `evara_core::branding`, which also applies the size and dimension limits. A `.png` that
+/// holds a JPEG is stored as a JPEG, and a `.png` that holds an executable is refused.
+#[tauri::command]
+pub fn setup_school_logo_set(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+    data_base64: String,
+) -> SetupResult<SchoolLogoView> {
+    // Refused before decoding. Base64 inflates by about a third, so this bounds the
+    // allocation below rather than letting a caller hand over an arbitrary amount of
+    // memory to expand. The real limit is applied to the decoded bytes by `inspect`.
+    if data_base64.len() > MAX_BYTES * 2 {
+        return Err(evara_db::DbError::Invalid {
+            message: format!("that image is larger than the {MAX_BYTES}-byte limit"),
+        }
+        .into());
+    }
+
+    let bytes = BASE64
+        .decode(data_base64.as_bytes())
+        .map_err(|_| evara_db::DbError::Invalid {
+            message: "that image could not be read".to_owned(),
+        })?;
+
+    let mut ws = workspace(&state)?;
+    let logo = ws.structure()?.set_school_logo(school_id, &bytes)?;
+    SchoolLogoView::render(&logo).ok_or_else(|| {
+        evara_db::DbError::Invalid {
+            message: "that image could not be read back".to_owned(),
+        }
+        .into()
+    })
+}
+
+/// Removes the school's logo, restoring the Evara one. Removing nothing succeeds.
+#[tauri::command]
+pub fn setup_school_logo_clear(state: State<'_, AppState>) -> SetupResult<()> {
+    let mut ws = workspace(&state)?;
+    Ok(ws.structure()?.clear_school_logo()?)
+}
+
+/// The limits the interface should enforce before sending, and state in its hint text.
+#[tauri::command]
+#[allow(clippy::unnecessary_wraps)] // Signature stays Result to match its neighbours.
+pub fn setup_school_logo_limits() -> SetupResult<LogoLimits> {
+    Ok(LogoLimits {
+        max_bytes: i64::try_from(MAX_BYTES).unwrap_or(i64::MAX),
+        max_edge: i64::from(MAX_EDGE),
+        min_edge: i64::from(MIN_EDGE),
+        media_types: LogoFormat::all()
+            .iter()
+            .map(|format| format.media_type().to_owned())
+            .collect(),
+    })
 }
 
 // ---------------------------------------------------------------------------- campus

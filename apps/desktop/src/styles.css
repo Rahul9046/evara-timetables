@@ -317,7 +317,9 @@ button.linkish:hover:not(:disabled) {
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   display: grid;
-  grid-template-columns: 1fr auto;
+  /* Logo, then the project identity, then the actions. The banner and error rows below
+     span with `1 / -1`, so they follow this without being told. */
+  grid-template-columns: auto 1fr auto;
   gap: 8px 16px;
   align-items: center;
 }
@@ -556,6 +558,119 @@ button.linkish:hover:not(:disabled) {
   color: var(--text-faint);
   max-width: 44ch;
   text-align: right;
+}
+
+/* ---- logos --------------------------------------------------------------- */
+
+/* The Evara mark and a school's own are rendered by the same component at different
+   sizes, so one rule covers both. `contain` rather than `cover`: a school's logo must
+   never be cropped to fit a square, which would cut the edges off a wordmark. */
+.logoMark {
+  display: block;
+  object-fit: contain;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  /* Checkered neither here nor anywhere: a transparent logo should sit on the surface it
+     is placed on, which is the point of recommending transparency. */
+  background: transparent;
+}
+
+.titleBarLogo {
+  border-radius: 8px;
+}
+
+.startLogo {
+  margin-bottom: 14px;
+  border-radius: 12px;
+}
+
+/* ---- school logo panel --------------------------------------------------- */
+
+.logoPanel > .muted {
+  margin-bottom: 14px;
+  max-width: 68ch;
+}
+
+.logoRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+/* A fixed box so the panel does not jump as logos of different shapes load into it. */
+.logoPreview {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 128px;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.logoPreview .logoMark {
+  width: 96px;
+  height: 96px;
+}
+
+.logoPreview .hint {
+  margin: 0;
+  text-align: center;
+  font-size: 11.5px;
+}
+
+.logoActions {
+  flex: 1 1 18rem;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.logoActions .hint {
+  flex: 1 1 100%;
+  margin: 2px 0 0;
+  max-width: 60ch;
+}
+
+/* A `<label>` that drives a visually hidden file input, styled as the button it stands
+   in for. The input keeps the keyboard and accessibility behaviour; this is only its
+   appearance, which is why every button rule is repeated rather than inherited. */
+.buttonish {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 15px;
+  font-size: 13px;
+  font-weight: 650;
+  font-family: inherit;
+  color: var(--surface);
+  background: var(--text);
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  user-select: none;
+}
+
+.buttonish:hover {
+  opacity: 0.88;
+}
+
+/* The ring follows the input's focus, since that is what the keyboard actually lands on
+   and the label itself is never focusable. */
+.logoActions:has(input:focus-visible) .buttonish {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.logoActions:has(input:disabled) .buttonish {
+  cursor: default;
+  opacity: 0.6;
 }
 
 /* ---- banners ------------------------------------------------------------ */
