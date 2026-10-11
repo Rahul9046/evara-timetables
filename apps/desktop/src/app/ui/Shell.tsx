@@ -3,7 +3,7 @@
  *
  * Banners, empty states, tables and the confirmation dialogue. Together with
  * `Field.tsx` these are the whole visual vocabulary of School Setup, which is what makes
- * nine sections look like one application rather than nine.
+ * eight sections look like one application rather than eight.
  */
 import { useEffect, useRef, type ReactNode } from "react";
 

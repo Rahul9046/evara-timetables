@@ -1,7 +1,7 @@
 /**
  * One editable collection: a table, a form, and a confirmed delete.
  *
- * Eight of the nine School Setup sections are the same interaction with different fields,
+ * Seven of the eight School Setup sections are the same interaction with different fields,
  * so the interaction is written once here and each section supplies a {@link CrudSpec}.
  * The point is not brevity — it is that "what happens when a save fails", "what a delete
  * asks before it happens" and "what an empty collection says" are decided in one place

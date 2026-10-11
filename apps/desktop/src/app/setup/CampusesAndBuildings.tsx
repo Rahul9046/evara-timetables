@@ -106,7 +106,7 @@ export function CampusesAndBuildings(props: { school: School }) {
       update: updateCampus,
       remove: deleteCampus,
       emptyHint:
-        "A school needs at least one campus before rooms, bell schedules or resources can be recorded against it. A single-site school has exactly one.",
+        "A school needs at least one campus before rooms or bell schedules can be recorded against it. A single-site school has exactly one.",
       deleteNote: () => (
         <p className="muted">
           A campus that still has buildings, rooms or resources cannot be deleted, and nor

@@ -1,7 +1,7 @@
 /**
  * The shared CRUD panel.
  *
- * Eight of the nine setup sections are this component with different fields, so the
+ * Seven of the eight setup sections are this component with different fields, so the
  * brief's requirements about forms and deletes are mostly requirements about *this*:
  *
  * - forms populate from persisted data
