@@ -169,7 +169,9 @@ The time model deliberately avoids assuming Monday–Friday.
 > so they cannot arrive by accident.
 >
 > `building_campus` arrived afterwards as migration `V5`, making a building shareable
-> across campuses — see [adr/0013](adr/0013-buildings-shared-across-campuses.md).
+> across campuses — see [adr/0013](adr/0013-buildings-shared-across-campuses.md) — and
+> `room_campus` as migration `V6`, doing the same for rooms:
+> [adr/0014](adr/0014-rooms-shared-across-campuses.md).
 
 ### Deletion semantics
 
@@ -196,6 +198,20 @@ Withdrawing a share is **not** a deletion and detaches nothing: it is refused wh
 on that campus are still in the building, and refused outright for the building's home
 campus, so a building can never reach zero campuses.
 
+`V6` added the room sharing edge, decided in
+[adr/0014](adr/0014-rooms-shared-across-campuses.md). Both halves are `RESTRICT`, for the
+reasons `building_campus` has them:
+
+| Edge | Behaviour |
+| --- | --- |
+| `room_campus.room_id` | `RESTRICT` — `delete_room` removes the association rows itself, so each removal is a change-log entry |
+| `room_campus.campus_id` | `RESTRICT` — a campus a room is shared *with* cannot be deleted until the share is withdrawn |
+
+Withdrawing a room share removes one association and nothing else — not even the room's
+own `rev`, since the room did not change. It is refused outright for the room's home
+campus, so a room can never reach zero campuses. Deleting a *building* still detaches its
+rooms through a real update; the rooms keep every campus they serve.
+
 Phase 1D added the time edges, decided in
 [adr/0011](adr/0011-stable-timeslot-identity.md). **Every one of them is `RESTRICT`**,
 including the nullable ones:
@@ -220,20 +236,24 @@ Following the documented rule that codes are unique within their parent:
 `academic_year(school_id, name)` · `term(academic_year_id, ordinal)` and
 `term(academic_year_id, name)`.
 
-Plus `building_campus(building_id, campus_id)`, which is what stops a campus being
-associated with the same building twice. Both columns are `NOT NULL`, so that constraint
-needs no `COALESCE` to actually hold.
+Plus `building_campus(building_id, campus_id)` and `room_campus(room_id, campus_id)`,
+which are what stop a campus being associated with the same building, or the same room,
+twice. All four columns are `NOT NULL`, so those constraints need no `COALESCE` to
+actually hold.
 
 `school` is a singleton, enforced by a constant column with a unique index: a project
 describes one school ([ADR 0003](adr/0003-sqlite-document-model.md)). A room's building
-must be **available to** the room's own campus, enforced by a trigger that reads
+must be **available to** every campus the room serves, enforced by triggers that read
 `building_campus` — which is what lets one shared building hold rooms belonging to
-different campuses.
+different campuses, and what stops a room being shared to a campus its building does not
+reach. Sharing a building does not share its rooms, and sharing a room does not share its
+building; that rule is the one place the two settings meet
+([ADR 0014](adr/0014-rooms-shared-across-campuses.md)).
 
-`building(campus_id, name)` scopes a name to a building's *home* campus only. The
-cross-campus case — sharing a building to a campus that already has one of that name —
-needs the other rows, so it is a repository rule in `evara-db` rather than a schema
-constraint.
+`building(campus_id, name)` scopes a name to a building's *home* campus only, and
+`room(campus_id, code)` does the same for a room's code. The cross-campus case — sharing
+to a campus that already has one of that name or code — needs the other rows, so both are
+repository rules in `evara-db` rather than schema constraints.
 
 ```sql
 school (id, name, timezone, locale, created_at, updated_at, rev)
@@ -252,8 +272,20 @@ building (id, campus_id -> campus, name, UNIQUE(campus_id, name))
 building_campus (id, building_id -> building, campus_id -> campus,
                  UNIQUE(building_id, campus_id))
 room_type (id, school_id, name, code)                       -- "Science Lab", "Gym"
+-- campus_id is the HOME campus, exactly as building.campus_id is: immutable, always
+-- present in room_campus, never withdrawable. It scopes UNIQUE(campus_id, code) and
+-- guarantees a room always has at least one campus. ADR 0014 records why it stayed.
 room (id, campus_id -> campus, building_id -> building NULL, name, code,
-      capacity INTEGER, room_type_id -> room_type NULL, is_bookable, notes)
+      capacity INTEGER, room_type_id -> room_type NULL, is_bookable, notes,
+      UNIQUE(campus_id, code))
+
+-- The COMPLETE set of campuses a room serves, home campus included. A SHARED ROOM IS ONE
+-- ROOM: room.id is its scheduling identity, so occupancy is a property of that identifier
+-- and never of (room_id, campus_id). room-clash (CORE-003) must therefore be evaluated per
+-- room_id across the whole project. See ADR 0014 — and D22, which must be settled first,
+-- because two campuses can run different bell schedules and matching period ordinals do
+-- not imply overlapping real times.
+room_campus (id, room_id -> room, campus_id -> campus, UNIQUE(room_id, campus_id))
 resource (id, school_id, name, code, quantity INTEGER, campus_id NULL)
 
 academic_year (id, school_id, name, starts_on DATE, ends_on DATE)

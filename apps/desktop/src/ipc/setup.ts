@@ -48,6 +48,7 @@ import type {
   RoomInput,
   RoomType,
   RoomTypeInput,
+  RoomWithCampuses,
   School,
   SchoolInput,
   SetupError,
@@ -235,9 +236,17 @@ export function deleteRoomType(id: string): Promise<void> {
 
 // ----------------------------------------------------------------------------- room
 
-/** Creates a room. */
-export function createRoom(input: RoomInput): Promise<Room> {
-  return invoke<Room>("setup_room_create", { input });
+/**
+ * Creates a room on a campus, optionally shared with others.
+ *
+ * `sharedCampusIds` names the *additional* campuses. The room and every association are
+ * written in one transaction, so a half-shared room is never persisted.
+ */
+export function createRoom(
+  input: RoomInput,
+  sharedCampusIds: string[] = [],
+): Promise<Room> {
+  return invoke<Room>("setup_room_create", { input, sharedCampusIds });
 }
 
 /** One room by identifier. */
@@ -245,17 +254,46 @@ export function getRoom(id: string): Promise<Room | null> {
   return invoke<Room | null>("setup_room_get", { id });
 }
 
-/** Every room on one campus. */
-export function listRooms(campusId: string): Promise<Room[]> {
-  return invoke<Room[]>("setup_room_list", { campusId });
+/**
+ * Every room available to one campus, shared ones included.
+ *
+ * Each entry carries the full set of campuses that room serves, so a listing can mark a
+ * shared room without a call per row.
+ */
+export function listRooms(campusId: string): Promise<RoomWithCampuses[]> {
+  return invoke<RoomWithCampuses[]>("setup_room_list", { campusId });
 }
 
-/** Replaces a room's details. `buildingId` and `roomTypeId` may be null. */
+/** Every campus one room serves. */
+export function listRoomCampuses(roomId: string): Promise<string[]> {
+  return invoke<string[]>("setup_room_campuses", { roomId });
+}
+
+/**
+ * Replaces a room's details. `buildingId` and `roomTypeId` may be null.
+ *
+ * Refused when the new building is not available to a campus the room serves.
+ */
 export function updateRoom(id: string, input: RoomInput): Promise<Room> {
   return invoke<Room>("setup_room_update", { id, input });
 }
 
-/** Deletes a room. */
+/** Shares an existing room with another campus. */
+export function shareRoom(roomId: string, campusId: string): Promise<void> {
+  return invoke<void>("setup_room_share", { roomId, campusId });
+}
+
+/**
+ * Stops sharing a room with a campus.
+ *
+ * Refused outright for the campus the room was created on. Nothing is moved, duplicated
+ * or deleted — the room keeps its identity and every other campus keeps it.
+ */
+export function unshareRoom(roomId: string, campusId: string): Promise<void> {
+  return invoke<void>("setup_room_unshare", { roomId, campusId });
+}
+
+/** Deletes a room. Its campus associations go with it. */
 export function deleteRoom(id: string): Promise<void> {
   return invoke<void>("setup_room_delete", { id });
 }

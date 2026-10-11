@@ -503,12 +503,12 @@ fn a_shared_building_holds_rooms_from_several_campuses() {
     let north_room = project
         .db()
         .structure()
-        .create_room(&room(north, "N1", Some(shared.id)))
+        .create_room(&room(north, "N1", Some(shared.id)), &[])
         .expect("a room on the home campus");
     let south_room = project
         .db()
         .structure()
-        .create_room(&room(south, "S1", Some(shared.id)))
+        .create_room(&room(south, "S1", Some(shared.id)), &[])
         .expect("a room on the shared campus");
 
     assert_eq!(north_room.building_id, Some(shared.id));
@@ -532,7 +532,7 @@ fn a_room_cannot_name_a_building_its_campus_does_not_have() {
     let outcome = project
         .db()
         .structure()
-        .create_room(&room(east, "E1", Some(block.id)));
+        .create_room(&room(east, "E1", Some(block.id)), &[]);
 
     assert!(
         matches!(outcome, Err(DbError::Invalid { .. })),
@@ -553,7 +553,7 @@ fn withdrawing_a_share_is_blocked_by_the_rooms_that_depend_on_it() {
     let south_room = project
         .db()
         .structure()
-        .create_room(&room(south, "S1", Some(shared.id)))
+        .create_room(&room(south, "S1", Some(shared.id)), &[])
         .expect("create room");
 
     let outcome = project.db().structure().unshare_building(shared.id, south);
@@ -599,7 +599,7 @@ fn withdrawing_a_share_succeeds_once_the_rooms_are_reassigned() {
     let south_room = project
         .db()
         .structure()
-        .create_room(&room(south, "S1", Some(shared.id)))
+        .create_room(&room(south, "S1", Some(shared.id)), &[])
         .expect("create room");
 
     project
@@ -634,7 +634,7 @@ fn rooms_on_other_campuses_do_not_block_a_withdrawal() {
     project
         .db()
         .structure()
-        .create_room(&room(north, "N1", Some(shared.id)))
+        .create_room(&room(north, "N1", Some(shared.id)), &[])
         .expect("a room on the home campus");
 
     // Only South's own rooms are South's business.
@@ -740,12 +740,12 @@ fn deleting_a_shared_building_detaches_rooms_on_every_campus_rather_than_deletin
     let north_room = project
         .db()
         .structure()
-        .create_room(&room(north, "N1", Some(shared.id)))
+        .create_room(&room(north, "N1", Some(shared.id)), &[])
         .expect("north room");
     let south_room = project
         .db()
         .structure()
-        .create_room(&room(south, "S1", Some(shared.id)))
+        .create_room(&room(south, "S1", Some(shared.id)), &[])
         .expect("south room");
 
     project
@@ -1081,7 +1081,14 @@ fn migrating_a_v4_project_preserves_every_identifier_and_relationship() {
 
     // Open it with this build, which migrates it forward.
     let mut db = Database::open_existing(&path, APP_VERSION, site).expect("migrate and open");
-    assert_eq!(db.schema_version(), 5, "the project is now at V5");
+    // Against the supported version rather than a literal: a V4 project must migrate all
+    // the way forward, and hardcoding "5" here made this test fail the moment V6 shipped
+    // for a reason that had nothing to do with what it checks.
+    assert_eq!(
+        db.schema_version(),
+        crate::migrations::supported_schema_version(),
+        "the project migrated all the way forward"
+    );
 
     // Identity is untouched.
     let block = db

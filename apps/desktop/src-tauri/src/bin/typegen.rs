@@ -148,8 +148,8 @@ fn write_all() -> (Vec<Generated>, Vec<String>) {
         CycleDayInput, CycleInput, GridCell, GridPreview, MaterialisationCounts,
         MaterialisationPlan, MaterialisationRequest, Period, PeriodInput, PeriodKind,
         PeriodStructure, PeriodStructureInput, PlanFingerprint, PlannedSlot, Resource,
-        ResourceInput, Room, RoomInput, RoomType, RoomTypeInput, School, SchoolInput, Term,
-        TermInput, Timeslot, TimeslotInput,
+        ResourceInput, Room, RoomInput, RoomType, RoomTypeInput, RoomWithCampuses, School,
+        SchoolInput, Term, TermInput, Timeslot, TimeslotInput,
     };
     use evara_desktop_lib::commands::AppInfo;
     use evara_desktop_lib::commands::error::SetupError;
@@ -167,6 +167,7 @@ fn write_all() -> (Vec<Generated>, Vec<String>) {
         RoomTypeInput,
         Room,
         RoomInput,
+        RoomWithCampuses,
         Resource,
         ResourceInput,
         AcademicYear,
