@@ -31,8 +31,8 @@
 
 use evara_db::{
     AcademicYear, AcademicYearInput, Building, BuildingInput, BuildingWithCampuses, Campus,
-    CampusInput, Resource, ResourceInput, Room, RoomInput, RoomType, RoomTypeInput, School,
-    SchoolInput, Term, TermInput,
+    CampusInput, Resource, ResourceInput, Room, RoomInput, RoomType, RoomTypeInput,
+    RoomWithCampuses, School, SchoolInput, Term, TermInput,
 };
 use tauri::State;
 use uuid::Uuid;
@@ -266,11 +266,19 @@ pub fn setup_room_type_delete(state: State<'_, AppState>, id: Uuid) -> SetupResu
 
 // ------------------------------------------------------------------------------ room
 
-/// Creates a room.
+/// Creates a room on a campus, optionally shared with others.
+///
+/// `shared_campus_ids` names the *additional* campuses. The room and every association are
+/// written in one transaction, so a half-shared room is never persisted — see
+/// [ADR 0014](../../../../docs/adr/0014-rooms-shared-across-campuses.md).
 #[tauri::command]
-pub fn setup_room_create(state: State<'_, AppState>, input: RoomInput) -> SetupResult<Room> {
+pub fn setup_room_create(
+    state: State<'_, AppState>,
+    input: RoomInput,
+    shared_campus_ids: Vec<Uuid>,
+) -> SetupResult<Room> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.create_room(&input)?)
+    Ok(ws.structure()?.create_room(&input, &shared_campus_ids)?)
 }
 
 /// One room by identifier.
@@ -280,17 +288,31 @@ pub fn setup_room_get(state: State<'_, AppState>, id: Uuid) -> SetupResult<Optio
     Ok(ws.structure()?.room(id)?)
 }
 
-/// Every room on one campus.
+/// Every room available to one campus, shared ones included.
+///
+/// Each entry carries the full set of campuses that room serves, so the listing can mark a
+/// shared room without a call per row.
 #[tauri::command]
-pub fn setup_room_list(state: State<'_, AppState>, campus_id: Uuid) -> SetupResult<Vec<Room>> {
+pub fn setup_room_list(
+    state: State<'_, AppState>,
+    campus_id: Uuid,
+) -> SetupResult<Vec<RoomWithCampuses>> {
     let mut ws = workspace(&state)?;
     Ok(ws.structure()?.rooms(campus_id)?)
 }
 
-/// Replaces a room's details.
+/// Every campus one room serves.
+#[tauri::command]
+pub fn setup_room_campuses(state: State<'_, AppState>, room_id: Uuid) -> SetupResult<Vec<Uuid>> {
+    let mut ws = workspace(&state)?;
+    Ok(ws.structure()?.room_campuses(room_id)?)
+}
+
+/// Replaces a room's details. Its home campus never changes.
 ///
 /// `buildingId` and `roomTypeId` stay nullable here: clearing either is a normal edit, not
-/// a deletion, and the repository accepts `null` for both.
+/// a deletion, and the repository accepts `null` for both. A change of building is refused
+/// when the new building is not available to a campus the room serves.
 #[tauri::command]
 pub fn setup_room_update(
     state: State<'_, AppState>,
@@ -301,7 +323,36 @@ pub fn setup_room_update(
     Ok(ws.structure()?.update_room(id, &input)?)
 }
 
-/// Deletes a room.
+/// Shares an existing room with another campus.
+///
+/// Refused when the room's building is not available to that campus, and refused for a
+/// campus that already has it — a repeat is reported rather than ignored, so a screen
+/// working from a stale share set finds out instead of believing a success.
+#[tauri::command]
+pub fn setup_room_share(
+    state: State<'_, AppState>,
+    room_id: Uuid,
+    campus_id: Uuid,
+) -> SetupResult<()> {
+    let mut ws = workspace(&state)?;
+    Ok(ws.structure()?.share_room(room_id, campus_id)?)
+}
+
+/// Stops sharing a room with a campus.
+///
+/// Refused outright for the campus the room was created on. Nothing is moved, duplicated
+/// or deleted: the room keeps its identity and every other campus keeps it.
+#[tauri::command]
+pub fn setup_room_unshare(
+    state: State<'_, AppState>,
+    room_id: Uuid,
+    campus_id: Uuid,
+) -> SetupResult<()> {
+    let mut ws = workspace(&state)?;
+    Ok(ws.structure()?.unshare_room(room_id, campus_id)?)
+}
+
+/// Deletes a room. Its campus associations go with it, one change-log entry each.
 #[tauri::command]
 pub fn setup_room_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
     let mut ws = workspace(&state)?;

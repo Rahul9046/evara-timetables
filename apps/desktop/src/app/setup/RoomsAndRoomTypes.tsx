@@ -16,10 +16,39 @@
  * own and any shared with it — because the
  * schema refuses the cross-campus case with a trigger. Showing an option that is
  * guaranteed to fail is not a choice.
+ *
+ * ## A room is shared, like a building
+ *
+ * One physical room can serve several campuses: a sports hall on a shared site, a lecture
+ * theatre two campuses timetable into. It stays **one room with one identifier**, listed
+ * by every campus it serves — see
+ * [ADR 0014](../../../../../docs/adr/0014-rooms-shared-across-campuses.md). That identity
+ * is the point: when scheduling arrives, the room is occupied or it is not, and no campus
+ * gets its own private answer.
+ *
+ * Sharing a building does **not** share the rooms inside it, and sharing a room does not
+ * share its building. The two settings are independent and this screen keeps them that
+ * way. They meet at exactly one rule: a room may serve a campus only if its building —
+ * when it has one — is available to that campus too. The repository owns that rule and
+ * refuses with a message naming the building and the campus; this screen shows what it
+ * said rather than second-guessing it, because the set of buildings a campus can reach is
+ * not something a form can recompute correctly while the user is typing.
+ *
+ * ## Withdrawing a share is not deleting anything
+ *
+ * Removing a campus from a room is reversible and takes nothing with it. The room keeps
+ * its identity and every other campus keeps it; only this campus stops listing it.
  */
 import { useCallback, useMemo, useState } from "react";
 
-import type { BuildingWithCampuses, Campus, Room, RoomType, School } from "@evara/domain";
+import type {
+  BuildingWithCampuses,
+  Campus,
+  Room,
+  RoomType,
+  RoomWithCampuses,
+  School,
+} from "@evara/domain";
 import {
   createRoom,
   createRoomType,
@@ -29,6 +58,8 @@ import {
   listCampuses,
   listRoomTypes,
   listRooms,
+  shareRoom,
+  unshareRoom,
   updateRoom,
   updateRoomType,
 } from "../../ipc/setup";
@@ -36,15 +67,42 @@ import { CrudPanel, type CrudSpec } from "../ui/CrudPanel";
 import type { Choice } from "../ui/Field";
 import {
   flag,
+  list,
   number,
   text,
   textOrNull,
   validateRoom,
   validateRoomType,
 } from "../validation";
-import { Absent } from "./CampusesAndBuildings";
+import { Absent, CampusShareList } from "./CampusesAndBuildings";
 import { ParentPicker } from "./ParentPicker";
 import { useList } from "./useList";
+
+/**
+ * One row of the rooms table.
+ *
+ * The room's own fields lifted alongside the campuses it serves, because `CrudPanel` keys
+ * rows by `id` and `RoomWithCampuses` keeps it one level down.
+ */
+type RoomRow = Room & { readonly campusIds: readonly string[] };
+
+function toRow(entry: RoomWithCampuses): RoomRow {
+  return { ...entry.room, campusIds: entry.campusIds };
+}
+
+/** What `createRoom` and `updateRoom` are given. */
+interface RoomDraft {
+  readonly campusId: string;
+  readonly buildingId: string | null;
+  readonly roomTypeId: string | null;
+  readonly name: string;
+  readonly code: string;
+  readonly capacity: number;
+  readonly isBookable: boolean;
+  readonly notes: string | null;
+  /** Every campus the room should serve *besides* its home campus. */
+  readonly sharedCampusIds: readonly string[];
+}
 
 export function RoomsAndRoomTypes(props: { school: School }) {
   const { school } = props;
@@ -105,14 +163,21 @@ export function RoomsAndRoomTypes(props: { school: School }) {
     [school.id],
   );
 
-  const roomSpec = useMemo<CrudSpec<Room, Parameters<typeof createRoom>[0]>>(() => {
+  const loadRooms = useCallback(
+    () =>
+      campusId
+        ? listRooms(campusId).then((entries) => entries.map(toRow))
+        : Promise.resolve([]),
+    [campusId],
+  );
+
+  const roomSpec = useMemo<CrudSpec<RoomRow, RoomDraft>>(() => {
     // Buildings *available to* this campus, which since ADR 0013 includes any shared
     // with it. Offering anything else would be offering a room a building its own campus
     // does not have, which the schema refuses anyway.
     const buildingChoices: Choice[] = (buildings.items ?? []).map((b) => ({
       value: b.building.id,
-      label:
-        b.campusIds.length > 1 ? `${b.building.name} (shared)` : b.building.name,
+      label: b.campusIds.length > 1 ? `${b.building.name} (shared)` : b.building.name,
     }));
     const typeChoices: Choice[] = (roomTypes.items ?? []).map((t) => ({
       value: t.id,
@@ -120,6 +185,18 @@ export function RoomsAndRoomTypes(props: { school: School }) {
     }));
     const buildingName = new Map(buildingChoices.map((c) => [c.value, c.label]));
     const typeName = new Map(typeChoices.map((c) => [c.value, c.label]));
+
+    const all = campuses.items ?? [];
+    const campusName = new Map(all.map((campus) => [campus.id, campus.name]));
+
+    /** Every campus except the one being viewed: the ones a room can be shared with. */
+    const shareChoices: Choice[] = all
+      .filter((campus) => campus.id !== campusId)
+      .map((campus) => ({ value: campus.id, label: `${campus.name} (${campus.code})` }));
+
+    /** A room's shared campuses, i.e. everything bar its home campus. */
+    const sharedOf = (row: RoomRow): string[] =>
+      row.campusIds.filter((id) => id !== row.campusId);
 
     return {
       noun: "room",
@@ -133,6 +210,17 @@ export function RoomsAndRoomTypes(props: { school: School }) {
           header: "Building",
           render: (row) =>
             row.buildingId ? (buildingName.get(row.buildingId) ?? <Absent />) : <Absent />,
+        },
+        {
+          header: "Campuses",
+          render: (row) => (
+            <CampusShareList
+              campusIds={row.campusIds}
+              homeId={row.campusId}
+              campusName={campusName}
+              viewing={campusId}
+            />
+          ),
         },
         {
           header: "Type",
@@ -161,6 +249,19 @@ export function RoomsAndRoomTypes(props: { school: School }) {
               : "Optional. Only buildings available to this campus are offered, shared ones included.",
         },
         {
+          kind: "multicombobox",
+          key: "sharedCampusIds",
+          label: "Shared with campuses",
+          choices: shareChoices,
+          placeholder: shareChoices.length === 0 ? "No other campuses" : "Search campuses",
+          emptyLabel: "No campus matches that",
+          noneLabel: "This campus only",
+          hint:
+            shareChoices.length === 0
+              ? "A school with one campus has nothing to share with. Add another campus first."
+              : "For one physical room that serves more than one campus. It stays a single room — one identity, one set of bookings, however many campuses list it. If it is in a building, only campuses that building reaches can be chosen; the save will say so.",
+        },
+        {
           kind: "select",
           key: "roomTypeId",
           label: "Room type",
@@ -186,6 +287,7 @@ export function RoomsAndRoomTypes(props: { school: School }) {
         capacity: row ? String(row.capacity) : "30",
         isBookable: row ? row.isBookable : true,
         notes: row?.notes ?? "",
+        sharedCampusIds: row ? sharedOf(row) : [],
       }),
       toInput: (draft) => ({
         campusId: campusId ?? "",
@@ -196,16 +298,80 @@ export function RoomsAndRoomTypes(props: { school: School }) {
         capacity: number(draft, "capacity"),
         isBookable: flag(draft, "isBookable"),
         notes: textOrNull(draft, "notes"),
+        sharedCampusIds: list(draft, "sharedCampusIds"),
       }),
-      list: () => (campusId ? listRooms(campusId) : Promise.resolve([])),
-      create: createRoom,
-      update: updateRoom,
+      list: loadRooms,
+      create: (input) =>
+        createRoom(withoutShares(input), [...input.sharedCampusIds]).then(
+          toNewRow(input),
+        ),
+      // Withdrawals go first, then the room itself, then the new shares. The order is
+      // what makes a legitimate edit possible: moving a room into a campus-local building
+      // *and* dropping the campus that cannot reach it is one edit to the user, and it
+      // only succeeds if the share is gone before the building changes. Adding shares
+      // last for the mirror-image reason — the new building has to be in place before a
+      // campus that depends on it is attached.
+      //
+      // The repository is the authority on each step and refuses the ones that are not
+      // allowed; a refusal leaves the earlier steps applied, which is why the panel
+      // re-reads the list after every mutation rather than patching it.
+      update: async (id, input) => {
+        const before = new Set(
+          (await loadRooms()).find((row) => row.id === id)?.campusIds ?? [],
+        );
+        before.delete(input.campusId);
+        const after = new Set(input.sharedCampusIds);
+
+        for (const campus of before) {
+          if (!after.has(campus)) await unshareRoom(id, campus);
+        }
+
+        const room = await updateRoom(id, withoutShares(input));
+
+        for (const campus of after) {
+          if (!before.has(campus)) await shareRoom(id, campus);
+        }
+
+        return { ...room, campusIds: [room.campusId, ...after] };
+      },
       remove: deleteRoom,
+      // Withdrawing a share is reversible but it is not nothing: a campus loses a room it
+      // may have been timetabling into. Asking first is the same courtesy a delete gets.
+      confirmSubmit: (draft, row) => {
+        if (!row) return null;
+        const after = new Set(list(draft, "sharedCampusIds"));
+        const removed = sharedOf(row).filter((id) => !after.has(id));
+        if (removed.length === 0) return null;
+
+        return (
+          <>
+            <p>
+              <strong>{row.name}</strong> will no longer be available to{" "}
+              <strong>
+                {removed.map((id) => campusName.get(id) ?? "another campus").join(", ")}
+              </strong>
+              .
+            </p>
+            <p className="muted">
+              The room itself is not moved, copied or deleted. It keeps its identity and
+              every other campus keeps it.
+            </p>
+          </>
+        );
+      },
       emptyHint:
         "Rooms are what lessons are scheduled into. Add the teaching spaces on this campus — you can classify them and group them by building later.",
+      deleteNote: (row) =>
+        row.campusIds.length > 1 ? (
+          <p className="warning">
+            This room is shared with {row.campusIds.length - 1} other campus
+            {row.campusIds.length > 2 ? "es" : ""}. Deleting it removes it from all of
+            them, not just this one.
+          </p>
+        ) : null,
       blockedBy: campusId === null ? "Select a campus first." : null,
     };
-  }, [campusId, buildings.items, roomTypes.items]);
+  }, [campusId, buildings.items, roomTypes.items, campuses.items, loadRooms]);
 
   return (
     <div className="section">
@@ -213,7 +379,9 @@ export function RoomsAndRoomTypes(props: { school: School }) {
         <h2>Rooms and room types</h2>
         <p>
           Rooms belong to a campus. A building and a room type are both optional — a room
-          with neither is perfectly normal.
+          with neither is perfectly normal. One room can serve several campuses: a sports
+          hall on a shared site is one room, not two, and stays one room however many
+          campuses list it.
         </p>
       </header>
 
@@ -246,4 +414,31 @@ export function RoomsAndRoomTypes(props: { school: School }) {
       </ParentPicker>
     </div>
   );
+}
+
+/**
+ * The draft minus its share set, which is a separate argument rather than part of
+ * `RoomInput`.
+ *
+ * `RoomInput` is generated from the Rust record and has no room for it — the associations
+ * are their own table — so the split happens here rather than by inventing a second
+ * input shape ([ADR 0012](../../../../../docs/adr/0012-records-are-the-ipc-contract.md)).
+ */
+function withoutShares(input: RoomDraft) {
+  const { sharedCampusIds: _ignored, ...roomInput } = input;
+  return roomInput;
+}
+
+/**
+ * Builds the row a create resolves to.
+ *
+ * `CrudPanel` re-reads the list straight afterwards, so this value is never what gets
+ * rendered — it exists so `create` satisfies the spec's return type without inventing a
+ * second source of truth.
+ */
+function toNewRow(input: RoomDraft): (created: Room) => RoomRow {
+  return (created) => ({
+    ...created,
+    campusIds: [created.campusId, ...input.sharedCampusIds],
+  });
 }

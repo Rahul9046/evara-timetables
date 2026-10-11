@@ -195,6 +195,8 @@ fn the_schema_contains_exactly_the_phases_shipped_so_far() {
             "refinery_schema_history".to_owned(),
             "resource".to_owned(),
             "room".to_owned(),
+            // V6 — rooms shared across campuses.
+            "room_campus".to_owned(),
             "room_type".to_owned(),
             "school".to_owned(),
             "term".to_owned(),

@@ -57,6 +57,7 @@ export type {
   RoomInput,
   RoomType,
   RoomTypeInput,
+  RoomWithCampuses,
   School,
   SchoolInput,
   SetupError,

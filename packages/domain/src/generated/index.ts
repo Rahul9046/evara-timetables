@@ -38,6 +38,7 @@ export type { Room } from "./Room";
 export type { RoomInput } from "./RoomInput";
 export type { RoomType } from "./RoomType";
 export type { RoomTypeInput } from "./RoomTypeInput";
+export type { RoomWithCampuses } from "./RoomWithCampuses";
 export type { School } from "./School";
 export type { SchoolInput } from "./SchoolInput";
 export type { SetupError } from "./SetupError";

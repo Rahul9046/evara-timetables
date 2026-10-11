@@ -439,7 +439,7 @@ fn a_campus_that_still_owns_rooms_cannot_be_deleted() {
     project
         .db()
         .structure()
-        .create_room(&room(campus, "R1"))
+        .create_room(&room(campus, "R1"), &[])
         .expect("create room");
 
     let outcome = project.db().structure().delete_campus(campus);
@@ -492,7 +492,7 @@ fn deleting_a_room_type_unclassifies_its_rooms_and_advances_their_revision() {
     let created = project
         .db()
         .structure()
-        .create_room(&input)
+        .create_room(&input, &[])
         .expect("create room");
     assert_eq!(created.rev, 1);
 
@@ -540,7 +540,7 @@ fn deleting_a_building_detaches_its_rooms() {
     let created = project
         .db()
         .structure()
-        .create_room(&input)
+        .create_room(&input, &[])
         .expect("create room");
 
     project
@@ -662,7 +662,7 @@ fn a_room_cannot_sit_in_a_building_on_another_campus() {
     let mut input = room(main, "X1");
     input.building_id = Some(block.id);
 
-    let outcome = project.db().structure().create_room(&input);
+    let outcome = project.db().structure().create_room(&input, &[]);
     assert!(
         matches!(outcome, Err(DbError::Invalid { .. })),
         "a room's building must be on the room's own campus: {outcome:?}"
@@ -693,10 +693,10 @@ fn room_codes_are_unique_within_a_campus_but_not_across_them() {
     project
         .db()
         .structure()
-        .create_room(&room(main, "R1"))
+        .create_room(&room(main, "R1"), &[])
         .expect("first");
 
-    let clash = project.db().structure().create_room(&room(main, "R1"));
+    let clash = project.db().structure().create_room(&room(main, "R1"), &[]);
     assert!(
         matches!(clash, Err(DbError::DuplicateValue { .. })),
         "{clash:?}"
@@ -716,7 +716,7 @@ fn room_codes_are_unique_within_a_campus_but_not_across_them() {
         project
             .db()
             .structure()
-            .create_room(&room(annexe.id, "R1"))
+            .create_room(&room(annexe.id, "R1"), &[])
             .is_ok(),
         "the same code on a different campus is a different room"
     );
@@ -746,7 +746,11 @@ fn schema_rules_reject_nonsense_values() {
     let mut negative = room(campus, "NEG");
     negative.capacity = -5;
     assert!(
-        project.db().structure().create_room(&negative).is_err(),
+        project
+            .db()
+            .structure()
+            .create_room(&negative, &[])
+            .is_err(),
         "capacity cannot be negative"
     );
 
@@ -914,7 +918,7 @@ fn a_multi_step_delete_is_one_transaction() {
         project
             .db()
             .structure()
-            .create_room(&input)
+            .create_room(&input, &[])
             .expect("create room");
     }
 
@@ -968,7 +972,7 @@ fn structure_survives_closing_and_reopening_the_project() {
     let created = project
         .db()
         .structure()
-        .create_room(&input)
+        .create_room(&input, &[])
         .expect("create room");
 
     project.workspace.close_project();
@@ -1100,7 +1104,7 @@ fn a_malformed_optional_reference_is_an_error_not_some_nil() {
     let created = project
         .db()
         .structure()
-        .create_room(&input)
+        .create_room(&input, &[])
         .expect("create room");
 
     // Every end is damaged to the *same* text, so the file stays referentially consistent
@@ -1146,7 +1150,7 @@ fn an_absent_optional_reference_is_still_simply_absent() {
     let created = project
         .db()
         .structure()
-        .create_room(&room(campus, "B1"))
+        .create_room(&room(campus, "B1"), &[])
         .expect("create room");
 
     let read = project
@@ -1184,11 +1188,19 @@ fn detaching_a_reference_reports_corruption_rather_than_a_missing_row() {
     project
         .db()
         .structure()
-        .create_room(&input)
+        .create_room(&input, &[])
         .expect("create room");
 
-    // Nothing references `room`, so its own identifier can be damaged outright.
-    corrupt(project.db(), "UPDATE room SET id = 'broken'");
+    // `room_campus.room_id` has referenced `room.id` since V6, so the damage has to be
+    // done to both halves at once or the foreign key refuses it. `defer_foreign_keys`
+    // holds the check until commit — unlike `foreign_keys`, it does take effect inside a
+    // transaction — by which point the two tables agree on the unparseable value.
+    corrupt(
+        project.db(),
+        "PRAGMA defer_foreign_keys = ON;
+         UPDATE room SET id = 'broken';
+         UPDATE room_campus SET room_id = 'broken';",
+    );
 
     let error = project
         .db()

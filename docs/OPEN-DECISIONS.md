@@ -258,6 +258,48 @@ states rather than by inventing policy, and are recorded here for visibility:
 - `calendar_day(school_id, date, COALESCE(campus_id, ''))` gets the same `COALESCE`
   treatment as `timeslot`, for the same reason: the campus-less rows are the common case.
 
+### D22 — How cross-campus time is compared for a shared room
+
+**Open. Must be settled before `room-clash` is implemented for shared rooms.**
+
+`V6` made a room shareable across campuses
+([adr/0014](adr/0014-rooms-shared-across-campuses.md)). A shared room is **one** room with
+one `room.id`, so its occupancy is global: if one campus has booked it at a given time, no
+other campus may. That part is decided and is recorded as a binding invariant in
+[CONSTRAINTS.md](CONSTRAINTS.md) and ADR 0014.
+
+What is *not* decided is what "at a given time" means across campuses.
+
+- `period_structure` is school-wide, and nothing ties a campus to exactly one, so two
+  campuses can timetable against different bell schedules.
+- Those schedules can carry the same period ordinals with different wall-clock times.
+  **Period 3 on North is not necessarily Period 3 on South.**
+- A timeslot's identity is `(term_id, cycle_day_id, period_id)` with no campus in it
+  ([adr/0011](adr/0011-stable-timeslot-identity.md)), so two campuses using different
+  period structures produce *different* `timeslot` rows for overlapping real minutes.
+
+So the obvious implementation of `room-clash` — "two activities in the same `timeslot_id`"
+— is correct when both campuses share a period structure and **wrong exactly when the
+sharing feature matters**, silently. It would report no violation for a hall genuinely
+double-booked by two campuses running different bells.
+
+Options, not yet weighed with the maintainer:
+
+| Option | Shape | Cost |
+| --- | --- | --- |
+| **A — compare real times** | Give `period` an authoritative wall-clock interval and clash-check shared rooms by interval overlap within a `(term, cycle_day)` | Needs a decision on what the authoritative interval is, and on how two campuses' cycle days are aligned to each other at all |
+| **B — require one bell schedule per shared room's campuses** | Refuse the share, in the repository, when the campuses do not agree on a period structure | Cheap and safe; may refuse a real school's setup, which is the kind of thing that makes a product unusable rather than merely limited |
+| **C — a campus-alignment table** | Model explicitly which `(campus, cycle_day, period)` tuples overlap in time | Most honest, most work, and premature before anyone has asked for it |
+
+Nothing is implemented in either direction. Per [CLAUDE.md](../CLAUDE.md) the constraint
+evaluators have exactly one implementation, in `evara-constraints`, so a provisional
+answer written anywhere else now would be the second one.
+
+Related risk: **R-shared-room-time.** Until this is settled, a school that shares a room
+between campuses on different bell schedules has no protection against double-booking it,
+and will not be warned by anything. The model permits the configuration; the solver cannot
+yet reason about it.
+
 ## Technical risks
 
 ### R1 — Incremental scoring correctness (highest)

@@ -144,6 +144,64 @@ describe("command names and payloads", () => {
   });
 });
 
+/**
+ * Room sharing crosses the boundary as a second argument rather than a field of
+ * `RoomInput`, because the associations are their own table and `RoomInput` is generated
+ * from the Rust record ([ADR 0012](../../../../docs/adr/0012-records-are-the-ipc-contract.md)).
+ * That split is the part a type cannot check: the payload key has to be `sharedCampusIds`
+ * and the share commands take `roomId`, not `id`.
+ */
+describe("room-campus associations", () => {
+  const input = {
+    campusId: ID,
+    buildingId: null,
+    roomTypeId: null,
+    name: "Sports Hall",
+    code: "HALL",
+    capacity: 120,
+    isBookable: true,
+    notes: null,
+  };
+
+  it("sends an empty share list when a room is created for one campus", async () => {
+    await setup.createRoom(input);
+    expect(invoke).toHaveBeenCalledWith("setup_room_create", {
+      input,
+      sharedCampusIds: [],
+    });
+  });
+
+  it("sends the extra campuses alongside the input, not inside it", async () => {
+    await setup.createRoom(input, [OTHER]);
+    expect(invoke).toHaveBeenCalledWith("setup_room_create", {
+      input,
+      sharedCampusIds: [OTHER],
+    });
+    const payload = invoke.mock.calls[0]?.[1] as { input: Record<string, unknown> };
+    expect(payload.input).not.toHaveProperty("sharedCampusIds");
+  });
+
+  it.each([
+    ["setup_room_share", () => setup.shareRoom(ID, OTHER)],
+    ["setup_room_unshare", () => setup.unshareRoom(ID, OTHER)],
+  ])("%s names the room and the campus", async (command, call) => {
+    await call();
+    // `roomId`, not `id`: these commands act on a pair, and a bare `id` would be
+    // ambiguous about which half it meant.
+    expect(invoke).toHaveBeenCalledWith(command, { roomId: ID, campusId: OTHER });
+  });
+
+  it("reads one room's campuses by roomId", async () => {
+    await setup.listRoomCampuses(ID);
+    expect(invoke).toHaveBeenCalledWith("setup_room_campuses", { roomId: ID });
+  });
+
+  it("keeps sharing and withdrawing distinct commands", () => {
+    // Withdrawing a share must not be reachable by passing a flag to the safe call.
+    expect(setup.shareRoom).not.toBe(setup.unshareRoom);
+  });
+});
+
 describe("the grid commands", () => {
   const request = {
     cycleId: ID,

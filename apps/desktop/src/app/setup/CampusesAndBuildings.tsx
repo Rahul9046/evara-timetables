@@ -110,7 +110,8 @@ export function CampusesAndBuildings(props: { school: School }) {
       deleteNote: () => (
         <p className="muted">
           A campus that still has buildings, rooms or resources cannot be deleted, and nor
-          can one that a building is shared with. Move, remove or unshare those first.
+          can one that a building or a room is shared with. Move, remove or unshare those
+          first.
         </p>
       ),
     }),
@@ -148,7 +149,12 @@ export function CampusesAndBuildings(props: { school: School }) {
         {
           header: "Campuses",
           render: (row) => (
-            <CampusList row={row} campusName={campusName} viewing={campusId} />
+            <CampusShareList
+              campusIds={row.campusIds}
+              homeId={row.campusId}
+              campusName={campusName}
+              viewing={campusId}
+            />
           ),
         },
       ],
@@ -302,22 +308,30 @@ export function CampusesAndBuildings(props: { school: School }) {
 }
 
 /**
- * The campuses a building serves, marking the one being viewed and the ones it is shared
- * with.
+ * The campuses one shared thing serves, marking the ones other than the campus being
+ * viewed and flagging its home campus.
  *
- * A building that serves only the current campus says so plainly rather than repeating the
+ * Shared by buildings and rooms, because "which campuses is this on" reads the same way
+ * for both and the model is the same shape — a home campus plus any number of shares.
+ * A row that serves only the current campus says so plainly rather than repeating the
  * campus name the user already selected above.
  */
-function CampusList(props: {
-  row: BuildingRow;
+export function CampusShareList(props: {
+  /** Every campus the row serves, home included. */
+  campusIds: readonly string[];
+  /** The campus the row was created on. */
+  homeId: string;
   campusName: Map<string, string>;
+  /** The campus currently selected above, which is not worth naming again. */
   viewing: string | null;
+  /** What to say when this campus is the only one. */
+  soleLabel?: string;
 }) {
-  const { row, campusName, viewing } = props;
-  const others = row.campusIds.filter((id) => id !== viewing);
+  const { campusIds, homeId, campusName, viewing, soleLabel } = props;
+  const others = campusIds.filter((id) => id !== viewing);
 
   if (others.length === 0) {
-    return <span className="absent">This campus only</span>;
+    return <span className="absent">{soleLabel ?? "This campus only"}</span>;
   }
 
   return (
@@ -326,8 +340,8 @@ function CampusList(props: {
       {others.map((id) => (
         <span key={id} className="shareName">
           {campusName.get(id) ?? "another campus"}
-          {id === row.campusId && (
-            <span className="muted" title="The campus this building was created on">
+          {id === homeId && (
+            <span className="muted" title="The campus this was created on">
               {" "}
               (home)
             </span>

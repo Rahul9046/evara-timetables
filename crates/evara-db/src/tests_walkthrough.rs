@@ -96,32 +96,38 @@ fn a_school_can_be_set_up_from_an_empty_project_and_survives_a_reopen() {
     let classified = workspace
         .structure()
         .expect("open")
-        .create_room(&RoomInput {
-            campus_id: campus,
-            building_id: Some(building),
-            room_type_id: Some(room_type),
-            name: "Lab 1".to_owned(),
-            code: "L1".to_owned(),
-            capacity: 24,
-            is_bookable: true,
-            notes: None,
-        })
+        .create_room(
+            &RoomInput {
+                campus_id: campus,
+                building_id: Some(building),
+                room_type_id: Some(room_type),
+                name: "Lab 1".to_owned(),
+                code: "L1".to_owned(),
+                capacity: 24,
+                is_bookable: true,
+                notes: None,
+            },
+            &[],
+        )
         .expect("room")
         .id;
     // A room with neither optional reference is a normal state, not an incomplete one.
     workspace
         .structure()
         .expect("open")
-        .create_room(&RoomInput {
-            campus_id: campus,
-            building_id: None,
-            room_type_id: None,
-            name: "Hall".to_owned(),
-            code: "HALL".to_owned(),
-            capacity: 200,
-            is_bookable: false,
-            notes: Some("Assembly only".to_owned()),
-        })
+        .create_room(
+            &RoomInput {
+                campus_id: campus,
+                building_id: None,
+                room_type_id: None,
+                name: "Hall".to_owned(),
+                code: "HALL".to_owned(),
+                capacity: 200,
+                is_bookable: false,
+                notes: Some("Assembly only".to_owned()),
+            },
+            &[],
+        )
         .expect("unclassified room");
 
     // ------------------------------------------------------- 4. resources

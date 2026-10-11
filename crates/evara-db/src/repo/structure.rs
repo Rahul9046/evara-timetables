@@ -642,7 +642,8 @@ impl Structure<'_> {
                 return Err(DbError::Invalid {
                     message: format!(
                         "{rooms} {plural} still in {name} on {campus}. Move them to another \
-                         building, or clear their building, before removing this campus."
+                         building, clear their building, or stop sharing them with \
+                         {campus}, before removing this campus."
                     ),
                 });
             }
@@ -750,14 +751,25 @@ fn associated_campuses(tx: &Transaction<'_>, building_id: Uuid) -> Result<Vec<Uu
         .collect()
 }
 
-/// How many rooms on one campus are in one building.
+/// How many rooms available to one campus are in one building.
+///
+/// "Available to", not "homed on": since V6 a room may serve a campus it was not created
+/// on, and such a room depends on the building share just as much as a local one does.
+/// Counting only `room.campus_id` here would let a building be withdrawn from a campus
+/// that is still listing shared rooms inside it — the invalid state ADR 0014 calls out,
+/// reached from the building side.
+///
+/// `room_campus` contains the home campus too, so this subsumes the V5 check rather than
+/// sitting beside it.
 fn rooms_in_building_on_campus(
     tx: &Transaction<'_>,
     building_id: Uuid,
     campus_id: Uuid,
 ) -> Result<i64> {
     Ok(tx.query_row(
-        "SELECT COUNT(*) FROM room WHERE building_id = ? AND campus_id = ?",
+        "SELECT COUNT(*) FROM room r
+         JOIN room_campus rc ON rc.room_id = r.id
+         WHERE r.building_id = ? AND rc.campus_id = ?",
         [text(building_id), text(campus_id)],
         |row| row.get(0),
     )?)
@@ -967,16 +979,65 @@ fn detach_rooms(tx: &rusqlite::Transaction<'_>, column: &str, id: Uuid) -> Resul
 const ROOM_COLUMNS: &str = "id, campus_id, building_id, room_type_id, name, code, capacity, \
                             is_bookable, notes, created_at, updated_at, rev";
 
+/// The same columns, qualified, for the joins through `room_campus`.
+const ROOM_COLUMNS_QUALIFIED: &str = "r.id, r.campus_id, r.building_id, r.room_type_id, r.name, r.code, r.capacity, \
+     r.is_bookable, r.notes, r.created_at, r.updated_at, r.rev";
+
+/// A room together with every campus it serves.
+///
+/// Returned by [`Structure::rooms`] rather than a bare [`Room`] so a listing can mark a
+/// shared room without a follow-up question per row.
+///
+/// `campus_ids` comes from `room_campus` and is complete: it includes `room.campus_id`,
+/// the home campus. Nothing reads that column to answer "which campuses?" — see
+/// [ADR 0014](../../../docs/adr/0014-rooms-shared-across-campuses.md).
+///
+/// The room inside is **one** room. Two campuses listing it are listing the same
+/// `room.id`, which is what makes its occupancy a single fact rather than one per campus.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct RoomWithCampuses {
+    /// The room itself. Its identity is unaffected by sharing.
+    pub room: Room,
+    /// Every campus this room serves, by campus name. Never empty.
+    pub campus_ids: Vec<Uuid>,
+}
+
 impl Structure<'_> {
-    /// Creates a room.
+    /// Creates a room on its home campus, optionally shared with others.
+    ///
+    /// One transaction: the room, its home association, and one association per entry in
+    /// `shared_with`. A partially shared room is never persisted, so a user cannot end up
+    /// with a room that exists but is missing half the campuses they asked for.
+    ///
+    /// Duplicates within `shared_with`, and the home campus appearing there, are ignored
+    /// rather than rejected — the caller is a multi-select, and "you picked the campus you
+    /// are already on" is not a mistake worth a round trip.
     ///
     /// # Errors
     ///
-    /// [`DbError::DuplicateValue`] if the code is taken on that campus, or
-    /// [`DbError::Invalid`] if the building named is on a different campus.
-    pub fn create_room(&mut self, input: &RoomInput) -> Result<Room> {
+    /// - [`DbError::DuplicateValue`] if the code is taken on the home campus or on any
+    ///   campus it is being shared to.
+    /// - [`DbError::NotFound`] if a named campus does not exist.
+    /// - [`DbError::Invalid`] if the building named is not available to the home campus or
+    ///   to one of the campuses it is being shared to.
+    pub fn create_room(&mut self, input: &RoomInput, shared_with: &[Uuid]) -> Result<Room> {
         let stamp = Stamp::new();
+        let extra = others(shared_with, input.campus_id);
+
         self.db.write(|tx| {
+            require_campus(tx, input.campus_id)?;
+            for campus_id in &extra {
+                require_campus(tx, *campus_id)?;
+                require_room_code_free(tx, *campus_id, &input.code, None)?;
+                // Checked before the room exists, so the message can name the building
+                // the caller asked for rather than reading it back off the row.
+                if let Some(building_id) = input.building_id {
+                    require_building_available(tx, building_id, *campus_id, &input.name)?;
+                }
+            }
+
             tx.execute(
                 "INSERT INTO room (id, campus_id, building_id, room_type_id, name, code,
                                    capacity, is_bookable, notes, created_at, updated_at, rev)
@@ -997,6 +1058,14 @@ impl Structure<'_> {
                 ],
             )
             .map_err(room_error)?;
+
+            // The home campus is an association like any other. Writing it here rather
+            // than leaving `room.campus_id` to imply it is what lets every later query
+            // read one table and get the whole answer.
+            associate_room(tx, stamp.id, input.campus_id)?;
+            for campus_id in &extra {
+                associate_room(tx, stamp.id, *campus_id)?;
+            }
             Ok(())
         })?;
         self.room(stamp.id)?
@@ -1017,30 +1086,113 @@ impl Structure<'_> {
         })
     }
 
-    /// Rooms on one campus, by name.
+    /// Rooms available to one campus, by name, each with every campus it serves.
+    ///
+    /// "Available to" rather than "on": a room shared with this campus appears here, as
+    /// the same row with the same identifier it has on its home campus. That is what
+    /// makes one room show up in several campus listings without being duplicated — and
+    /// what will make its occupancy one fact rather than one per campus when scheduling
+    /// arrives.
+    ///
+    /// Two queries rather than one per row — the second reads the associations of every
+    /// room in the result in a single pass.
     ///
     /// # Errors
     ///
-    /// Propagates any database failure.
-    pub fn rooms(&self, campus_id: Uuid) -> Result<Vec<Room>> {
+    /// Propagates any database failure, or [`DbError::CorruptIdentifier`] for an
+    /// unreadable stored identifier.
+    pub fn rooms(&self, campus_id: Uuid) -> Result<Vec<RoomWithCampuses>> {
         self.db.read(|conn| {
             let mut stmt = conn.prepare(&format!(
-                "SELECT {ROOM_COLUMNS} FROM room WHERE campus_id = ? ORDER BY name, id"
+                "SELECT {ROOM_COLUMNS_QUALIFIED} FROM room r
+                 JOIN room_campus rc ON rc.room_id = r.id
+                 WHERE rc.campus_id = ?
+                 ORDER BY r.name, r.id"
             ))?;
-            let rows = stmt.query_map([text(campus_id)], Room::from_row)?;
-            rows.collect::<rusqlite::Result<Vec<_>>>()
-                .map_err(DbError::from)
+            let rooms = stmt
+                .query_map([text(campus_id)], Room::from_row)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            drop(stmt);
+
+            // Ordered by campus name so what the user reads never varies, and by room
+            // first so the grouping below is a single pass.
+            let mut stmt = conn.prepare(
+                "SELECT rc.room_id, rc.campus_id
+                 FROM room_campus rc
+                 JOIN campus c ON c.id = rc.campus_id
+                 WHERE rc.room_id IN (
+                     SELECT room_id FROM room_campus WHERE campus_id = ?
+                 )
+                 ORDER BY rc.room_id, c.name, c.id",
+            )?;
+            let pairs = stmt
+                .query_map([text(campus_id)], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            drop(stmt);
+
+            let mut shares: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+            for (room_id, campus) in pairs {
+                let room_id = parse_id_text("room_campus.room_id", &room_id)?;
+                let campus = parse_id_text("room_campus.campus_id", &campus)?;
+                shares.entry(room_id).or_default().push(campus);
+            }
+
+            Ok(rooms
+                .into_iter()
+                .map(|room| {
+                    let campus_ids = shares.remove(&room.id).unwrap_or_default();
+                    RoomWithCampuses { room, campus_ids }
+                })
+                .collect())
         })
     }
 
-    /// Replaces a room's details. Its campus never changes.
+    /// Every campus one room serves, by campus name.
+    ///
+    /// # Errors
+    ///
+    /// Propagates any database failure, or [`DbError::CorruptIdentifier`].
+    pub fn room_campuses(&self, room_id: Uuid) -> Result<Vec<Uuid>> {
+        self.db.read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT rc.campus_id FROM room_campus rc
+                 JOIN campus c ON c.id = rc.campus_id
+                 WHERE rc.room_id = ? ORDER BY c.name, c.id",
+            )?;
+            let raw = stmt
+                .query_map([text(room_id)], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            raw.iter()
+                .map(|value| parse_id_text("room_campus.campus_id", value))
+                .collect()
+        })
+    }
+
+    /// Replaces a room's details. Its home campus never changes.
+    ///
+    /// The code must be free on every campus the room serves, not only its home one:
+    /// `UNIQUE (campus_id, code)` can see only the home campus, and a code that collided
+    /// on a shared campus would put two identically coded rooms in one listing.
+    ///
+    /// A change of building must hold for every campus the room serves too. Both are
+    /// checked here, before the write, so the message can name the campus and the
+    /// building; the schema's triggers are the backstop for a write that bypasses this.
     ///
     /// # Errors
     ///
     /// [`DbError::NotFound`], [`DbError::DuplicateValue`], or [`DbError::Invalid`] if the
-    /// building is on another campus.
+    /// building is not available to a campus the room serves.
     pub fn update_room(&mut self, id: Uuid, input: &RoomInput) -> Result<Room> {
         self.db.write(|tx| {
+            for campus_id in room_campuses_in(tx, id)? {
+                require_room_code_free(tx, campus_id, &input.code, Some(id))?;
+                if let Some(building_id) = input.building_id {
+                    require_building_available(tx, building_id, campus_id, &input.name)?;
+                }
+            }
+
             let building = opt_text(input.building_id);
             let room_type = opt_text(input.room_type_id);
             update(
@@ -1064,14 +1216,245 @@ impl Structure<'_> {
         self.room(id)?.ok_or(DbError::NotFound { entity: "room" })
     }
 
+    /// Shares an existing room with another campus.
+    ///
+    /// # Errors
+    ///
+    /// - [`DbError::NotFound`] if the room or the campus does not exist.
+    /// - [`DbError::Invalid`] if that campus already has it. Associating a campus twice is
+    ///   refused rather than quietly ignored: reaching this point means the interface's
+    ///   idea of the share set is stale, and it should re-read rather than believe a
+    ///   success it did not cause.
+    /// - [`DbError::Invalid`] if the room is in a building that campus does not have.
+    /// - [`DbError::DuplicateValue`] if that campus already has a different room with the
+    ///   same code.
+    pub fn share_room(&mut self, room_id: Uuid, campus_id: Uuid) -> Result<()> {
+        self.db.write(|tx| {
+            let (name, code, building_id) = room_identity(tx, room_id)?;
+            let campus = campus_name(tx, campus_id)?;
+
+            if room_campuses_in(tx, room_id)?.contains(&campus_id) {
+                return Err(DbError::Invalid {
+                    message: format!("{campus} already has this room."),
+                });
+            }
+
+            require_room_code_free(tx, campus_id, &code, Some(room_id))?;
+            if let Some(building_id) = building_id {
+                require_building_available(tx, building_id, campus_id, &name)?;
+            }
+            associate_room(tx, room_id, campus_id)
+        })
+    }
+
+    /// Stops sharing a room with a campus.
+    ///
+    /// Nothing is moved, duplicated or deleted: the room keeps its identity and every
+    /// other campus keeps it. Only this campus stops listing it.
+    ///
+    /// # Errors
+    ///
+    /// - [`DbError::NotFound`] if that campus does not share this room.
+    /// - [`DbError::Invalid`] if it is the room's home campus. Withdrawing that would
+    ///   leave the room with no campus and no screen it appears on.
+    pub fn unshare_room(&mut self, room_id: Uuid, campus_id: Uuid) -> Result<()> {
+        self.db.write(|tx| {
+            let home = room_home_campus(tx, room_id)?;
+            if home == campus_id {
+                let campus = campus_name(tx, campus_id)?;
+                return Err(DbError::Invalid {
+                    message: format!(
+                        "This room was created on {campus}, so {campus} cannot be removed \
+                         from it. Delete the room instead, or remove the other campuses."
+                    ),
+                });
+            }
+
+            let Some(association_id) = room_association(tx, room_id, campus_id)? else {
+                return Err(DbError::NotFound {
+                    entity: "room share",
+                });
+            };
+
+            // Nothing depends on a room-campus association yet. When activities arrive
+            // they will: an activity scheduled into this room on behalf of a group on
+            // this campus is exactly the dependency that has to block a withdrawal here,
+            // the way rooms block `unshare_building`. Recorded in ADR 0014 rather than
+            // guessed at now, because the shape of that reference is a later phase's.
+            delete(tx, "room", "room_campus", association_id)
+        })
+    }
+
     /// Deletes a room.
+    ///
+    /// Its campus associations are removed explicitly through [`super::delete`], one
+    /// change-log entry each, rather than by a `CASCADE` SQLite would apply without
+    /// firing the trigger.
     ///
     /// # Errors
     ///
     /// [`DbError::NotFound`] if there is no such room.
     pub fn delete_room(&mut self, id: Uuid) -> Result<()> {
-        self.db.write(|tx| delete(tx, "room", "room", id))
+        self.db.write(|tx| {
+            for association_id in room_associations_of(tx, id)? {
+                delete(tx, "room", "room_campus", association_id)?;
+            }
+            delete(tx, "room", "room", id)
+        })
     }
+}
+
+/// Writes one room-campus association row.
+fn associate_room(tx: &Transaction<'_>, room_id: Uuid, campus_id: Uuid) -> Result<()> {
+    let stamp = Stamp::new();
+    tx.execute(
+        "INSERT INTO room_campus (id, room_id, campus_id, created_at, updated_at, rev)
+         VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            text(stamp.id),
+            text(room_id),
+            text(campus_id),
+            &stamp.created_at,
+            &stamp.updated_at,
+            stamp.rev,
+        ),
+    )
+    .map_err(room_error)?;
+    Ok(())
+}
+
+/// Identifier of one association, or `None` when that campus does not share the room.
+fn room_association(tx: &Transaction<'_>, room_id: Uuid, campus_id: Uuid) -> Result<Option<Uuid>> {
+    let found: Option<String> = tx
+        .query_row(
+            "SELECT id FROM room_campus WHERE room_id = ? AND campus_id = ?",
+            [text(room_id), text(campus_id)],
+            |row| row.get(0),
+        )
+        .optional()?;
+    found
+        .as_deref()
+        .map(|value| parse_id_text("room_campus.id", value))
+        .transpose()
+}
+
+/// Identifiers of every association of one room.
+fn room_associations_of(tx: &Transaction<'_>, room_id: Uuid) -> Result<Vec<Uuid>> {
+    let mut stmt = tx.prepare("SELECT id FROM room_campus WHERE room_id = ? ORDER BY id")?;
+    let raw = stmt
+        .query_map([text(room_id)], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(stmt);
+    raw.iter()
+        .map(|value| parse_id_text("room_campus.id", value))
+        .collect()
+}
+
+/// Every campus one room serves, inside a transaction.
+fn room_campuses_in(tx: &Transaction<'_>, room_id: Uuid) -> Result<Vec<Uuid>> {
+    let mut stmt =
+        tx.prepare("SELECT campus_id FROM room_campus WHERE room_id = ? ORDER BY campus_id")?;
+    let raw = stmt
+        .query_map([text(room_id)], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(stmt);
+    raw.iter()
+        .map(|value| parse_id_text("room_campus.campus_id", value))
+        .collect()
+}
+
+/// The room's name, code and building, or [`DbError::NotFound`].
+fn room_identity(tx: &Transaction<'_>, room_id: Uuid) -> Result<(String, String, Option<Uuid>)> {
+    let found: Option<(String, String, Option<String>)> = tx
+        .query_row(
+            "SELECT name, code, building_id FROM room WHERE id = ?",
+            [text(room_id)],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?;
+    let (name, code, building) = found.ok_or(DbError::NotFound { entity: "room" })?;
+    let building = building
+        .as_deref()
+        .map(|value| parse_id_text("room.building_id", value))
+        .transpose()?;
+    Ok((name, code, building))
+}
+
+/// The room's home campus, or [`DbError::NotFound`].
+fn room_home_campus(tx: &Transaction<'_>, room_id: Uuid) -> Result<Uuid> {
+    let raw: Option<String> = tx
+        .query_row(
+            "SELECT campus_id FROM room WHERE id = ?",
+            [text(room_id)],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let raw = raw.ok_or(DbError::NotFound { entity: "room" })?;
+    parse_id_text("room.campus_id", &raw)
+}
+
+/// Refuses a code already used by a *different* room available to that campus.
+///
+/// `UNIQUE (campus_id, code)` scopes only a room's home campus, so it cannot see this
+/// case. The rule needs the other rows, which puts it here in Rust rather than in the
+/// frontend's validators.
+fn require_room_code_free(
+    tx: &Transaction<'_>,
+    campus_id: Uuid,
+    code: &str,
+    except: Option<Uuid>,
+) -> Result<()> {
+    let taken: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM room r
+         JOIN room_campus rc ON rc.room_id = r.id
+         WHERE rc.campus_id = ? AND r.code = ? AND r.id <> ?",
+        [
+            text(campus_id),
+            code.to_owned(),
+            except.map(text).unwrap_or_default(),
+        ],
+        |row| row.get(0),
+    )?;
+
+    if taken > 0 {
+        return Err(DbError::DuplicateValue {
+            entity: "room",
+            field: "code",
+        });
+    }
+    Ok(())
+}
+
+/// Refuses a room-campus pairing whose building does not reach that campus.
+///
+/// A shared building does not imply shared rooms and a shared room does not imply a
+/// shared building; this is the one point where the two settings have to agree. The
+/// schema's triggers enforce the same rule, but with one fixed message for every route
+/// into it. This runs first so the user is told which building and which campus, and what
+/// to do about it.
+fn require_building_available(
+    tx: &Transaction<'_>,
+    building_id: Uuid,
+    campus_id: Uuid,
+    room_name: &str,
+) -> Result<()> {
+    let available: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM building_campus WHERE building_id = ? AND campus_id = ?",
+        [text(building_id), text(campus_id)],
+        |row| row.get(0),
+    )?;
+    if available > 0 {
+        return Ok(());
+    }
+
+    let building = building_name(tx, building_id)?;
+    let campus = campus_name(tx, campus_id)?;
+    Err(DbError::Invalid {
+        message: format!(
+            "{room_name} is in {building}, which {campus} does not have. Share {building} \
+             with {campus} first, or clear the room's building."
+        ),
+    })
 }
 
 /// The cross-campus rule is enforced by a trigger, which surfaces as a generic SQLite

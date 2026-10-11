@@ -57,11 +57,29 @@ Status: `M1` = Milestone 1, `M2+` = later, `R` = schema reserved only.
 | --- | --- | --- | --- |
 | `teacher-clash` | HARD | A teacher may not be in two activities in one timeslot. `CORE-001` | M1 |
 | `student-clash` | HARD | A student group (resolved to leaf student sets) may not attend two activities in one timeslot. `CORE-002` | M1 |
-| `room-clash` | HARD | A room may not host two activities in one timeslot. `CORE-003` | M1 |
+| `room-clash` | HARD | A room may not host two activities in one timeslot. Evaluated **per `room_id`, project-wide** — see the note below. `CORE-003` | M1 |
 | `resource-clash` | HARD | Demand for a shared resource may not exceed its quantity in a timeslot. | M1 |
 | `room-capacity` | HARD | Room capacity ≥ activity's required capacity. `CORE-005` | M1 |
 | `room-type-required` | HARD | Assigned room must match the required room type. `CORE-006` | M1 |
 | `room-candidate-only` | HARD | If `activity_room_candidate` rows exist, the room must be one of them. | M1 |
+
+> **Shared rooms: occupancy is global.** Since `V6` a room may serve several campuses
+> ([ADR 0014](adr/0014-rooms-shared-across-campuses.md)). It remains **one room with one
+> `room.id`** — that is the entire point of the association table — so every room-scoped
+> rule here keys on `room_id` and nothing else. `room-clash` in particular must never be
+> evaluated per campus or with a campus term in its key: if Campus A has booked a shared
+> hall, Campus B cannot book it, and a per-campus evaluation would let both succeed and
+> produce a timetable that double-books a physical space while reporting no violation.
+>
+> **This is not yet implementable for the cross-campus case, and must not be guessed.**
+> `period_structure` is school-wide and no campus is tied to one, so two campuses can
+> timetable against different bell schedules whose periods share ordinals and differ in
+> wall-clock time. A timeslot's identity is `(term_id, cycle_day_id, period_id)` with no
+> campus in it ([ADR 0011](adr/0011-stable-timeslot-identity.md)), so comparing
+> `timeslot_id` is *not* the same as comparing time. The obvious implementation is wrong
+> exactly when sharing matters, and wrong silently. **D22** in
+> [OPEN-DECISIONS.md](OPEN-DECISIONS.md) must be settled before `room-clash` is
+> implemented for rooms shared between campuses on different bell schedules.
 
 ### Availability and time windows
 
