@@ -183,12 +183,26 @@ export function problems(entries: Array<[string, string | null]>): Problems {
 
 // ------------------------------------------------------------------ per-form validators
 
-/** The school record. */
+/**
+ * The school record.
+ *
+ * `workingDays` is here for the same reason every other check in this file is: so the user
+ * is told immediately rather than after a round trip. It restates a `CHECK` the schema
+ * also enforces — `working_days BETWEEN 1 AND 127`, where the lower bound *is* "at least
+ * one day" — so a disagreement is impossible to act on wrongly, and the backend remains
+ * the authority.
+ */
 export function validateSchool(draft: Draft): Problems {
   return problems([
     ["name", required(text(draft, "name"), "School name")],
     ["timezone", required(text(draft, "timezone"), "Time zone")],
     ["locale", required(text(draft, "locale"), "Locale")],
+    [
+      "workingDays",
+      list(draft, "workingDays").length === 0
+        ? "Choose at least one working day."
+        : null,
+    ],
   ]);
 }
 
@@ -271,12 +285,16 @@ function withDateOrder(found: Problems, draft: Draft): Problems {
  *
  * `dayCount` is the declared length and may exceed the number of days that exist — that
  * is a legal intermediate state, reported by the coverage panel rather than refused here.
+ *
+ * `weekCount` is deliberately absent. The form no longer asks for it, so there is no
+ * input to attach a message to and nothing a user could do about one. The value a save
+ * sends is supplied by `CyclesAndCycleDays.weekCountFor`, which cannot produce an invalid
+ * one; the column's `CHECK (week_count >= 1)` remains the authority either way.
  */
 export function validateCycle(draft: Draft): Problems {
   return problems([
     ["name", required(text(draft, "name"), "Cycle name")],
     ["dayCount", wholeNumber(text(draft, "dayCount"), "Days in the cycle", { min: 1 })],
-    ["weekCount", wholeNumber(text(draft, "weekCount"), "Weeks spanned", { min: 1 })],
   ]);
 }
 

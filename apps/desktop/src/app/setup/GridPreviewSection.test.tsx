@@ -28,6 +28,9 @@ const SCHOOL = {
   name: "Northgate Secondary",
   timezone: "Europe/London",
   locale: "en-GB",
+  // An ordinary working week. Note that the cycle below is a six-day rotation: the two
+  // numbers are unrelated, and this screen reads neither of them.
+  workingDays: [1, 2, 3, 4, 5],
   createdAt: "2027-01-01T00:00:00.000Z",
   updatedAt: "2027-01-01T00:00:00.000Z",
   rev: 1,

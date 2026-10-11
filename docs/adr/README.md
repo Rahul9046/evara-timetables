@@ -20,6 +20,7 @@ tempted to undo it without knowing why.
 | [0012](0012-records-are-the-ipc-contract.md) | Repository records are the IPC contract; no parallel DTO layer | Accepted |
 | [0013](0013-buildings-shared-across-campuses.md) | A building may serve many campuses; `building_campus` is the association set | Accepted |
 | [0014](0014-rooms-shared-across-campuses.md) | A room may serve many campuses; one identity, so occupancy is global | Accepted |
+| [0015](0015-school-working-days.md) | School working days are a calendar default, stored as a seven-bit set; `cycle.week_count` retired from the UI only | Accepted |
 
 Statuses: **Proposed** (awaiting a decision), **Accepted**, **Superseded by NNNN**,
 **Deprecated**. Accepted records are not edited to reflect a change of mind — a new

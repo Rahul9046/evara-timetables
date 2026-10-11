@@ -69,8 +69,8 @@ pub use crate::repo::structure::{
 pub use crate::repo::time_model::{
     CalendarDay, CalendarDayInput, CalendarDayKind, Cycle, CycleDay, CycleDayInput, CycleInput,
     GridCell, GridPreview, MaterialisationCounts, MaterialisationPlan, MaterialisationRequest,
-    Period, PeriodInput, PeriodKind, PeriodStructure, PeriodStructureInput, PlanFingerprint,
-    PlannedSlot, TimeModel, Timeslot, TimeslotInput,
+    NonWorkingInstructionalDay, Period, PeriodInput, PeriodKind, PeriodStructure,
+    PeriodStructureInput, PlanFingerprint, PlannedSlot, TimeModel, Timeslot, TimeslotInput,
 };
 pub use crate::settings::{MAX_RECENT_PROJECTS, RecentProject, Settings};
 pub use crate::workspace::{PROJECT_EXTENSION, ProjectSummary, Workspace};
@@ -337,3 +337,6 @@ mod tests_setup;
 
 #[cfg(test)]
 mod tests_walkthrough;
+
+#[cfg(test)]
+mod tests_working_days;

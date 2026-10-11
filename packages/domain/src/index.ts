@@ -44,6 +44,7 @@ export type {
   MaterialisationCounts,
   MaterialisationPlan,
   MaterialisationRequest,
+  NonWorkingInstructionalDay,
   Period,
   PeriodInput,
   PeriodKind,

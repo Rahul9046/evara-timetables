@@ -13,7 +13,14 @@ import { createSchool, describeSetupError, getSchool, updateSchool } from "../..
 import { withExistingValue } from "../ui/Combobox";
 import { EntityForm, type FieldSpec } from "../ui/Field";
 import { Banner, EmptyState, Facts, Loading } from "../ui/Shell";
-import { isValid, text, validateSchool, type Draft, type Problems } from "../validation";
+import {
+  isValid,
+  list,
+  text,
+  validateSchool,
+  type Draft,
+  type Problems,
+} from "../validation";
 import { currentLocale, localeLabel, localeOptions } from "./locales";
 import {
   canonicalTimezone,
@@ -24,6 +31,12 @@ import {
   timezoneOptions,
 } from "./timezones";
 import { useValue } from "./useList";
+import {
+  MONDAY_TO_FRIDAY,
+  describeWeek,
+  toWeekdayNumbers,
+  toWeekdayValues,
+} from "./weekdays";
 
 /**
  * How a stored timezone that the list does not offer is described.
@@ -85,6 +98,13 @@ function fieldsFor(school: School | null): readonly FieldSpec[] {
       choices: withExistingValue(localeOptions(), school?.locale, existingLocale),
       hint: "A BCP-47 tag, used for formatting dates and numbers in reports. Independent of the time zone.",
     },
+    {
+      kind: "weekdays",
+      key: "workingDays",
+      label: "School working days",
+      required: true,
+      hint: "The weekdays this school normally teaches on. This is the school's calendar week — it does not set the cycle's length, and it does not decide which cycle day a date is. A six-day rotation across a five-day week is perfectly ordinary, and dates are still mapped one at a time in Calendar Mapping.",
+    },
   ];
 }
 
@@ -95,6 +115,11 @@ function draftOf(school: School | null): Draft {
     // existing school keeps exactly what it was saved with; see fieldsFor.
     timezone: school?.timezone ?? currentTimezone(),
     locale: school?.locale ?? currentLocale(),
+    // Monday to Friday for a new school, and whatever is stored for an existing one. A
+    // project upgraded from a schema without the column already reads as Monday to
+    // Friday, so there is no second default to keep in step here — the migration's
+    // `DEFAULT 31` is the one that matters.
+    workingDays: toWeekdayValues(school?.workingDays ?? MONDAY_TO_FRIDAY),
   };
 }
 
@@ -128,6 +153,7 @@ export function SchoolDetails(props: { onChanged: () => void }) {
       name: text(draft, "name"),
       timezone: text(draft, "timezone"),
       locale: text(draft, "locale"),
+      workingDays: toWeekdayNumbers(list(draft, "workingDays")),
     };
 
     setBusy(true);
@@ -184,8 +210,8 @@ export function SchoolDetails(props: { onChanged: () => void }) {
           title="Start here"
           action={{ label: "Describe the school", onClick: () => open(null) }}
         >
-          Nothing has been set up in this project yet. Give the school a name, a time zone
-          and a locale, and the rest of the setup sections will open up.
+          Nothing has been set up in this project yet. Give the school a name, a time zone,
+          a locale and its working days, and the rest of the setup sections will open up.
         </EmptyState>
       ) : (
         <>
@@ -196,6 +222,7 @@ export function SchoolDetails(props: { onChanged: () => void }) {
               // because the identifier is what is actually stored.
               ["Time zone", timezoneLabel(school.timezone)],
               ["Locale", localeLabel(school.locale)],
+              ["Working days", describeWeek(school.workingDays)],
               ["Revision", String(school.rev)],
               ["Last changed", school.updatedAt],
             ]}

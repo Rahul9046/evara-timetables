@@ -21,6 +21,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use evara_core::calendar::WorkingDays;
 use rusqlite::types::ToSql;
 use rusqlite::{OptionalExtension, Transaction};
 use uuid::Uuid;
@@ -57,6 +58,14 @@ entity! {
         timezone: String,
         /// BCP-47 locale, e.g. `en-GB`.
         locale: String,
+        /// Which weekdays the school normally teaches on. Never empty.
+        ///
+        /// Stored as a seven-bit set and carried over IPC as ascending ISO weekday
+        /// numbers, `[1, 2, 3, 4, 5]` for Monday to Friday. A *calendar* default and an
+        /// advisory, never a scheduling identity: nothing derives a cycle day from it and
+        /// nothing infers it from `cycle.day_count`. See
+        /// [`evara_core::calendar::WorkingDays`].
+        working_days: WorkingDays,
     }
 }
 
@@ -187,7 +196,8 @@ entity! {
 
 // ---------------------------------------------------------------------------- school
 
-const SCHOOL_COLUMNS: &str = "id, name, timezone, locale, created_at, updated_at, rev";
+const SCHOOL_COLUMNS: &str =
+    "id, name, timezone, locale, working_days, created_at, updated_at, rev";
 
 impl Structure<'_> {
     /// Creates the school record.
@@ -200,13 +210,18 @@ impl Structure<'_> {
         let stamp = Stamp::new();
         self.db.write(|tx| {
             tx.execute(
-                "INSERT INTO school (id, name, timezone, locale, created_at, updated_at, rev)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO school
+                     (id, name, timezone, locale, working_days, created_at, updated_at, rev)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     text(stamp.id),
                     &input.name,
                     &input.timezone,
                     &input.locale,
+                    // Bits on the way in, the newtype everywhere else. The column's
+                    // CHECK refuses an empty week, so this cannot write one even if a
+                    // caller somehow built one.
+                    input.working_days.bits(),
                     &stamp.created_at,
                     &stamp.updated_at,
                     stamp.rev,
@@ -221,6 +236,7 @@ impl Structure<'_> {
             name: input.name.clone(),
             timezone: input.timezone.clone(),
             locale: input.locale.clone(),
+            working_days: input.working_days,
             created_at: stamp.created_at,
             updated_at: stamp.updated_at,
             rev: stamp.rev,
@@ -252,8 +268,13 @@ impl Structure<'_> {
                 "school",
                 "school",
                 id,
-                "name = ?, timezone = ?, locale = ?",
-                &[&input.name, &input.timezone, &input.locale],
+                "name = ?, timezone = ?, locale = ?, working_days = ?",
+                &[
+                    &input.name,
+                    &input.timezone,
+                    &input.locale,
+                    &input.working_days.bits(),
+                ],
             )
         })?;
         self.require_school(id)

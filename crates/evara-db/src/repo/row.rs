@@ -8,6 +8,7 @@
 //! `Row` mapping — pure boilerplate with no decisions in it. Every query, every constraint
 //! and every deletion rule is still written out by hand in the repository.
 
+use evara_core::calendar::WorkingDays;
 use rusqlite::Row;
 use uuid::Uuid;
 
@@ -44,6 +45,34 @@ impl FromColumn for Option<Uuid> {
             Some(raw) => parse_id(row, index, &raw).map(Some),
             None => Ok(None),
         }
+    }
+}
+
+/// Decodes the seven-bit working week stored in one INTEGER.
+///
+/// The bit layout is a storage decision, so this is the only place in the codebase that
+/// knows the column holds bits at all: above here it is
+/// [`WorkingDays`](evara_core::calendar::WorkingDays), and across IPC it is a list of
+/// weekday numbers.
+///
+/// A value the schema's `CHECK (working_days BETWEEN 1 AND 127)` should have refused is
+/// corruption, and is reported as such rather than replaced with a plausible week. Same
+/// rule as [`parse_id`], and for the same reason: an invented default makes a damaged file
+/// look like a working one. A school that silently claims to teach Monday to Friday when
+/// its file says otherwise is worse than a school that refuses to open.
+impl FromColumn for WorkingDays {
+    fn read(row: &Row<'_>, index: usize) -> rusqlite::Result<Self> {
+        let bits: i64 = row.get(index)?;
+        Self::from_bits(bits).map_err(|_| {
+            rusqlite::Error::FromSqlConversionFailure(
+                index,
+                rusqlite::types::Type::Integer,
+                Box::new(CorruptId {
+                    column: column_name(row, index),
+                    value: bits.to_string(),
+                }),
+            )
+        })
     }
 }
 

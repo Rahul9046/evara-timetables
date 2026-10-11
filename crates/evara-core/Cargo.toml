@@ -24,3 +24,8 @@ uuid = { workspace = true }
 time = { workspace = true }
 thiserror = { workspace = true }
 ts-rs = { workspace = true, optional = true }
+
+[dev-dependencies]
+# Only the tests need it: this crate's own serde impls are hand-written, and asserting the
+# wire format is the point of testing them.
+serde_json = { workspace = true }

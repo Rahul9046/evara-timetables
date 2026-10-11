@@ -35,6 +35,7 @@ function school(overrides: Partial<School> = {}): School {
     name: "Northgate Secondary",
     timezone: "Europe/London",
     locale: "en-GB",
+    workingDays: [1, 2, 3, 4, 5],
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-02T00:00:00.000Z",
     rev: 3,
@@ -174,6 +175,7 @@ describe("reopening an existing project", () => {
       name: "Northgate Secondary",
       timezone: "Europe/London",
       locale: "en-GB",
+      workingDays: [1, 2, 3, 4, 5],
     });
   });
 

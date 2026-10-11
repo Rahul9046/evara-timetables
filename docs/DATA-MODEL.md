@@ -256,7 +256,13 @@ to a campus that already has one of that name or code — needs the other rows, 
 repository rules in `evara-db` rather than schema constraints.
 
 ```sql
-school (id, name, timezone, locale, created_at, updated_at, rev)
+-- working_days is a seven-bit set: bit 0 Monday through bit 6 Sunday, so 31 is
+-- Monday-to-Friday and CHECK (BETWEEN 1 AND 127) is what makes "at least one working
+-- day" a schema invariant. A CALENDAR default and an advisory only: nothing derives a
+-- cycle day from it, nothing infers it from cycle.day_count, and an explicit calendar_day
+-- row always outranks it. Carried over IPC as [1,2,3,4,5]. ADR 0015.
+school (id, name, timezone, locale, working_days INTEGER DEFAULT 31,
+        created_at, updated_at, rev)
 
 campus (id, school_id -> school, name, code, address, UNIQUE(school_id, code))
 campus_travel (from_campus_id, to_campus_id, minutes, PRIMARY KEY(from, to))
@@ -300,6 +306,8 @@ term (id, academic_year_id -> academic_year, name, ordinal, starts_on, ends_on)
 -- day_count is the *declared* length: the materialiser uses the cycle_day rows that
 -- actually exist, and the repository refuses an ordinal beyond it (ADR 0011 Q4).
 cycle (id, school_id, name, day_count INTEGER, week_count INTEGER DEFAULT 1, is_default,
+       -- week_count is no longer collected by the interface (ADR 0015). The column
+       -- stays; existing values are preserved on edit.
        UNIQUE(school_id, name))
 cycle_day (id, cycle_id -> cycle, ordinal INTEGER, label,
            weekday_hint INTEGER NULL,          -- 1..7, display only, never logic

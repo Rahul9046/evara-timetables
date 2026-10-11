@@ -20,6 +20,8 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use uuid::Uuid;
 
+use evara_core::calendar::WorkingDays;
+
 use crate::repo::structure::{BuildingInput, CampusInput, RoomInput, SchoolInput};
 use crate::workspace::Workspace;
 use crate::{Database, DbError, PROJECT_EXTENSION};
@@ -61,6 +63,7 @@ impl Project {
                 name: "Northgate Secondary".to_owned(),
                 timezone: "Europe/London".to_owned(),
                 locale: "en-GB".to_owned(),
+                working_days: WorkingDays::MONDAY_TO_FRIDAY,
             })
             .expect("create school");
 

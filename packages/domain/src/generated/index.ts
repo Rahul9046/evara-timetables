@@ -25,6 +25,7 @@ export type { GridPreview } from "./GridPreview";
 export type { MaterialisationCounts } from "./MaterialisationCounts";
 export type { MaterialisationPlan } from "./MaterialisationPlan";
 export type { MaterialisationRequest } from "./MaterialisationRequest";
+export type { NonWorkingInstructionalDay } from "./NonWorkingInstructionalDay";
 export type { Period } from "./Period";
 export type { PeriodInput } from "./PeriodInput";
 export type { PeriodKind } from "./PeriodKind";

@@ -813,6 +813,98 @@ button:focus-visible,
   color: var(--text-faint);
 }
 
+/* ---- weekday picker ----------------------------------------------------- */
+
+/* Seven toggles read as one control, so the field spans the grid rather than being
+   squeezed into one 230px column beside a text box. */
+.field--wide {
+  grid-column: 1 / -1;
+}
+
+.weekdayGroup {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.weekdayGroup legend {
+  font-size: 12.5px;
+  font-weight: 650;
+  padding: 0;
+  margin-bottom: 5px;
+}
+
+.weekdayRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* The checkbox itself is hidden from sight but not from the accessibility tree or the
+   keyboard: it still receives focus, still toggles on Space, and still announces its
+   checked state. `appearance: none` rather than `display: none`, which would make it
+   unfocusable and turn this into a mouse-only control. */
+.weekdayToggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  margin: 0;
+  pointer-events: none;
+}
+
+.weekdayToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 46px;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text);
+  background: var(--bg);
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--border);
+  cursor: pointer;
+  user-select: none;
+}
+
+.weekdayToggle:hover {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* Focus is drawn on the label, because that is what is visible; the ring has to follow
+   the keyboard rather than the pointer, hence `:focus-visible` on the input inside. */
+.weekdayToggle:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* A selected day is a solid accent fill with no ring; an unselected one is the page
+   background inside a ring. That is a fill-and-outline difference rather than a change of
+   hue alone, and the checkbox underneath carries the state for assistive technology.
+   Nothing here adds generated content: the label is the two-letter abbreviation and
+   nothing else, in both states. See ui/WeekdayPicker.test.tsx. */
+.weekdayToggle:has(input:checked) {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: none;
+}
+
+.weekdayToggle:has(input:disabled) {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.weekdayRow.invalid .weekdayToggle {
+  box-shadow: inset 0 0 0 1px var(--bad);
+}
+
+.weekdayRow.invalid .weekdayToggle:has(input:checked) {
+  box-shadow: none;
+}
+
 /* ---- date field --------------------------------------------------------- */
 
 /* The box and its calendar button are one control, so the border is the wrapper's. The

@@ -23,5 +23,11 @@
 //! whether a repeating cycle is finished. It is here rather than in `evara-db` or the
 //! interface because it is a question about the model, and a scheduling rule in the view
 //! layer is an architecture bug.
+//!
+//! [`calendar::WorkingDays`] joins it: which weekdays a school normally teaches on. The
+//! two modules are deliberately separate, because a cycle position and a weekday are
+//! different kinds of thing and only one of them schedules anything — see the
+//! [`calendar`] header.
 
+pub mod calendar;
 pub mod time;

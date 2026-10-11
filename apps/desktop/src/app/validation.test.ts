@@ -126,8 +126,13 @@ describe("field primitives", () => {
 });
 
 describe("school", () => {
-  it("requires all three fields", () => {
-    expect(Object.keys(validateSchool({}))).toEqual(["name", "timezone", "locale"]);
+  it("requires a name, a time zone, a locale and a working week", () => {
+    expect(Object.keys(validateSchool({}))).toEqual([
+      "name",
+      "timezone",
+      "locale",
+      "workingDays",
+    ]);
   });
 
   it("accepts a complete record", () => {
@@ -137,9 +142,42 @@ describe("school", () => {
           name: "Northgate Secondary",
           timezone: "Europe/London",
           locale: "en-GB",
+          workingDays: ["1", "2", "3", "4", "5"],
         }),
       ),
     ).toBe(true);
+  });
+
+  it("refuses a school that teaches on no day at all", () => {
+    // Restates `working_days BETWEEN 1 AND 127`, whose lower bound is this rule. The
+    // schema is the authority; this exists so the user is told before the round trip.
+    const complete = {
+      name: "Northgate Secondary",
+      timezone: "Europe/London",
+      locale: "en-GB",
+    };
+    expect(validateSchool({ ...complete, workingDays: [] })).toHaveProperty("workingDays");
+    expect(validateSchool({ ...complete })).toHaveProperty("workingDays");
+  });
+
+  it("accepts any combination of working days, however unusual", () => {
+    const complete = {
+      name: "Northgate Secondary",
+      timezone: "Europe/London",
+      locale: "en-GB",
+    };
+    for (const workingDays of [
+      ["1"], // Mondays only
+      ["7", "1", "2", "3", "4"], // Sunday to Thursday
+      ["1", "2", "3", "4", "5", "6"], // six days
+      ["1", "2", "3", "4", "5", "6", "7"], // every day
+      ["6", "7"], // weekends only
+    ]) {
+      expect(
+        isValid(validateSchool({ ...complete, workingDays })),
+        `${workingDays.join(",")} must be accepted`,
+      ).toBe(true);
+    }
   });
 });
 
@@ -221,25 +259,37 @@ describe("academic year and term", () => {
 
 describe("cycle", () => {
   it("accepts a one-day cycle", () => {
-    expect(
-      isValid(validateCycle({ name: "Every day", dayCount: "1", weekCount: "1" })),
-    ).toBe(true);
+    expect(isValid(validateCycle({ name: "Every day", dayCount: "1" }))).toBe(true);
   });
 
   it("accepts a cycle longer than a week", () => {
     // Nothing in the model treats five or seven days as special, so nothing here may.
     for (const dayCount of ["6", "8", "10", "15"]) {
       expect(
-        isValid(validateCycle({ name: "Rotation", dayCount, weekCount: "2" })),
+        isValid(validateCycle({ name: "Rotation", dayCount })),
         `a ${dayCount}-day cycle must be accepted`,
       ).toBe(true);
     }
   });
 
   it("rejects a cycle of zero days", () => {
-    expect(validateCycle({ name: "Nothing", dayCount: "0", weekCount: "1" })).toHaveProperty(
-      "dayCount",
+    expect(validateCycle({ name: "Nothing", dayCount: "0" })).toHaveProperty("dayCount");
+  });
+
+  it("says nothing about weeks spanned, with or without one in the draft", () => {
+    // The form no longer asks, so there is no input to put a message on. A draft that
+    // still carries the value — which an edit does, to send it back unchanged — must not
+    // be validated against a field the user cannot see.
+    expect(isValid(validateCycle({ name: "Rotation", dayCount: "10" }))).toBe(true);
+    expect(validateCycle({ name: "Rotation", dayCount: "10" })).not.toHaveProperty(
+      "weekCount",
     );
+    expect(
+      validateCycle({ name: "Rotation", dayCount: "10", weekCount: "0" }),
+    ).not.toHaveProperty("weekCount");
+    expect(
+      isValid(validateCycle({ name: "Rotation", dayCount: "10", weekCount: "nonsense" })),
+    ).toBe(true);
   });
 });
 
