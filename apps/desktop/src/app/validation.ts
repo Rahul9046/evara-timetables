@@ -31,6 +31,8 @@
  * Pure, so the tests need no DOM and no backend.
  */
 
+import { DATE_FORMAT, isRealDate, readTypedDate } from "./dates";
+
 /** Field-keyed validation messages. Empty means valid. */
 export type Problems = Record<string, string>;
 
@@ -90,26 +92,31 @@ export function wallClock(value: string | null | undefined, label: string): stri
 }
 
 /**
- * A canonical `YYYY-MM-DD` date.
+ * A canonical `YYYY-MM-DD` date — the form a draft holds and the backend is sent.
  *
  * Canonical matters: the column stores `date(date)` and compares as text, so `2027-9-1`
- * would sort and range-query wrongly even though a human reads it the same.
+ * would sort and range-query wrongly even though a human reads it the same. The user
+ * never types this form — the date field shows and accepts `DD/MM/YYYY` and converts —
+ * so a value reaching here uncanonical means the conversion declined it.
+ *
+ * Which is why there are two different complaints rather than one. The field passes text
+ * it could not parse straight through instead of guessing, so this has to tell apart:
+ *
+ * - `31/02/2026` or `2027-02-29`: a date, spelled plainly, naming a day that does not
+ *   exist. Never silently corrected to the 3rd of March or the 1st of March — the user
+ *   is told, because only they know which day they meant.
+ * - anything else: not a date, and the format is what needs saying.
  */
 export function isoDate(value: string | null | undefined, label: string): string | null {
   const text = (value ?? "").trim();
   if (text.length === 0) return `${label} is required.`;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) {
-    return `${label} must be a date like 2027-09-01.`;
-  }
 
-  // Round-tripping through Date catches 2027-02-31, which the pattern cannot.
-  const [year, month, day] = text.split("-").map(Number) as [number, number, number];
-  const parsed = new Date(Date.UTC(year, month - 1, day));
-  const real =
-    parsed.getUTCFullYear() === year &&
-    parsed.getUTCMonth() === month - 1 &&
-    parsed.getUTCDate() === day;
-  return real ? null : `${label} is not a real date.`;
+  const typed = readTypedDate(text);
+  if (typed !== null && !isRealDate(typed)) return `${label} is not a real date.`;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return `${label} must be a date like ${DATE_FORMAT}.`;
+  }
+  return null;
 }
 
 /** An optional field: validated only when something was typed. */

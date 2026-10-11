@@ -813,6 +813,199 @@ button:focus-visible,
   color: var(--text-faint);
 }
 
+/* ---- date field --------------------------------------------------------- */
+
+/* The box and its calendar button are one control, so the border is the wrapper's. The
+   calendar itself is portalled to the body and positioned from script, so nothing here
+   needs `position: relative` for it to hang off. */
+.dateInput {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.dateInput:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.dateInput:has(.invalid) {
+  border-color: var(--bad);
+}
+
+/* Overrides the shared `.field input` box: the wrapper above owns the frame now. The
+   explicit `width` replaces the shared rule's `100%`, which in a flex row would size the
+   box from the wrapper and leave the button nothing. */
+.field .dateInput input {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+
+.field .dateInput input:focus-visible {
+  /* The wrapper shows the focus ring for the whole control. */
+  outline: none;
+}
+
+.field .dateInput input.invalid {
+  border-color: transparent;
+}
+
+.dateInputTrigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 32px;
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  cursor: pointer;
+}
+
+.dateInputTrigger:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--info-bg);
+}
+
+.dateInputTrigger:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* ---- the calendar ------------------------------------------------------- */
+
+/* Fixed and body-level, so neither the scrolling setup body nor the `<dialog>` that a
+   confirmation opens can clip it or paint over it. `top`/`left` come from script. */
+.calendarPopup {
+  position: fixed;
+  z-index: 60;
+  width: 266px;
+  padding: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 14px 34px rgb(24 33 47 / 18%);
+}
+
+.calendarHead {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.calendarStep {
+  flex: 0 0 auto;
+  width: 22px;
+  padding: 3px 0;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.calendarStep:hover {
+  color: var(--accent);
+  background: var(--info-bg);
+}
+
+/* Two selects share the middle of the row; the month name is the longer of the two. */
+.calendarSelect {
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 3px 4px;
+  min-width: 0;
+}
+
+.calendarSelect:first-of-type {
+  flex: 1 1 auto;
+}
+
+.calendarMonth {
+  /* The heading the grid is labelled by. The selects above already say the month, so
+     this is for a screen reader rather than for the eye. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.calendarWeekdays,
+.calendarWeek {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+}
+
+.calendarWeekdays {
+  margin: 8px 0 3px;
+}
+
+.calendarWeekdays abbr {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--text-faint);
+  text-decoration: none;
+  cursor: default;
+}
+
+.calendarDay {
+  width: 100%;
+  padding: 5px 0;
+  font: inherit;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.calendarDay:hover {
+  background: var(--info-bg);
+}
+
+/* Faded, not hidden: the days either side of the month are still selectable, which is
+   what makes the end of August reachable from September without paging. */
+.calendarDay--outside {
+  color: var(--text-faint);
+}
+
+.calendarDay--today {
+  box-shadow: inset 0 0 0 1px var(--border);
+  font-weight: 700;
+}
+
+.calendarDay--on,
+.calendarDay--on:hover {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+}
+
 /* ---- multi-select ------------------------------------------------------- */
 
 /* The chips and the search box are one control, so the border belongs to the wrapper
