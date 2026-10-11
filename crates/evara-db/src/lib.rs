@@ -340,3 +340,6 @@ mod tests_walkthrough;
 
 #[cfg(test)]
 mod tests_working_days;
+
+#[cfg(test)]
+mod tests_cycle_day_limit;

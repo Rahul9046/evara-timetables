@@ -545,6 +545,19 @@ button.linkish:hover:not(:disabled) {
   font-size: 13px;
 }
 
+/* A standing explanation beside a panel's disabled action, e.g. "all cycle positions are
+   filled". Sits between the title and the button, so `.panelHead`'s space-between pushes
+   it against the button it explains rather than leaving it adrift under the heading. */
+.panelNote {
+  margin: 0 0 0 auto;
+  padding-right: 10px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text-faint);
+  max-width: 44ch;
+  text-align: right;
+}
+
 /* ---- banners ------------------------------------------------------------ */
 
 .banner {

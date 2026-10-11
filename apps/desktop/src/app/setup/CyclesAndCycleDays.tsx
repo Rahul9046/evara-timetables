@@ -195,9 +195,8 @@ export function CyclesAndCycleDays(props: { school: School }) {
           label: "Position",
           required: true,
           min: 1,
-          hint: selected
-            ? `From 1 to ${selected.dayCount}. This is the day's identity — everything scheduled points at it.`
-            : "From 1. This is the day's identity.",
+          max: selected?.dayCount,
+          hint: positionHint(selected, coverage.value),
         },
         {
           kind: "text",
@@ -244,6 +243,9 @@ export function CyclesAndCycleDays(props: { school: School }) {
         </p>
       ),
       blockedBy: cycleId === null ? "Select a cycle first." : null,
+      // Not `blockedBy`: the table of days must stay on screen. The reason adding is
+      // unavailable is that every one of those days exists.
+      addBlockedBy: cycleFull(coverage.value),
     }),
     [cycleId, selected, coverage.value],
   );
@@ -258,7 +260,18 @@ export function CyclesAndCycleDays(props: { school: School }) {
         </p>
       </header>
 
-      <CrudPanel spec={cycleSpec} onChanged={cycles.reload} />
+      <CrudPanel
+        spec={cycleSpec}
+        // Coverage as well as the list. Editing a cycle changes its `dayCount`, which is
+        // what decides whether the cycle is full -- and `loadCoverage` is keyed on the
+        // selected cycle's id, which an edit does not change. Without this, lengthening a
+        // cycle left "all cycle positions are filled" on screen and the Add button
+        // disabled, so the one instruction that message gives would not have worked.
+        onChanged={() => {
+          cycles.reload();
+          coverage.reload();
+        }}
+      />
 
       <hr />
 
@@ -299,10 +312,51 @@ export function CyclesAndCycleDays(props: { school: School }) {
   );
 }
 
+/**
+ * What the Position field says about the range it will accept.
+ *
+ * Names the free positions when some are free, because "from 1 to 10" is unhelpful on a
+ * cycle whose only gap is 7. Presentation only: the authority on whether a position is
+ * legal is `check_ordinal_within_cycle` in `evara-db`, and its refusal is what the form
+ * shows if one slips through — which is why this never grows into a validator.
+ */
+function positionHint(cycle: Cycle | null, coverage: CycleCoverage | undefined): string {
+  const identity = "This is the day's identity — everything scheduled points at it.";
+  if (!cycle) return `From 1. ${identity}`;
+
+  const free = coverage?.missingOrdinals ?? [];
+  if (free.length === 0 || free.length === cycle.dayCount) {
+    return `From 1 to ${cycle.dayCount}. ${identity}`;
+  }
+  const named = free.length <= 4 ? free.join(", ") : `${free.slice(0, 4).join(", ")} and more`;
+  return `From 1 to ${cycle.dayCount}; still free: ${named}. ${identity}`;
+}
+
 /** The position a new day should default to: the first gap, or one past the end. */
 function nextPosition(coverage: CycleCoverage | undefined): number {
   if (!coverage) return 1;
   return coverage.missingOrdinals[0] ?? coverage.present + 1;
+}
+
+/** What a full cycle says when asked for another day. */
+export const CYCLE_FULL_MESSAGE =
+  "All cycle positions are filled. Increase the cycle length to add more days.";
+
+/**
+ * Why no further day can be added, or `null` while one still can.
+ *
+ * Answered from {@link CycleCoverage.missingOrdinals}, which `evara_core::time` computed
+ * and the backend handed over. That matters: "is this cycle full?" is a question about the
+ * model, and deciding it here by comparing a row count against `dayCount` would be the
+ * same rule implemented twice, in the layer `CLAUDE.md` forbids it in. The screen reads an
+ * answer; it does not work one out.
+ *
+ * `undefined` coverage means it has not arrived yet, which is not the same as "full" —
+ * disabling the button then would flash it off and on during every load.
+ */
+function cycleFull(coverage: CycleCoverage | undefined): string | null {
+  if (!coverage) return null;
+  return coverage.missingOrdinals.length === 0 ? CYCLE_FULL_MESSAGE : null;
 }
 
 /**
