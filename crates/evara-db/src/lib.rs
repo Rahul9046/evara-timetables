@@ -62,9 +62,9 @@ pub use crate::meta::ProjectIdentity;
 pub use crate::migrations::supported_schema_version;
 pub use crate::repo::Stamp;
 pub use crate::repo::structure::{
-    AcademicYear, AcademicYearInput, Building, BuildingInput, Campus, CampusInput, Resource,
-    ResourceInput, Room, RoomInput, RoomType, RoomTypeInput, School, SchoolInput, Structure, Term,
-    TermInput,
+    AcademicYear, AcademicYearInput, Building, BuildingInput, BuildingWithCampuses, Campus,
+    CampusInput, Resource, ResourceInput, Room, RoomInput, RoomType, RoomTypeInput, School,
+    SchoolInput, Structure, Term, TermInput,
 };
 pub use crate::repo::time_model::{
     CalendarDay, CalendarDayInput, CalendarDayKind, Cycle, CycleDay, CycleDayInput, CycleInput,
@@ -322,6 +322,9 @@ mod tests_lifecycle;
 
 #[cfg(test)]
 mod tests_structure;
+
+#[cfg(test)]
+mod tests_shared_buildings;
 
 #[cfg(test)]
 mod tests_time_model;

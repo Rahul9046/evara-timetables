@@ -143,12 +143,13 @@ fn main() -> ExitCode {
 fn write_all() -> (Vec<Generated>, Vec<String>) {
     use evara_core::time::CycleCoverage;
     use evara_db::{
-        AcademicYear, AcademicYearInput, Building, BuildingInput, CalendarDay, CalendarDayInput,
-        CalendarDayKind, Campus, CampusInput, Cycle, CycleDay, CycleDayInput, CycleInput, GridCell,
-        GridPreview, MaterialisationCounts, MaterialisationPlan, MaterialisationRequest, Period,
-        PeriodInput, PeriodKind, PeriodStructure, PeriodStructureInput, PlanFingerprint,
-        PlannedSlot, Resource, ResourceInput, Room, RoomInput, RoomType, RoomTypeInput, School,
-        SchoolInput, Term, TermInput, Timeslot, TimeslotInput,
+        AcademicYear, AcademicYearInput, Building, BuildingInput, BuildingWithCampuses,
+        CalendarDay, CalendarDayInput, CalendarDayKind, Campus, CampusInput, Cycle, CycleDay,
+        CycleDayInput, CycleInput, GridCell, GridPreview, MaterialisationCounts,
+        MaterialisationPlan, MaterialisationRequest, Period, PeriodInput, PeriodKind,
+        PeriodStructure, PeriodStructureInput, PlanFingerprint, PlannedSlot, Resource,
+        ResourceInput, Room, RoomInput, RoomType, RoomTypeInput, School, SchoolInput, Term,
+        TermInput, Timeslot, TimeslotInput,
     };
     use evara_desktop_lib::commands::AppInfo;
     use evara_desktop_lib::commands::error::SetupError;
@@ -161,6 +162,7 @@ fn write_all() -> (Vec<Generated>, Vec<String>) {
         CampusInput,
         Building,
         BuildingInput,
+        BuildingWithCampuses,
         RoomType,
         RoomTypeInput,
         Room,

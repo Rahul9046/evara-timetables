@@ -129,7 +129,7 @@ export function optional(
  * holds. Converting to the typed input the backend wants happens once, on submit, after
  * validation has passed.
  */
-export type Draft = Record<string, string | boolean | null>;
+export type Draft = Record<string, string | boolean | readonly string[] | null>;
 
 /** Reads a draft field as trimmed text. */
 export function text(draft: Draft, key: string): string {
@@ -151,6 +151,18 @@ export function number(draft: Draft, key: string): number {
 /** Reads a draft field as a boolean. */
 export function flag(draft: Draft, key: string): boolean {
   return draft[key] === true;
+}
+
+/**
+ * Reads a draft field as a list of identifiers — what a multi-select holds.
+ *
+ * Returns a fresh array so a caller cannot mutate the draft by accident, and an empty one
+ * for a field that was never touched, because "nothing chosen" and "no such field" mean
+ * the same thing to every caller that exists.
+ */
+export function list(draft: Draft, key: string): string[] {
+  const value = draft[key];
+  return Array.isArray(value) ? [...value] : [];
 }
 
 /** Collects the non-null messages into a {@link Problems} map. */

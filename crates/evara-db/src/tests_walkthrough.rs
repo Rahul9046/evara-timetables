@@ -72,10 +72,13 @@ fn a_school_can_be_set_up_from_an_empty_project_and_survives_a_reopen() {
     let building = workspace
         .structure()
         .expect("open")
-        .create_building(&BuildingInput {
-            campus_id: campus,
-            name: "Science Block".to_owned(),
-        })
+        .create_building(
+            &BuildingInput {
+                campus_id: campus,
+                name: "Science Block".to_owned(),
+            },
+            &[],
+        )
         .expect("building")
         .id;
 

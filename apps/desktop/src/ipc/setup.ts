@@ -24,6 +24,7 @@ import type {
   AcademicYearInput,
   Building,
   BuildingInput,
+  BuildingWithCampuses,
   CalendarDay,
   CalendarDayInput,
   Campus,
@@ -147,9 +148,17 @@ export function deleteCampus(id: string): Promise<void> {
 
 // ------------------------------------------------------------------------- building
 
-/** Creates a building on a campus. */
-export function createBuilding(input: BuildingInput): Promise<Building> {
-  return invoke<Building>("setup_building_create", { input });
+/**
+ * Creates a building on a campus, optionally shared with others.
+ *
+ * `sharedCampusIds` names the *additional* campuses. The building and every association
+ * are written in one transaction, so a half-shared building is never persisted.
+ */
+export function createBuilding(
+  input: BuildingInput,
+  sharedCampusIds: string[] = [],
+): Promise<Building> {
+  return invoke<Building>("setup_building_create", { input, sharedCampusIds });
 }
 
 /** One building by identifier. */
@@ -157,14 +166,39 @@ export function getBuilding(id: string): Promise<Building | null> {
   return invoke<Building | null>("setup_building_get", { id });
 }
 
-/** Every building on one campus. */
-export function listBuildings(campusId: string): Promise<Building[]> {
-  return invoke<Building[]>("setup_building_list", { campusId });
+/**
+ * Every building available to one campus, shared ones included.
+ *
+ * Each entry carries the full set of campuses that building serves, so a listing can mark
+ * a shared building without a call per row.
+ */
+export function listBuildings(campusId: string): Promise<BuildingWithCampuses[]> {
+  return invoke<BuildingWithCampuses[]>("setup_building_list", { campusId });
 }
 
-/** Replaces a building's details. */
+/** Every campus one building serves. */
+export function listBuildingCampuses(buildingId: string): Promise<string[]> {
+  return invoke<string[]>("setup_building_campuses", { buildingId });
+}
+
+/** Replaces a building's details. Its home campus never changes. */
 export function updateBuilding(id: string, input: BuildingInput): Promise<Building> {
   return invoke<Building>("setup_building_update", { id, input });
+}
+
+/** Shares an existing building with another campus. */
+export function shareBuilding(buildingId: string, campusId: string): Promise<void> {
+  return invoke<void>("setup_building_share", { buildingId, campusId });
+}
+
+/**
+ * Stops sharing a building with a campus.
+ *
+ * Refused while rooms on that campus are still in the building, and refused outright for
+ * the campus the building was created on. Nothing is detached or deleted either way.
+ */
+export function unshareBuilding(buildingId: string, campusId: string): Promise<void> {
+  return invoke<void>("setup_building_unshare", { buildingId, campusId });
 }
 
 /** Deletes a building. Its rooms survive, detached rather than deleted. */

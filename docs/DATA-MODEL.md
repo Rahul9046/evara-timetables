@@ -148,7 +148,7 @@ extraction; references run downward in this table only.
 
 | Group | Owns | Depends on |
 | --- | --- | --- |
-| **Structure** | school, campus, building, room, room_type, resource, academic_year, term, cycle, cycle_day, period_structure, period, timeslot, calendar_day | — |
+| **Structure** | school, campus, building, building_campus, room, room_type, resource, academic_year, term, cycle, cycle_day, period_structure, period, timeslot, calendar_day | — |
 | **People** | teacher, department, teacher_qualification, year_level, student, student_group, student_group_member | Structure |
 | **Curriculum** | subject, course, class_section, class_teacher, class_group, enrolment, course_request | Structure, People |
 | **Activities** | activity, activity_teacher, activity_group, activity_room_candidate, activity_resource, line, line_member, activity_link, activity_link_member, availability | Structure, People, Curriculum |
@@ -167,6 +167,9 @@ The time model deliberately avoids assuming Monday–Friday.
 > in Phase 1D as migration `V4`, together with the timeslot materialiser. The whole
 > Structure group now exists, and a test asserts that every *later* group's tables do not,
 > so they cannot arrive by accident.
+>
+> `building_campus` arrived afterwards as migration `V5`, making a building shareable
+> across campuses — see [adr/0013](adr/0013-buildings-shared-across-campuses.md).
 
 ### Deletion semantics
 
@@ -180,6 +183,18 @@ Decided in Phase 1C and enforced by foreign keys — see
 
 Repositories clear the optional references with proper rev-bumping updates before
 deleting a parent, so `SET NULL` is a backstop rather than the normal route.
+
+`V5` added the sharing edge, decided in
+[adr/0013](adr/0013-buildings-shared-across-campuses.md). Both halves are `RESTRICT`:
+
+| Edge | Behaviour |
+| --- | --- |
+| `building_campus.building_id` | `RESTRICT` — `delete_building` removes the association rows itself, so each removal is a change-log entry. A `CASCADE` would remove them without firing the trigger |
+| `building_campus.campus_id` | `RESTRICT` — a campus a building is shared *with* cannot be deleted until the share is withdrawn, so "delete a campus" means the same thing on every edge |
+
+Withdrawing a share is **not** a deletion and detaches nothing: it is refused while rooms
+on that campus are still in the building, and refused outright for the building's home
+campus, so a building can never reach zero campuses.
 
 Phase 1D added the time edges, decided in
 [adr/0011](adr/0011-stable-timeslot-identity.md). **Every one of them is `RESTRICT`**,
@@ -205,16 +220,37 @@ Following the documented rule that codes are unique within their parent:
 `academic_year(school_id, name)` · `term(academic_year_id, ordinal)` and
 `term(academic_year_id, name)`.
 
+Plus `building_campus(building_id, campus_id)`, which is what stops a campus being
+associated with the same building twice. Both columns are `NOT NULL`, so that constraint
+needs no `COALESCE` to actually hold.
+
 `school` is a singleton, enforced by a constant column with a unique index: a project
 describes one school ([ADR 0003](adr/0003-sqlite-document-model.md)). A room's building
-must be on the room's own campus, enforced by a trigger.
+must be **available to** the room's own campus, enforced by a trigger that reads
+`building_campus` — which is what lets one shared building hold rooms belonging to
+different campuses.
+
+`building(campus_id, name)` scopes a name to a building's *home* campus only. The
+cross-campus case — sharing a building to a campus that already has one of that name —
+needs the other rows, so it is a repository rule in `evara-db` rather than a schema
+constraint.
 
 ```sql
 school (id, name, timezone, locale, created_at, updated_at, rev)
 
 campus (id, school_id -> school, name, code, address, UNIQUE(school_id, code))
 campus_travel (from_campus_id, to_campus_id, minutes, PRIMARY KEY(from, to))
-building (id, campus_id -> campus, name)
+-- campus_id is the HOME campus: the one the building was created on. Immutable, always
+-- present in building_campus, and never withdrawable. It scopes UNIQUE(campus_id, name)
+-- and guarantees a building always has at least one campus. ADR 0013 records why it was
+-- not dropped in favour of a fully symmetric join table.
+building (id, campus_id -> campus, name, UNIQUE(campus_id, name))
+
+-- The COMPLETE set of campuses a building serves, home campus included. Nothing reads
+-- building.campus_id to answer "which campuses?". A full entity table rather than a bare
+-- junction, because the change-log triggers read NEW.id and NEW.rev.
+building_campus (id, building_id -> building, campus_id -> campus,
+                 UNIQUE(building_id, campus_id))
 room_type (id, school_id, name, code)                       -- "Science Lab", "Gym"
 room (id, campus_id -> campus, building_id -> building NULL, name, code,
       capacity INTEGER, room_type_id -> room_type NULL, is_bookable, notes)

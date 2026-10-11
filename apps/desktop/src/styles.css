@@ -813,6 +813,107 @@ button:focus-visible,
   color: var(--text-faint);
 }
 
+/* ---- multi-select ------------------------------------------------------- */
+
+/* The chips and the search box are one control, so the border belongs to the wrapper
+   rather than to the input inside it. */
+.chipField {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 5px 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.chipField:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.chipField.invalid {
+  border-color: var(--bad);
+}
+
+/* Grows to fill the row it lands on, so the caret is never squeezed to nothing by a
+   long list of chips. */
+.chipFieldInput {
+  flex: 1 1 7rem;
+  min-width: 7rem;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  padding: 3px 2px;
+}
+
+.chipFieldInput:focus-visible {
+  /* The wrapper shows the focus ring for the whole control. */
+  outline: none;
+}
+
+.chipFieldNone {
+  font-size: 12.5px;
+  color: var(--text-faint);
+  padding: 3px 2px;
+}
+
+.chipToken {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px 8px;
+  font-size: 12.5px;
+  background: var(--info-bg);
+  color: var(--accent);
+  border-radius: 999px;
+}
+
+.chipRemove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Comfortably clickable without making the chip tall. */
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.chipRemove:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* ---- shared-building listing -------------------------------------------- */
+
+.shareList {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.shareName {
+  font-size: 12.5px;
+}
+
+.shareName + .shareName::before {
+  /* A separator that is not a comma in the markup, so it cannot be read out as content. */
+  content: "·";
+  color: var(--text-faint);
+  margin-right: 6px;
+}
+
 .checkboxRow {
   display: flex;
   align-items: center;

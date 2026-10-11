@@ -55,6 +55,17 @@ export interface CrudSpec<T extends { id: string }, I> {
   /** Extra warning in the delete confirmation, when this row deserves one. */
   readonly deleteNote?: (row: T) => ReactNode;
   /**
+   * Why this particular edit needs confirming before it is sent, if it does.
+   *
+   * Returns the warning to show, or `null` to save straight away. Exists because some
+   * edits are as consequential as a delete — withdrawing a building from a campus is the
+   * first — and "what a risky change asks before it happens" belongs here with "what a
+   * delete asks", not reimplemented per screen.
+   *
+   * Called with the validated draft and the row being edited, `null` for a create.
+   */
+  readonly confirmSubmit?: (draft: Draft, row: T | null) => ReactNode | null;
+  /**
    * Why this collection cannot be edited yet, if it cannot.
    *
    * Shown instead of the table. Used for the prerequisites the model really has — rooms
@@ -81,6 +92,7 @@ export function CrudPanel<T extends { id: string }, I>(props: {
   const [draft, setDraft] = useState<Draft>({});
   const [problems, setProblems] = useState<Problems>({});
   const [pendingDelete, setPendingDelete] = useState<T | null>(null);
+  const [pendingSave, setPendingSave] = useState<ReactNode | null>(null);
 
   const blocked = spec.blockedBy ?? null;
   const [nonce, setNonce] = useState(0);
@@ -144,9 +156,10 @@ export function CrudPanel<T extends { id: string }, I>(props: {
   const closeForm = useCallback(() => {
     setEditing(null);
     setProblems({});
+    setPendingSave(null);
   }, []);
 
-  const change = useCallback((key: string, value: string | boolean) => {
+  const change = useCallback((key: string, value: string | boolean | string[]) => {
     setDraft((current) => ({ ...current, [key]: value }));
     // Clearing the field's own message as it is retyped keeps a stale "required"
     // sitting under a field the user has just filled in.
@@ -158,13 +171,11 @@ export function CrudPanel<T extends { id: string }, I>(props: {
     });
   }, []);
 
-  const submit = useCallback(async () => {
+  /** Performs the mutation. Reached only once anything that needed confirming has been. */
+  const save = useCallback(async () => {
     if (!editing) return;
 
-    const found = spec.validate(draft);
-    setProblems(found);
-    if (!isValid(found)) return;
-
+    setPendingSave(null);
     setBusy(true);
     setError(null);
     try {
@@ -191,6 +202,27 @@ export function CrudPanel<T extends { id: string }, I>(props: {
       setBusy(false);
     }
   }, [editing, draft, spec, reload, onChanged, closeForm]);
+
+  /**
+   * Validates, then either saves or asks first.
+   *
+   * Validation runs before the confirmation so a user is never asked to confirm a save
+   * that was going to be rejected anyway.
+   */
+  const submit = useCallback(() => {
+    if (!editing) return;
+
+    const found = spec.validate(draft);
+    setProblems(found);
+    if (!isValid(found)) return;
+
+    const warning = spec.confirmSubmit?.(draft, editing.row) ?? null;
+    if (warning !== null) {
+      setPendingSave(warning);
+      return;
+    }
+    void save();
+  }, [draft, editing, save, spec]);
 
   const confirmDelete = useCallback(async () => {
     if (!pendingDelete) return;
@@ -249,7 +281,7 @@ export function CrudPanel<T extends { id: string }, I>(props: {
           busy={busy}
           submitLabel={editing.row ? "Save changes" : `Add ${spec.noun}`}
           onChange={change}
-          onSubmit={() => void submit()}
+          onSubmit={submit}
           onCancel={closeForm}
         />
       )}
@@ -277,6 +309,18 @@ export function CrudPanel<T extends { id: string }, I>(props: {
           onDelete={setPendingDelete}
         />
       )}
+
+      <ConfirmDialog
+        open={pendingSave !== null}
+        title={`Save these changes to this ${spec.noun}?`}
+        confirmLabel="Save changes"
+        tone="danger"
+        busy={busy}
+        onConfirm={() => void save()}
+        onCancel={() => setPendingSave(null)}
+      >
+        {pendingSave}
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={pendingDelete !== null}
