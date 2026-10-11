@@ -13,6 +13,8 @@ use std::path::PathBuf;
 use tempfile::TempDir;
 use uuid::Uuid;
 
+use evara_core::calendar::WorkingDays;
+
 use crate::repo::structure::{AcademicYearInput, CampusInput, SchoolInput, TermInput};
 use crate::repo::time_model::{
     CalendarDayInput, CalendarDayKind, CycleDayInput, CycleInput, MaterialisationRequest,
@@ -53,6 +55,7 @@ impl Project {
                 name: "Northgate Secondary".to_owned(),
                 timezone: "Europe/London".to_owned(),
                 locale: "en-GB".to_owned(),
+                working_days: WorkingDays::MONDAY_TO_FRIDAY,
             })
             .expect("school")
             .id;

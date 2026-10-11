@@ -1,0 +1,51 @@
+-- Which weekdays a school normally teaches on.
+--
+-- Forward-only. V1-V6 are untouched.
+--
+-- See ADR 0015 for the reasoning. The short version of each decision:
+--
+--   * A column on `school`, not a `school_working_day` table. A weekday is not an entity
+--     and this is not a relationship between two of them -- it is a set-valued attribute
+--     of the one school a project describes. V5's "an association is a first-class
+--     entity" rule governs building-to-campus, where both ends are real rows with their
+--     own identities; there is no second entity here to associate with.
+--
+--   * A seven-bit set in one INTEGER, bit 0 Monday through bit 6 Sunday, rather than
+--     seven boolean columns or a comma-separated TEXT. This is the only encoding that
+--     makes "a school must have at least one working day" a property of the schema:
+--     a non-empty set is exactly 1..=127, so the CHECK below is the whole rule. With
+--     seven columns it would take a trigger, and with a text list nothing could check it
+--     at all -- in both cases the repository and the form would be the only things
+--     standing between a school and a week it never teaches in.
+--
+--     The cost is that `31` is not self-describing to someone reading the file in a
+--     SQLite browser. ADR 0003's readability argument is about identifiers, which are
+--     copied between tables and quoted in bug reports; this value is read through one
+--     accessor in `evara_core::calendar::WorkingDays` and never cross-referenced.
+--
+--   * DEFAULT 31 is Monday to Friday: bits 0-4, 1+2+4+8+16. An existing project therefore
+--     upgrades to a sensible working week with no data migration at all. SQLite's
+--     ALTER TABLE ADD COLUMN with a constant default does not rewrite the stored row --
+--     it returns the default for rows written before the column existed -- so every
+--     existing school keeps its `rev`, its `updated_at` and its change-log history
+--     exactly as they were. Nothing in this migration consumes a revision or appends to
+--     the change feed, which is correct: the school did not change, the schema did.
+--
+--     `evara_core::calendar::tests::the_stored_default_is_thirty_one` asserts that 31 and
+--     `WorkingDays::MONDAY_TO_FRIDAY` still agree, so this literal cannot drift away from
+--     the constant it duplicates.
+--
+-- No change_log work is needed here. `school` has been in change_log::TRACKED_TABLES
+-- since V3, `install_all` reinstalls triggers on every open, and the triggers record only
+-- id, op and rev -- they name no columns, so a new column is already covered.
+--
+-- What this column must never be used for: deciding which cycle day a date carries.
+-- Working days are a default calendar pattern, not a scheduling identity. An explicit
+-- `calendar_day` row remains the only thing that maps a real date onto a cycle position
+-- (ADR 0011), and nothing may infer "five working days" from `cycle.day_count` or the
+-- reverse. The repository exposes the mismatch between the two as a *warning* for the
+-- user to act on, and never resolves it by writing.
+
+ALTER TABLE school
+    ADD COLUMN working_days INTEGER NOT NULL DEFAULT 31
+        CHECK (working_days BETWEEN 1 AND 127);

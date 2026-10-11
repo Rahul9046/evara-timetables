@@ -26,6 +26,7 @@
 
 use std::collections::HashMap;
 
+use evara_core::calendar::WorkingDays;
 use evara_core::time::CycleCoverage;
 use rusqlite::types::{ToSql, ToSqlOutput};
 use rusqlite::{Row, Transaction};
@@ -892,6 +893,35 @@ impl TimeModel<'_> {
 
 // ======================================================================== calendar day
 
+/// A mapped teaching date sitting on a weekday the school does not work.
+///
+/// Returned by [`TimeModel::non_working_instructional_days`] so the interface can warn
+/// without re-deriving the rule. Carries the date exactly as stored, so a caller can find
+/// the row being talked about, and the weekday it landed on, so the warning can name it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct NonWorkingInstructionalDay {
+    /// The date, canonical `YYYY-MM-DD`, exactly as the row stores it.
+    pub date: String,
+    /// The row's `kind`: `SCHOOL`, `EXAM`, `EVENT`, `PD` or `HOLIDAY`.
+    ///
+    /// Reported rather than filtered on, because an exam day with a cycle day attached is
+    /// still a day with lessons timetabled against it.
+    pub kind: String,
+    /// The ISO weekday the date fell on, 1 Monday through 7 Sunday.
+    pub weekday: i64,
+}
+
+/// Converts SQLite's Sunday-based weekday to the ISO numbering the model uses everywhere.
+///
+/// `strftime('%w')` counts 0 for Sunday through 6 for Saturday; ISO-8601, `WorkingDays`
+/// and `cycle_day.weekday_hint` all count 1 for Monday through 7 for Sunday. One
+/// conversion, one place.
+const fn iso_weekday(sunday_based: i64) -> i64 {
+    if sunday_based == 0 { 7 } else { sunday_based }
+}
+
 const CALENDAR_DAY_COLUMNS: &str = "id, school_id, date, term_id, campus_id, cycle_day_id, \
                                     kind, note, created_at, updated_at, rev";
 
@@ -970,6 +1000,84 @@ impl TimeModel<'_> {
             let rows = stmt.query_map([from, to], CalendarDay::from_row)?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(DbError::from)
+        })
+    }
+
+    /// Mapped teaching dates that fall on a weekday the school does not work.
+    ///
+    /// # Advisory, and only advisory
+    ///
+    /// This **reports**. It never writes. An explicit `calendar_day` row is the only thing
+    /// that maps a real date onto a cycle position ([ADR
+    /// 0011](../../../docs/adr/0011-stable-timeslot-identity.md)), and that stays true
+    /// whatever the working week says -- a school really might teach one Saturday for an
+    /// open day, and a build that "tidied" such a row away would destroy a deliberate
+    /// decision. So changing the working week creates, deletes and overwrites nothing; it
+    /// only changes what this returns.
+    ///
+    /// Most of the time a hit here is a typo, a date entered a day out, which is precisely
+    /// why the user and not the application has to decide.
+    ///
+    /// # Why a weekday is read at all
+    ///
+    /// Scheduling may never read a weekday, and nothing here does. The weekday being read
+    /// is that of a real date on an explicit calendar row, compared against a stated fact
+    /// about the institution's week. No cycle day is derived, inferred or altered, and
+    /// `cycle.day_count` is not consulted: a six-day rotation across a five-day working
+    /// week produces no findings at all unless a mapped date genuinely lands on a
+    /// non-working weekday. See [`evara_core::calendar`].
+    ///
+    /// # Errors
+    ///
+    /// Propagates a read failure. A row whose `date` SQLite cannot read as a date is
+    /// skipped rather than reported, because the `CHECK` on that column makes inserting
+    /// one impossible and a damaged row is not evidence about the working week.
+    pub fn non_working_instructional_days(
+        &self,
+        working_days: WorkingDays,
+    ) -> Result<Vec<NonWorkingInstructionalDay>> {
+        self.db.read(|conn| {
+            let mut stmt = conn.prepare(
+                // `cycle_day_id IS NOT NULL` is what makes a row instructional: a NULL
+                // means "no lessons that day", which is exactly what a non-working day
+                // should look like and never a finding. `kind` is deliberately not
+                // filtered on -- an EXAM or EVENT day with a cycle day attached still has
+                // lessons timetabled against it.
+                //
+                // `%w` rather than `%u`: Sunday-based 0-6 has been in SQLite forever,
+                // while ISO `%u` arrived in 3.46 and this binary must open a project on
+                // whatever SQLite it was built against. The conversion to ISO happens
+                // once, in `iso_weekday`.
+                "SELECT date, kind, CAST(strftime('%w', date) AS INTEGER)
+                 FROM calendar_day
+                 WHERE cycle_day_id IS NOT NULL
+                 ORDER BY date, COALESCE(campus_id, ''), id",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                ))
+            })?;
+
+            let mut found = Vec::new();
+            for row in rows {
+                let (date, kind, sunday_based) = row?;
+                // NULL only if SQLite could not read the date, which the column's CHECK
+                // forbids. Skipped rather than guessed at.
+                let Some(weekday) = sunday_based.map(iso_weekday) else {
+                    continue;
+                };
+                if !working_days.contains(weekday) {
+                    found.push(NonWorkingInstructionalDay {
+                        date,
+                        kind,
+                        weekday,
+                    });
+                }
+            }
+            Ok(found)
         })
     }
 

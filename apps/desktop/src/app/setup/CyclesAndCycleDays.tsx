@@ -18,6 +18,19 @@
  * because a grid built from a half-finished cycle is a half-finished grid. Hence
  * {@link CoveragePanel}: it names the positions that have no day, and the answer comes
  * from `evara_core::time::CycleCoverage` over IPC rather than from a count done here.
+ *
+ * ## `weekCount` is no longer asked for
+ *
+ * "Calendar weeks spanned" was display-and-grouping only, and nothing was ever grouped by
+ * it — not the materialiser, not the grid, not a report. It asked every user to work out
+ * and maintain a number the application did not consult, and it invited exactly the
+ * inference this screen exists to avoid: that a cycle is a number of weeks.
+ *
+ * The field is gone from the forms and from the table. The column and the IPC contract are
+ * not: `cycle.week_count` is `NOT NULL CHECK (week_count >= 1)`, a released migration is
+ * immutable, and `CycleInput` still carries it. So {@link weekCountFor} supplies one — the
+ * row's own value when editing, 1 for a new cycle — which means **no existing cycle record
+ * changes**. See the Fix 6 report for why dropping the column was deferred.
  */
 import { useCallback, useMemo, useState } from "react";
 
@@ -43,10 +56,30 @@ import {
   textOrNull,
   validateCycle,
   validateCycleDay,
+  type Draft,
 } from "../validation";
 import { Absent } from "./CampusesAndBuildings";
 import { ParentPicker } from "./ParentPicker";
 import { useList, useValue } from "./useList";
+
+/**
+ * The `weekCount` a save must send, for a field no longer on screen.
+ *
+ * The schema requires `week_count >= 1` and the IPC contract still carries it, so a save
+ * has to name a value. The right value is whatever the row already held — preserving it is
+ * what keeps "do not silently change existing cycle records" true — and 1 for a cycle being
+ * created.
+ *
+ * Validated rather than trusted, even though the only writers are {@link CrudSpec.toDraft}
+ * and this function. `number()` would hand `NaN` to the backend for anything unexpected,
+ * and a save rejected by a `CHECK` on a field the user cannot see would be unfixable from
+ * the interface. The fallback is 1, which is both the column's own default and the value a
+ * new cycle gets.
+ */
+function weekCountFor(draft: Draft): number {
+  const stored = Number(text(draft, "weekCount"));
+  return Number.isInteger(stored) && stored >= 1 ? stored : 1;
+}
 
 export function CyclesAndCycleDays(props: { school: School }) {
   const { school } = props;
@@ -80,7 +113,6 @@ export function CyclesAndCycleDays(props: { school: School }) {
       columns: [
         { header: "Name", render: (row) => row.name },
         { header: "Days", numeric: true, render: (row) => row.dayCount },
-        { header: "Weeks", numeric: true, render: (row) => row.weekCount },
         {
           header: "Default",
           render: (row) => (row.isDefault ? <span className="yes">Yes</span> : <Absent />),
@@ -103,14 +135,6 @@ export function CyclesAndCycleDays(props: { school: School }) {
           hint: "The intended length: 1, 5, 6, 10 — whatever the school actually repeats. There is no assumption of a five-day week.",
         },
         {
-          kind: "number",
-          key: "weekCount",
-          label: "Calendar weeks spanned",
-          required: true,
-          min: 1,
-          hint: "For display and grouping only. A ten-day fortnight usually spans 2.",
-        },
-        {
           kind: "checkbox",
           key: "isDefault",
           label: "This is the school's default cycle",
@@ -121,6 +145,8 @@ export function CyclesAndCycleDays(props: { school: School }) {
       toDraft: (row) => ({
         name: row?.name ?? "",
         dayCount: row ? String(row.dayCount) : "5",
+        // Carried in the draft without a field to render it, so an edit sends the value
+        // back exactly as it was read. There is no input that can change it.
         weekCount: row ? String(row.weekCount) : "1",
         isDefault: row ? row.isDefault : (cycles.items?.length ?? 0) === 0,
       }),
@@ -128,7 +154,7 @@ export function CyclesAndCycleDays(props: { school: School }) {
         schoolId: school.id,
         name: text(draft, "name"),
         dayCount: number(draft, "dayCount"),
-        weekCount: number(draft, "weekCount"),
+        weekCount: weekCountFor(draft),
         isDefault: flag(draft, "isDefault"),
       }),
       list: listCycles,

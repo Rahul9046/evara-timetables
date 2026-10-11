@@ -118,6 +118,7 @@ pub fn run() {
             commands::time_model::setup_calendar_day_create,
             commands::time_model::setup_calendar_day_get,
             commands::time_model::setup_calendar_day_list,
+            commands::time_model::setup_calendar_non_working_days,
             commands::time_model::setup_calendar_day_update,
             commands::time_model::setup_calendar_day_delete,
             // Timetable grid — Phase 1E. `release_orphans` is the only destructive one.

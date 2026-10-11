@@ -12,6 +12,7 @@
  * `aria-invalid` plus `aria-errormessage` when it is wrong. Doing it in the renderer
  * rather than in each form is the only way it stays true of all of them.
  */
+import { WEEKDAYS } from "../setup/weekdays";
 import type { Draft, Problems } from "../validation";
 import { Combobox } from "./Combobox";
 import { DateInput } from "./DateInput";
@@ -60,6 +61,16 @@ export type FieldSpec =
       choices: readonly Choice[];
     }
   /**
+   * The seven weekdays, any combination selectable. The draft holds a `string[]` of ISO
+   * weekday numbers as strings — `["1", "2", "3", "4", "5"]` for Monday to Friday.
+   *
+   * Its own kind rather than a `multicombobox` with seven choices: a fixed set of seven
+   * short labels wants to be visible and one click away, not behind a search box. The
+   * vocabulary is `setup/weekdays`, and nothing about it reaches scheduling — see that
+   * module's header.
+   */
+  | { kind: "weekdays"; key: string; label: string; hint?: string; required?: boolean }
+  /**
    * A searchable multi-select. The draft holds a `string[]` of chosen values.
    *
    * Use it where the model has a real many-to-many — the campuses a building serves, say
@@ -105,6 +116,45 @@ export function Field(props: {
     "aria-describedby": describedBy,
     className: error ? "invalid" : undefined,
   } as const;
+
+  // A weekday picker is seven inputs, so there is nothing for a `<label for>` to point
+  // at. It gets a real `<fieldset>` with a `<legend>` instead, which is what associates a
+  // group's name with its controls — see WeekdayPicker.
+  if (spec.kind === "weekdays") {
+    return (
+      <div className="field field--wide">
+        <fieldset className="weekdayGroup">
+          <legend>
+            {spec.label}
+            {spec.required ? (
+              <span className="requiredMark" aria-hidden="true">
+                {" *"}
+              </span>
+            ) : null}
+          </legend>
+          <WeekdayPicker
+            id={id}
+            values={Array.isArray(value) ? value : []}
+            disabled={disabled}
+            invalid={error !== undefined}
+            describedBy={describedBy}
+            errorId={errorId}
+            onChange={(values) => onChange(spec.key, values)}
+          />
+          {spec.hint && (
+            <p className="hint" id={hintId}>
+              {spec.hint}
+            </p>
+          )}
+          {error && (
+            <p className="fieldError" id={errorId} role="alert">
+              {error}
+            </p>
+          )}
+        </fieldset>
+      </div>
+    );
+  }
 
   return (
     <div className={spec.kind === "checkbox" ? "field field--inline" : "field"}>
@@ -220,6 +270,73 @@ export function Field(props: {
           {error}
         </p>
       )}
+    </div>
+  );
+}
+
+/**
+ * Seven weekday toggles.
+ *
+ * Real `<input type="checkbox">`es, styled as chips. That is the whole accessibility
+ * story and it is why they are not buttons with `aria-pressed`: a checkbox is reachable by
+ * Tab, toggles on Space, announces its own checked state, and is understood by every
+ * assistive technology without a role being asserted. Each has a visible `<label>`
+ * carrying the full day name, with the two-letter form shown and the name available to a
+ * screen reader, so "Mo" is never what gets read out.
+ *
+ * Order is Monday first, matching ISO numbering, so what is displayed and what is stored
+ * cannot disagree. Any combination is selectable; "at least one" is enforced by
+ * `validateSchool` for the message and by the column's own `CHECK` for the invariant, not
+ * by disabling the last remaining checkbox — a user clearing the row to start again is
+ * doing something reasonable, and a control that refuses to turn off is confusing.
+ */
+function WeekdayPicker(props: {
+  id: string;
+  values: readonly string[];
+  disabled: boolean;
+  invalid: boolean;
+  describedBy: string | undefined;
+  errorId: string | undefined;
+  onChange: (values: string[]) => void;
+}) {
+  const { id, values, disabled, invalid, describedBy, errorId, onChange } = props;
+  const chosen = new Set(values);
+
+  const toggle = (value: string, on: boolean) => {
+    const next = new Set(chosen);
+    if (on) {
+      next.add(value);
+    } else {
+      next.delete(value);
+    }
+    // Sorted so the draft is in a stable order whatever order the boxes were clicked in,
+    // which keeps "did this change?" comparisons honest.
+    onChange([...next].sort((a, b) => Number(a) - Number(b)));
+  };
+
+  return (
+    <div className={invalid ? "weekdayRow invalid" : "weekdayRow"}>
+      {WEEKDAYS.map((day) => {
+        const value = String(day.value);
+        const boxId = `${id}-${value}`;
+        return (
+          <label key={day.value} className="weekdayToggle" htmlFor={boxId}>
+            <input
+              id={boxId}
+              type="checkbox"
+              value={value}
+              checked={chosen.has(value)}
+              disabled={disabled}
+              aria-invalid={invalid ? true : undefined}
+              aria-errormessage={errorId}
+              aria-describedby={describedBy}
+              onChange={(e) => toggle(value, e.currentTarget.checked)}
+            />
+            <span aria-hidden="true">{day.short}</span>
+            <span className="srOnly">{day.label}</span>
+          </label>
+        );
+      })}
     </div>
   );
 }

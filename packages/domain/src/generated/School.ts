@@ -21,6 +21,16 @@ timezone: string,
  */
 locale: string, 
 /**
+ * Which weekdays the school normally teaches on. Never empty.
+ *
+ * Stored as a seven-bit set and carried over IPC as ascending ISO weekday
+ * numbers, `[1, 2, 3, 4, 5]` for Monday to Friday. A *calendar* default and an
+ * advisory, never a scheduling identity: nothing derives a cycle day from it and
+ * nothing infers it from `cycle.day_count`. See
+ * [`evara_core::calendar::WorkingDays`].
+ */
+workingDays: number[], 
+/**
  * When the row was first written, ISO-8601 UTC.
  */
 createdAt: string, 

@@ -12,6 +12,8 @@
 //! The school is synthetic, deliberately not a five-day week, and deliberately not
 //! Monday-to-Friday in its labels.
 
+use evara_core::calendar::WorkingDays;
+
 use crate::repo::structure::{
     AcademicYearInput, BuildingInput, CampusInput, ResourceInput, RoomInput, RoomTypeInput,
     SchoolInput, TermInput,
@@ -53,6 +55,7 @@ fn a_school_can_be_set_up_from_an_empty_project_and_survives_a_reopen() {
             name: "Northgate Secondary".to_owned(),
             timezone: "Europe/London".to_owned(),
             locale: "en-GB".to_owned(),
+            working_days: WorkingDays::MONDAY_TO_FRIDAY,
         })
         .expect("school")
         .id;
@@ -403,6 +406,7 @@ fn removing_a_cycle_day_takes_the_whole_guarded_route() {
             name: "Northgate Secondary".to_owned(),
             timezone: "Europe/London".to_owned(),
             locale: "en-GB".to_owned(),
+            working_days: WorkingDays::MONDAY_TO_FRIDAY,
         })
         .expect("school")
         .id;

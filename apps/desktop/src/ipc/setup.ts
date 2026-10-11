@@ -37,6 +37,7 @@ import type {
   GridPreview,
   MaterialisationPlan,
   MaterialisationRequest,
+  NonWorkingInstructionalDay,
   Period,
   PeriodInput,
   PeriodStructure,
@@ -537,6 +538,25 @@ export function updateCalendarDay(
 /** Deletes a calendar day. The dates around it are untouched. */
 export function deleteCalendarDay(id: string): Promise<void> {
   return invoke<void>("setup_calendar_day_delete", { id });
+}
+
+/**
+ * Mapped teaching dates that land on a weekday the school does not work.
+ *
+ * Advisory and read-only. Asking this never creates, deletes or rewrites a mapping —
+ * `TimeModel::non_working_instructional_days` records why that has to stay true — so the
+ * interface may call it as freely as it likes, including to preview a week before saving
+ * one.
+ *
+ * `workingDays` is a list of ISO weekday numbers, 1 Monday through 7 Sunday. An empty list
+ * is rejected by the backend rather than treated as "every day".
+ */
+export function nonWorkingInstructionalDays(
+  workingDays: readonly number[],
+): Promise<NonWorkingInstructionalDay[]> {
+  return invoke<NonWorkingInstructionalDay[]>("setup_calendar_non_working_days", {
+    workingDays,
+  });
 }
 
 // ----------------------------------------------------------------------------- grid

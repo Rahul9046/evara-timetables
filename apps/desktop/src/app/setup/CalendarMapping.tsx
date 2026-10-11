@@ -19,10 +19,29 @@
  *
  * The `kind` column records *why*: a holiday, an exam day, an event, staff development.
  * Both halves matter and neither implies the other — an exam day may well have lessons.
+ *
+ * ## Working days are advice, and these rows are the authority
+ *
+ * {@link WorkingDayWarning} reports mapped teaching dates that landed on a weekday the
+ * school says it does not work. It is a warning and nothing else: the school's working
+ * days are a *default calendar pattern*, and an explicit row here outranks them, because a
+ * school really might teach one Saturday for an open day. Changing the working days in
+ * School Details creates, deletes and rewrites nothing on this screen — it only changes
+ * what the warning says. The user resolves it by editing a date or the working week, and
+ * the application never resolves it for them.
  */
 import { useCallback, useMemo, useState } from "react";
 
-import type { AcademicYear, CalendarDay, Campus, Cycle, CycleDay, School, Term } from "@evara/domain";
+import type {
+  AcademicYear,
+  CalendarDay,
+  Campus,
+  Cycle,
+  CycleDay,
+  NonWorkingInstructionalDay,
+  School,
+  Term,
+} from "@evara/domain";
 import {
   createCalendarDay,
   deleteCalendarDay,
@@ -32,12 +51,14 @@ import {
   listCycleDays,
   listCycles,
   listTerms,
+  nonWorkingInstructionalDays,
   updateCalendarDay,
 } from "../../ipc/setup";
 import { toDisplay } from "../dates";
 import { CrudPanel, type CrudSpec } from "../ui/CrudPanel";
 import { DateInput } from "../ui/DateInput";
 import { Banner, Panel } from "../ui/Shell";
+import { describeWeek, weekdayName } from "./weekdays";
 import { text, textOrNull, validateCalendarDay } from "../validation";
 import { Absent } from "./CampusesAndBuildings";
 import { useList } from "./useList";
@@ -294,7 +315,65 @@ export function CalendarMapping(props: { school: School }) {
         )}
       </Panel>
 
+      <WorkingDayWarning school={school} />
+
       <CrudPanel spec={spec} reloadKey={`${activeFrom}:${activeTo}`} />
     </div>
+  );
+}
+
+/** How many offending dates are named before the rest are summarised. */
+const NAMED_LIMIT = 8;
+
+/**
+ * Warns when a mapped teaching date sits on a weekday the school does not work.
+ *
+ * A warning, never a correction. The backend only reads — see
+ * `TimeModel::non_working_instructional_days` — so nothing here or there alters a mapping,
+ * and the user decides whether the date is a typo or a deliberate Saturday.
+ *
+ * Deliberately *not* scoped to the range above: a date entered a day out is worth knowing
+ * about whether or not it happens to be on screen, and a warning that disappeared when you
+ * narrowed the range would be worse than no warning. The count is over the whole project.
+ */
+function WorkingDayWarning(props: { school: School }) {
+  const { school } = props;
+  const workingDays = school.workingDays;
+
+  // The week is the only thing this depends on. Deliberately *not* the date range: the
+  // finding is project-wide, so re-reading when the range above changes would be a round
+  // trip for an answer that cannot have moved.
+  //
+  // Keyed on the joined week rather than the array, because the array arrives from JSON
+  // and is a fresh object on every load — its identity would re-fetch forever.
+  const key = workingDays.join(",");
+  const load = useCallback(
+    () => nonWorkingInstructionalDays(workingDays),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [key],
+  );
+  const found = useList<NonWorkingInstructionalDay>(load);
+
+  // A failure here is not worth a banner of its own: the screen's real job is the table
+  // below, and an advisory that could not be computed is better silent than alarming.
+  if (found.error !== null || found.items === null || found.items.length === 0) return null;
+
+  const days = found.items;
+  const named = days.slice(0, NAMED_LIMIT);
+  const rest = days.length - named.length;
+
+  return (
+    <Banner tone="warning">
+      {days.length === 1
+        ? "One mapped teaching date falls outside the school's working days"
+        : `${days.length} mapped teaching dates fall outside the school's working days`}{" "}
+      ({describeWeek(workingDays)}):{" "}
+      {named
+        .map((day) => `${toDisplay(day.date)} (${weekdayName(day.weekday)})`)
+        .join(", ")}
+      {rest > 0 && ` and ${rest} more`}. Nothing has been changed — these mappings are
+      what the timetable uses. Edit a date below if it is wrong, or change the working days
+      in School Details if the school really does teach then.
+    </Banner>
   );
 }

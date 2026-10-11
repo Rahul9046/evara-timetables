@@ -10,6 +10,8 @@ use std::path::PathBuf;
 use tempfile::TempDir;
 use uuid::Uuid;
 
+use evara_core::calendar::WorkingDays;
+
 use crate::repo::structure::{
     AcademicYearInput, BuildingInput, CampusInput, ResourceInput, RoomInput, RoomTypeInput,
     SchoolInput, TermInput,
@@ -57,6 +59,7 @@ impl Project {
                 name: "Northgate Secondary".to_owned(),
                 timezone: "Europe/London".to_owned(),
                 locale: "en-GB".to_owned(),
+                working_days: WorkingDays::MONDAY_TO_FRIDAY,
             })
             .expect("create school");
 
@@ -731,6 +734,7 @@ fn only_one_school_can_exist_per_project() {
         name: "Another School".to_owned(),
         timezone: "Europe/London".to_owned(),
         locale: "en-GB".to_owned(),
+        working_days: WorkingDays::MONDAY_TO_FRIDAY,
     });
     assert!(
         second.is_err(),

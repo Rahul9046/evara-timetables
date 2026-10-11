@@ -18,10 +18,11 @@
 // See `project.rs` for why this lint is inapplicable to a module of command handlers.
 #![allow(clippy::needless_pass_by_value)]
 
+use evara_core::calendar::WorkingDays;
 use evara_core::time::CycleCoverage;
 use evara_db::{
-    CalendarDay, CalendarDayInput, Cycle, CycleDay, CycleDayInput, CycleInput, Period, PeriodInput,
-    PeriodStructure, PeriodStructureInput,
+    CalendarDay, CalendarDayInput, Cycle, CycleDay, CycleDayInput, CycleInput,
+    NonWorkingInstructionalDay, Period, PeriodInput, PeriodStructure, PeriodStructureInput,
 };
 use tauri::State;
 use uuid::Uuid;
@@ -306,4 +307,25 @@ pub fn setup_calendar_day_update(
 pub fn setup_calendar_day_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
     Ok(ws.time_model()?.delete_calendar_day(id)?)
+}
+
+/// Mapped teaching dates that land on a weekday the school does not work.
+///
+/// Advisory. The repository only reads — see
+/// [`TimeModel::non_working_instructional_days`](evara_db::TimeModel::non_working_instructional_days)
+/// for why changing the working week must never rewrite a calendar mapping, and why a
+/// weekday may be read here at all when scheduling may not read one anywhere.
+///
+/// Takes the week as `workingDays`, a list of ISO weekday numbers, rather than reading the
+/// school itself. That keeps the handler honest about being a projection over an argument
+/// the caller already has, and lets the interface preview a week before saving it.
+#[tauri::command]
+pub fn setup_calendar_non_working_days(
+    state: State<'_, AppState>,
+    working_days: WorkingDays,
+) -> SetupResult<Vec<NonWorkingInstructionalDay>> {
+    let mut ws = workspace(&state)?;
+    Ok(ws
+        .time_model()?
+        .non_working_instructional_days(working_days)?)
 }
