@@ -82,6 +82,21 @@ pub enum ProjectError {
     },
 }
 
+/// What a user creates and opens, in the interface's own words.
+///
+/// `evara-db` calls it a project, and so does every identifier in this crate. The
+/// interface calls it a **campus** — see `App.tsx` for why, and for why the longer
+/// "campus file" is used wherever a school's own campuses could be on screen at the same
+/// time.
+///
+/// The three messages below are written here rather than forwarded from `DbError`'s
+/// `Display` for that reason. `evara-db` is a library the CLI and the tests also use, its
+/// wording is not the desktop interface's to change, and this module already replaces
+/// several messages for a comparable reason — see the `Failed` arm just below.
+const NOT_A_CAMPUS: &str = "That file is not an Evara campus.";
+const WRONG_EXTENSION_PREFIX: &str = "An Evara campus must use the";
+const NONE_OPEN: &str = "No campus is open.";
+
 impl From<DbError> for ProjectError {
     fn from(error: DbError) -> Self {
         let message = error.to_string();
@@ -89,21 +104,29 @@ impl From<DbError> for ProjectError {
             DbError::SchemaTooNew { found, supported } => Self::SchemaTooNew {
                 found,
                 supported,
-                message,
+                message: format!(
+                    "This campus was created by a newer version of Evara (file format \
+                     v{found}; this version understands up to v{supported}). Update Evara \
+                     to open it."
+                ),
             },
             DbError::ProjectNotFound { .. } => Self::NotFound { message },
-            DbError::NotAnEvaraProject { .. } => Self::NotAnEvaraProject { message },
+            DbError::NotAnEvaraProject { .. } => Self::NotAnEvaraProject {
+                message: NOT_A_CAMPUS.to_owned(),
+            },
             DbError::WrongExtension { expected } => Self::WrongExtension {
                 expected: expected.to_owned(),
-                message,
+                message: format!("{WRONG_EXTENSION_PREFIX} {expected} extension."),
             },
             DbError::ProjectAlreadyExists { .. } => Self::AlreadyExists { message },
-            DbError::NoProjectOpen => Self::NoProjectOpen { message },
+            DbError::NoProjectOpen => Self::NoProjectOpen {
+                message: NONE_OPEN.to_owned(),
+            },
             // Everything else is an internal failure. These carry engine detail in their
             // source chain, so their own wording is replaced rather than forwarded.
             DbError::Open { .. } | DbError::Internal(_) | DbError::Migration(_) => Self::Failed {
-                message: "The project could not be opened. The file may be damaged or in use \
-                          by another program."
+                message: "That campus could not be opened. The file may be damaged or in \
+                          use by another program."
                     .to_owned(),
             },
             _ => Self::Failed { message },

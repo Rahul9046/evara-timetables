@@ -403,7 +403,7 @@ export function GridPreviewSection(_props: { school: School }) {
             onCancel={() => setConfirming(null)}
           >
             <p>
-              These slots will be removed from the project. This cannot be undone, and it is
+              These slots will be removed from this campus file. This cannot be undone, and it is
               the step that makes the excluded cycle day or period deletable.
             </p>
             <ul className="orphanList">

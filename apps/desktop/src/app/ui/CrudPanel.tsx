@@ -374,7 +374,7 @@ export function CrudPanel<T extends { id: string }, I>(props: {
           <>
             <p>
               <strong>{spec.describe(pendingDelete)}</strong> will be removed from this
-              project. This cannot be undone.
+              campus file. This cannot be undone.
             </p>
             {spec.deleteNote?.(pendingDelete)}
           </>
