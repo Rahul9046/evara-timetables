@@ -1,7 +1,7 @@
 /**
- * The School Setup workflow: navigation, and the eight sections behind it.
+ * The School Setup workflow: navigation, and the eleven sections behind it.
  *
- * ## Why a sidebar of eight sections rather than one long form
+ * ## Why a sidebar of many sections rather than one long form
  *
  * The brief asks not to put all configuration on one enormous screen, and the model
  * agrees: the entities fall into natural pairs — a campus and its buildings, a cycle and
@@ -32,6 +32,9 @@ import { GridPreviewSection } from "./GridPreviewSection";
 import { PeriodStructuresAndPeriods } from "./PeriodStructuresAndPeriods";
 import { RoomsAndRoomTypes } from "./RoomsAndRoomTypes";
 import { SchoolDetails } from "./SchoolDetails";
+import { StudentGroups } from "./StudentGroups";
+import { StudentsAndYearLevels } from "./StudentsAndYearLevels";
+import { Teachers } from "./Teachers";
 import { useValue } from "./useList";
 
 /** One entry in the setup navigation. */
@@ -46,7 +49,7 @@ interface Section {
 }
 
 /**
- * The eight sections, in setup order.
+ * The eleven sections, in setup order.
  *
  * Exported so a test can assert the list rather than the rendering: the set of sections
  * and their order is a product decision, and a silently dropped one would otherwise only
@@ -114,6 +117,30 @@ export const SECTIONS: readonly Section[] = [
     blurb: "Every slot a lesson could occupy",
     needsSchool: true,
     render: (school) => <GridPreviewSection school={school} />,
+  },
+  // People come after the grid because nothing about them depends on it, and because the
+  // grid is the first point at which a school can see that the structure it described is
+  // the one it meant. Entering staff before that is work done on an unverified foundation.
+  {
+    id: "teachers",
+    label: "Teachers",
+    blurb: "The staff a timetable is built around",
+    needsSchool: true,
+    render: (school) => <Teachers school={school} />,
+  },
+  {
+    id: "students",
+    label: "Students and year levels",
+    blurb: "Optional — a timetable can be built without them",
+    needsSchool: true,
+    render: (school) => <StudentsAndYearLevels school={school} />,
+  },
+  {
+    id: "groups",
+    label: "Student groups",
+    blurb: "Whoever a lesson is taught to",
+    needsSchool: true,
+    render: (school) => <StudentGroups school={school} />,
   },
 ];
 

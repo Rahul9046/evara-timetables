@@ -143,14 +143,17 @@ fn main() -> ExitCode {
 fn write_all() -> (Vec<Generated>, Vec<String>) {
     use evara_core::time::{CycleCoverage, CycleRotation};
     use evara_db::{
-        AcademicYear, AcademicYearInput, Building, BuildingInput, BuildingWithCampuses,
+        AcademicYear, AcademicYearInput, AvailabilityEntity, AvailabilityRule,
+        AvailabilityRuleInput, AvailabilityStatus, Building, BuildingInput, BuildingWithCampuses,
         CalendarDay, CalendarDayInput, CalendarDayKind, Campus, CampusInput, Cycle, CycleDay,
-        CycleDayInput, CycleInput, CycleKind, CycleShape, GridCell, GridPreview,
+        CycleDayInput, CycleInput, CycleKind, CycleShape, GridCell, GridPreview, GroupKind,
         MaterialisationCounts, MaterialisationPlan, MaterialisationRequest,
         NonWorkingInstructionalDay, Period, PeriodInput, PeriodKind, PeriodStructure,
         PeriodStructureInput, PlanFingerprint, PlannedSlot, Resource, ResourceInput, Room,
-        RoomInput, RoomType, RoomTypeInput, RoomWithCampuses, School, SchoolInput, Term, TermInput,
-        Timeslot, TimeslotInput, WeeklyCycleDay,
+        RoomInput, RoomType, RoomTypeInput, RoomWithCampuses, School, SchoolInput, Student,
+        StudentGroup, StudentGroupInput, StudentGroupMember, StudentGroupMemberInput, StudentInput,
+        Teacher, TeacherInput, Term, TermInput, Timeslot, TimeslotInput, WeeklyCycleDay, YearLevel,
+        YearLevelInput,
     };
     use evara_desktop_lib::commands::AppInfo;
     use evara_desktop_lib::commands::error::SetupError;
@@ -176,6 +179,23 @@ fn write_all() -> (Vec<Generated>, Vec<String>) {
         AcademicYearInput,
         Term,
         TermInput,
+        // People.
+        YearLevel,
+        YearLevelInput,
+        Teacher,
+        TeacherInput,
+        Student,
+        StudentInput,
+        StudentGroup,
+        StudentGroupInput,
+        GroupKind,
+        StudentGroupMember,
+        StudentGroupMemberInput,
+        // Availability.
+        AvailabilityRule,
+        AvailabilityRuleInput,
+        AvailabilityEntity,
+        AvailabilityStatus,
         // Time model.
         Cycle,
         CycleInput,

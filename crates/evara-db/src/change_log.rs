@@ -165,6 +165,14 @@ pub const TRACKED_TABLES: &[&str] = &[
     "room_campus",
     // V8 — the school's own logo.
     "school_logo",
+    // V10 — the People group.
+    "year_level",
+    "teacher",
+    "student",
+    "student_group",
+    "student_group_member",
+    // V11 — availability.
+    "availability",
 ];
 
 /// Installs the change-log triggers for one table.

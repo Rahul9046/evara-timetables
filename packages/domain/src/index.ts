@@ -16,7 +16,7 @@
  * type guards, discriminated-union helpers and display formatting.
  *
  * Type generation was wired up in Phase 1E. `./generated/` now holds the whole IPC
- * contract — forty types, written by `npm run types:generate` and verified by
+ * contract — sixty-four types, written by `npm run types:generate` and verified by
  * `npm run types:check`, which CI runs. See
  * [ADR 0009](../../../docs/adr/0009-typescript-type-generation.md) and
  * [ADR 0012](../../../docs/adr/0012-records-are-the-ipc-contract.md).
@@ -26,6 +26,10 @@ export type {
   AcademicYear,
   AcademicYearInput,
   AppInfo,
+  AvailabilityEntity,
+  AvailabilityRule,
+  AvailabilityRuleInput,
+  AvailabilityStatus,
   Building,
   BuildingInput,
   BuildingWithCampuses,
@@ -44,6 +48,7 @@ export type {
   CycleShape,
   GridCell,
   GridPreview,
+  GroupKind,
   LogoLimits,
   MaterialisationCounts,
   MaterialisationPlan,
@@ -67,11 +72,21 @@ export type {
   SchoolInput,
   SchoolLogoView,
   SetupError,
+  Student,
+  StudentGroup,
+  StudentGroupInput,
+  StudentGroupMember,
+  StudentGroupMemberInput,
+  StudentInput,
+  Teacher,
+  TeacherInput,
   Term,
   TermInput,
   Timeslot,
   TimeslotInput,
   WeeklyCycleDay,
+  YearLevel,
+  YearLevelInput,
 } from './generated/index';
 
 import type { AppInfo } from './generated/index';

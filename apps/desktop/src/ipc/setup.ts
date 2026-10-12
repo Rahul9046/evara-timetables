@@ -22,6 +22,9 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AcademicYear,
   AcademicYearInput,
+  AvailabilityEntity,
+  AvailabilityRule,
+  AvailabilityRuleInput,
   Building,
   BuildingInput,
   BuildingWithCampuses,
@@ -56,9 +59,19 @@ import type {
   SchoolInput,
   SchoolLogoView,
   SetupError,
+  Student,
+  StudentGroup,
+  StudentGroupInput,
+  StudentGroupMember,
+  StudentGroupMemberInput,
+  StudentInput,
+  Teacher,
+  TeacherInput,
   Term,
   TermInput,
   Timeslot,
+  YearLevel,
+  YearLevelInput,
 } from "@evara/domain";
 
 // ---------------------------------------------------------------------- error helpers
@@ -668,4 +681,222 @@ export function listTimeslots(
   termId: string | null,
 ): Promise<Timeslot[]> {
   return invoke<Timeslot[]>("setup_grid_timeslots", { cycleId, termId });
+}
+
+// ----------------------------------------------------------------------- year level
+
+/** Creates a year level. */
+export function createYearLevel(input: YearLevelInput): Promise<YearLevel> {
+  return invoke<YearLevel>("setup_year_level_create", { input });
+}
+
+/** One year level by identifier. */
+export function getYearLevel(id: string): Promise<YearLevel | null> {
+  return invoke<YearLevel | null>("setup_year_level_get", { id });
+}
+
+/** Every year level, in the school's own progression order. */
+export function listYearLevels(): Promise<YearLevel[]> {
+  return invoke<YearLevel[]>("setup_year_level_list");
+}
+
+/** Replaces a year level's details. */
+export function updateYearLevel(
+  id: string,
+  input: YearLevelInput,
+): Promise<YearLevel> {
+  return invoke<YearLevel>("setup_year_level_update", { id, input });
+}
+
+/** Deletes a year level, detaching anything classified by it. */
+export function deleteYearLevel(id: string): Promise<void> {
+  return invoke<void>("setup_year_level_delete", { id });
+}
+
+// -------------------------------------------------------------------------- teacher
+
+/** Creates a teacher. */
+export function createTeacher(input: TeacherInput): Promise<Teacher> {
+  return invoke<Teacher>("setup_teacher_create", { input });
+}
+
+/** One teacher by identifier. */
+export function getTeacher(id: string): Promise<Teacher | null> {
+  return invoke<Teacher | null>("setup_teacher_get", { id });
+}
+
+/**
+ * Every teacher, active and inactive.
+ *
+ * Inactive teachers are included deliberately. Deciding who to *offer* is a screen's
+ * decision; a list that hid them would also hide a teacher a timetable already names.
+ */
+export function listTeachers(): Promise<Teacher[]> {
+  return invoke<Teacher[]>("setup_teacher_list");
+}
+
+/** Replaces a teacher's details. Their identity is unchanged. */
+export function updateTeacher(id: string, input: TeacherInput): Promise<Teacher> {
+  return invoke<Teacher>("setup_teacher_update", { id, input });
+}
+
+/** Deletes a teacher. */
+export function deleteTeacher(id: string): Promise<void> {
+  return invoke<void>("setup_teacher_delete", { id });
+}
+
+// -------------------------------------------------------------------------- student
+
+/** Creates a student. */
+export function createStudent(input: StudentInput): Promise<Student> {
+  return invoke<Student>("setup_student_create", { input });
+}
+
+/** One student by identifier. */
+export function getStudent(id: string): Promise<Student | null> {
+  return invoke<Student | null>("setup_student_get", { id });
+}
+
+/** Every student, enrolled and left. */
+export function listStudents(): Promise<Student[]> {
+  return invoke<Student[]>("setup_student_list");
+}
+
+/** Replaces a student's details. Their identity is unchanged. */
+export function updateStudent(id: string, input: StudentInput): Promise<Student> {
+  return invoke<Student>("setup_student_update", { id, input });
+}
+
+/**
+ * Deletes a student who belongs to no group.
+ *
+ * Rejects when they are still in one; {@link listGroupsForStudent} is how a screen finds
+ * that out before offering the action rather than after it.
+ */
+export function deleteStudent(id: string): Promise<void> {
+  return invoke<void>("setup_student_delete", { id });
+}
+
+// -------------------------------------------------------------------- student group
+
+/** Creates a student group. */
+export function createStudentGroup(
+  input: StudentGroupInput,
+): Promise<StudentGroup> {
+  return invoke<StudentGroup>("setup_student_group_create", { input });
+}
+
+/** One student group by identifier. */
+export function getStudentGroup(id: string): Promise<StudentGroup | null> {
+  return invoke<StudentGroup | null>("setup_student_group_get", { id });
+}
+
+/** Every student group, ordered by name. */
+export function listStudentGroups(): Promise<StudentGroup[]> {
+  return invoke<StudentGroup[]>("setup_student_group_list");
+}
+
+/** Replaces a group's details. */
+export function updateStudentGroup(
+  id: string,
+  input: StudentGroupInput,
+): Promise<StudentGroup> {
+  return invoke<StudentGroup>("setup_student_group_update", { id, input });
+}
+
+/** Deletes a group and the memberships that only existed because of it. */
+export function deleteStudentGroup(id: string): Promise<void> {
+  return invoke<void>("setup_student_group_delete", { id });
+}
+
+// ----------------------------------------------------------------------- membership
+
+/** Adds a student to a group. */
+export function addGroupMember(
+  input: StudentGroupMemberInput,
+): Promise<StudentGroupMember> {
+  return invoke<StudentGroupMember>("setup_student_group_member_add", { input });
+}
+
+/** Removes one student from one group. The student is untouched. */
+export function removeGroupMember(
+  studentGroupId: string,
+  studentId: string,
+): Promise<void> {
+  return invoke<void>("setup_student_group_member_remove", {
+    studentGroupId,
+    studentId,
+  });
+}
+
+/** Every student in one group, ordered by name. */
+export function listGroupMembers(studentGroupId: string): Promise<Student[]> {
+  return invoke<Student[]>("setup_student_group_member_list", { studentGroupId });
+}
+
+/** How many students are in one group, for a confirmation that says so before it asks. */
+export function countGroupMembers(studentGroupId: string): Promise<number> {
+  return invoke<number>("setup_student_group_member_count", { studentGroupId });
+}
+
+/** Every group one student belongs to. */
+export function listGroupsForStudent(studentId: string): Promise<StudentGroup[]> {
+  return invoke<StudentGroup[]>("setup_student_groups_for_student", { studentId });
+}
+
+// --------------------------------------------------------------------- availability
+
+/**
+ * Writes an availability rule, replacing whatever already covers the same scope.
+ *
+ * There is no separate create and update, because the grid does not have those two
+ * actions: a cell is set or cleared, and whether that is an insert or an edit is the
+ * repository's business. It keys on the scope tuple, so the existing rule keeps its
+ * identity and gains a revision.
+ */
+export function setAvailability(
+  input: AvailabilityRuleInput,
+): Promise<AvailabilityRule> {
+  return invoke<AvailabilityRule>("setup_availability_set", { input });
+}
+
+/**
+ * Removes the rule covering one scope.
+ *
+ * Resolves `false` when there was none. That is not an error: the grid sends the same
+ * request whichever way a cell was toggled, and "nothing to remove" is the right outcome.
+ */
+export function clearAvailability(
+  scope: AvailabilityRuleInput,
+): Promise<boolean> {
+  return invoke<boolean>("setup_availability_clear", { scope });
+}
+
+/** Every availability rule for one entity. */
+export function listAvailability(
+  entityKind: AvailabilityEntity,
+  entityId: string,
+): Promise<AvailabilityRule[]> {
+  return invoke<AvailabilityRule[]>("setup_availability_list", {
+    entityKind,
+    entityId,
+  });
+}
+
+/** How many rules one entity has, for a listing that marks who has been configured. */
+export function countAvailability(
+  entityKind: AvailabilityEntity,
+  entityId: string,
+): Promise<number> {
+  return invoke<number>("setup_availability_count", { entityKind, entityId });
+}
+
+/**
+ * Rules whose entity no longer exists.
+ *
+ * The integrity sweep for the one reference the database cannot enforce. Nothing in
+ * normal operation should ever see a non-empty result.
+ */
+export function availabilityOrphans(): Promise<AvailabilityRule[]> {
+  return invoke<AvailabilityRule[]>("setup_availability_orphans");
 }

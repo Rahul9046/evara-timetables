@@ -25,6 +25,12 @@ use commands::project::AppState;
 ///
 /// Panics if the Tauri context cannot be initialised, which indicates a broken build
 /// rather than a runtime condition worth recovering from.
+#[expect(
+    clippy::too_many_lines,
+    reason = "almost all of it is the command manifest, which `tauri::generate_handler!` \
+              requires in one place; splitting it would hide what the application exposes \
+              without making any part of it shorter"
+)]
 pub fn run() {
     // The workspace owns the installation settings and the one open project. Built once,
     // here, because a failure to reach the settings database means Evara cannot function
@@ -48,6 +54,38 @@ pub fn run() {
             commands::project::project_forget_recent,
             commands::project::project_extension,
             commands::project::project_default_folder,
+            // School Setup, availability — Phase 2.
+            commands::availability::setup_availability_set,
+            commands::availability::setup_availability_clear,
+            commands::availability::setup_availability_list,
+            commands::availability::setup_availability_count,
+            commands::availability::setup_availability_orphans,
+            // School Setup, people and groups — Phase 2.
+            commands::people::setup_year_level_create,
+            commands::people::setup_year_level_get,
+            commands::people::setup_year_level_list,
+            commands::people::setup_year_level_update,
+            commands::people::setup_year_level_delete,
+            commands::people::setup_teacher_create,
+            commands::people::setup_teacher_get,
+            commands::people::setup_teacher_list,
+            commands::people::setup_teacher_update,
+            commands::people::setup_teacher_delete,
+            commands::people::setup_student_create,
+            commands::people::setup_student_get,
+            commands::people::setup_student_list,
+            commands::people::setup_student_update,
+            commands::people::setup_student_delete,
+            commands::people::setup_student_group_create,
+            commands::people::setup_student_group_get,
+            commands::people::setup_student_group_list,
+            commands::people::setup_student_group_update,
+            commands::people::setup_student_group_delete,
+            commands::people::setup_student_group_member_add,
+            commands::people::setup_student_group_member_remove,
+            commands::people::setup_student_group_member_list,
+            commands::people::setup_student_group_member_count,
+            commands::people::setup_student_groups_for_student,
             // School Setup, static structure — Phase 1E.
             commands::structure::setup_school_create,
             commands::structure::setup_school_get,

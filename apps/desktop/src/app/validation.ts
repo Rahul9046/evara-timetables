@@ -155,6 +155,18 @@ export function number(draft: Draft, key: string): number {
   return Number(text(draft, key));
 }
 
+/**
+ * Reads a draft field as a number, or null when blank — for a nullable numeric column.
+ *
+ * Blank means *unset*, never zero. A teacher with no period ceiling and a teacher who may
+ * teach no periods are different claims, and defaulting the first to the second would
+ * quietly write a rule the school never asked for.
+ */
+export function numberOrNull(draft: Draft, key: string): number | null {
+  const value = text(draft, key);
+  return value.length === 0 ? null : Number(value);
+}
+
 /** Reads a draft field as a boolean. */
 export function flag(draft: Draft, key: string): boolean {
   return draft[key] === true;
@@ -242,6 +254,55 @@ export function validateResource(draft: Draft): Problems {
     ["name", required(text(draft, "name"), "Resource name")],
     ["code", required(text(draft, "code"), "Code")],
     ["quantity", wholeNumber(text(draft, "quantity"), "Quantity", { min: 0 })],
+  ]);
+}
+
+/** A year level. */
+export function validateYearLevel(draft: Draft): Problems {
+  return problems([
+    ["name", required(text(draft, "name"), "Year level name")],
+    ["ordinal", wholeNumber(text(draft, "ordinal"), "Position", { min: 0 })],
+  ]);
+}
+
+/**
+ * A teacher.
+ *
+ * Only the two names are required. A staff code is optional because plenty of schools do
+ * not issue one, and an email is optional because Evara has no accounts and never sends
+ * anything — requiring either would be asking for data to satisfy a form rather than the
+ * school.
+ */
+export function validateTeacher(draft: Draft): Problems {
+  return problems([
+    ["givenName", required(text(draft, "givenName"), "First name")],
+    ["familyName", required(text(draft, "familyName"), "Last name")],
+    ["ftePercent", wholeNumber(text(draft, "ftePercent"), "Full-time equivalent", { min: 0, max: 100 })],
+    ["maxPeriodsPerDay", optional(text(draft, "maxPeriodsPerDay"), (value, name) => wholeNumber(value, name, { min: 0 }), "Periods per day")],
+    ["maxPeriodsPerCycle", optional(text(draft, "maxPeriodsPerCycle"), (value, name) => wholeNumber(value, name, { min: 0 }), "Periods per cycle")],
+    ["maxConsecutivePeriods", optional(text(draft, "maxConsecutivePeriods"), (value, name) => wholeNumber(value, name, { min: 0 }), "Consecutive periods")],
+  ]);
+}
+
+/** A student. Only the two names are required, for the same reasons as a teacher. */
+export function validateStudent(draft: Draft): Problems {
+  return problems([
+    ["givenName", required(text(draft, "givenName"), "First name")],
+    ["familyName", required(text(draft, "familyName"), "Last name")],
+  ]);
+}
+
+/**
+ * A student group.
+ *
+ * `size` is optional and means something specific when left blank: "the membership list is
+ * the truth". A blank is therefore not an incomplete form, and is not defaulted to zero.
+ */
+export function validateStudentGroup(draft: Draft): Problems {
+  return problems([
+    ["name", required(text(draft, "name"), "Group name")],
+    ["kind", required(text(draft, "kind"), "Kind")],
+    ["size", optional(text(draft, "size"), (value, name) => wholeNumber(value, name, { min: 0 }), "Size")],
   ]);
 }
 

@@ -61,6 +61,13 @@ pub use crate::error::{DbError, InternalError, Result};
 pub use crate::meta::ProjectIdentity;
 pub use crate::migrations::supported_schema_version;
 pub use crate::repo::Stamp;
+pub use crate::repo::availability::{
+    Availability, AvailabilityEntity, AvailabilityRule, AvailabilityRuleInput, AvailabilityStatus,
+};
+pub use crate::repo::people::{
+    GroupKind, People, Student, StudentGroup, StudentGroupInput, StudentGroupMember,
+    StudentGroupMemberInput, StudentInput, Teacher, TeacherInput, YearLevel, YearLevelInput,
+};
 pub use crate::repo::structure::{
     AcademicYear, AcademicYearInput, Building, BuildingInput, BuildingWithCampuses, Campus,
     CampusInput, Resource, ResourceInput, Room, RoomInput, RoomType, RoomTypeInput,
@@ -254,6 +261,18 @@ impl Database {
         TimeModel::new(self)
     }
 
+    /// Reads and writes the People entities — teachers, students, groups and memberships.
+    ///
+    /// The only route to that data. Callers never see SQL or a connection.
+    pub fn people(&mut self) -> People<'_> {
+        People::new(self)
+    }
+
+    /// Reads and writes availability rules, for every entity kind that can carry them.
+    pub fn availability(&mut self) -> Availability<'_> {
+        Availability::new(self)
+    }
+
     /// Reads the connection settings back from SQLite, for diagnostics and tests.
     ///
     /// # Errors
@@ -350,3 +369,11 @@ mod tests_cycle_kinds;
 
 #[cfg(test)]
 mod tests_school_logo;
+
+/// Phase 2: teachers, students, groups, membership, and what survives a reopen.
+#[cfg(test)]
+mod tests_people;
+
+/// Phase 2: availability, and what the polymorphic reference needs to stay honest.
+#[cfg(test)]
+mod tests_availability;

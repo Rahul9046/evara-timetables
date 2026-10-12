@@ -56,6 +56,15 @@ vi.mock("./CalendarMapping", () => ({
 vi.mock("./GridPreviewSection", () => ({
   GridPreviewSection: () => <div>stub:grid</div>,
 }));
+vi.mock("./Teachers", () => ({
+  Teachers: () => <div>stub:teachers</div>,
+}));
+vi.mock("./StudentsAndYearLevels", () => ({
+  StudentsAndYearLevels: () => <div>stub:students</div>,
+}));
+vi.mock("./StudentGroups", () => ({
+  StudentGroups: () => <div>stub:groups</div>,
+}));
 
 const { SchoolSetup, SECTIONS } = await import("./SchoolSetup");
 
@@ -94,7 +103,7 @@ function steps(): string[] {
 }
 
 describe("the section list", () => {
-  it("is the eight steps of setup, in dependency order", () => {
+  it("is the eleven steps of setup, in dependency order", () => {
     expect(SECTIONS.map((s) => s.id)).toEqual([
       "school",
       "campuses",
@@ -104,6 +113,11 @@ describe("the section list", () => {
       "periods",
       "calendar",
       "grid",
+      // People follow the grid: nothing about them depends on it, and the grid is where a
+      // school first sees that the structure it described is the one it meant.
+      "teachers",
+      "students",
+      "groups",
     ]);
   });
 
@@ -123,12 +137,12 @@ describe("the sidebar", () => {
   it("offers every section and no Resources entry", async () => {
     await open();
 
-    expect(steps()).toHaveLength(8);
+    expect(steps()).toHaveLength(11);
     expect(within(nav()).queryByRole("button", { name: /Resources/i })).toBeNull();
     expect(within(nav()).queryByText(/Shared equipment/i)).toBeNull();
   });
 
-  it("numbers the steps 1-8 with no gap where Resources was", async () => {
+  it("numbers the steps 1-11 with no gap where Resources was", async () => {
     await open();
 
     // The numbers come from array position, so this is what proves the removal
@@ -136,7 +150,9 @@ describe("the sidebar", () => {
     const indices = within(nav())
       .getAllByRole("button")
       .map((b) => b.querySelector(".navIndex")?.textContent);
-    expect(indices).toEqual(["1", "2", "3", "4", "5", "6", "7", "8"]);
+    expect(indices).toEqual([
+      "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11",
+    ]);
   });
 
   it("gives step 4 to academic years, which followed Resources", async () => {
@@ -235,7 +251,7 @@ describe("before the school record exists", () => {
     const locked = within(nav())
       .getAllByRole("button")
       .filter((b) => b.hasAttribute("disabled"));
-    expect(locked).toHaveLength(7);
+    expect(locked).toHaveLength(10);
     expect(locked.every((b) => b.textContent?.includes("Needs the school record"))).toBe(
       true,
     );
