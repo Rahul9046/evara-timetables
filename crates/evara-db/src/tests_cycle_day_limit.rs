@@ -23,7 +23,8 @@ use uuid::Uuid;
 use crate::DbError;
 use crate::repo::structure::SchoolInput;
 use crate::repo::time_model::{
-    CalendarDayInput, CalendarDayKind, CycleDay, CycleDayInput, CycleInput, MaterialisationRequest,
+    CalendarDayInput, CalendarDayKind, CycleDay, CycleDayInput, CycleInput, CycleKind,
+    MaterialisationRequest,
 };
 use crate::tests_time_model::Project;
 
@@ -74,6 +75,7 @@ fn try_resize(project: &mut Project, cycle: Uuid, day_count: i64) -> Result<(), 
             &CycleInput {
                 school_id: school,
                 name: "Rotation".to_owned(),
+                kind: CycleKind::Custom,
                 day_count,
                 week_count: 1,
                 is_default: false,
@@ -87,7 +89,7 @@ fn try_resize(project: &mut Project, cycle: Uuid, day_count: i64) -> Result<(), 
 #[test]
 fn a_five_day_cycle_with_five_days_refuses_a_sixth() {
     let mut project = Project::new();
-    let cycle = project.cycle("Rotation", 5);
+    let cycle = project.bare_cycle("Rotation", 5);
     for ordinal in 1..=5 {
         project.day(cycle, ordinal, &format!("Day {ordinal}"));
     }
@@ -113,7 +115,7 @@ fn a_five_day_cycle_with_five_days_refuses_a_sixth() {
 #[test]
 fn a_full_cycle_refuses_every_position_it_already_has() {
     let mut project = Project::new();
-    let cycle = project.cycle("Rotation", 5);
+    let cycle = project.bare_cycle("Rotation", 5);
     for ordinal in 1..=5 {
         project.day(cycle, ordinal, &format!("Day {ordinal}"));
     }
@@ -138,7 +140,7 @@ fn a_full_cycle_refuses_every_position_it_already_has() {
 #[test]
 fn a_five_day_cycle_with_four_days_accepts_the_missing_one() {
     let mut project = Project::new();
-    let cycle = project.cycle("Rotation", 5);
+    let cycle = project.bare_cycle("Rotation", 5);
     // Deliberately leaving position 3 empty rather than position 5: a gap in the middle
     // is the case a "count the rows" implementation gets wrong.
     for ordinal in [1, 2, 4, 5] {
@@ -169,7 +171,7 @@ fn a_five_day_cycle_with_four_days_accepts_the_missing_one() {
 #[test]
 fn filling_the_last_gap_then_refuses_anything_further() {
     let mut project = Project::new();
-    let cycle = project.cycle("Rotation", 3);
+    let cycle = project.bare_cycle("Rotation", 3);
     project.day(cycle, 1, "Day 1");
     project.day(cycle, 2, "Day 2");
 
@@ -189,7 +191,7 @@ fn filling_the_last_gap_then_refuses_anything_further() {
 #[test]
 fn a_position_below_one_is_refused_with_a_reason_a_user_can_act_on() {
     let mut project = Project::new();
-    let cycle = project.cycle("Rotation", 5);
+    let cycle = project.bare_cycle("Rotation", 5);
 
     for ordinal in [0, -1, i64::MIN] {
         match try_day(&mut project, cycle, ordinal, "Nowhere") {
@@ -217,7 +219,7 @@ fn a_position_below_one_is_refused_with_a_reason_a_user_can_act_on() {
 #[test]
 fn a_position_past_the_declared_length_is_refused() {
     let mut project = Project::new();
-    let cycle = project.cycle("Rotation", 5);
+    let cycle = project.bare_cycle("Rotation", 5);
 
     for ordinal in [6, 7, 100, i64::MAX] {
         match try_day(&mut project, cycle, ordinal, "Beyond") {
@@ -232,7 +234,7 @@ fn a_position_past_the_declared_length_is_refused() {
 #[test]
 fn a_one_day_cycle_accepts_exactly_one_position() {
     let mut project = Project::new();
-    let cycle = project.cycle("Every day", 1);
+    let cycle = project.bare_cycle("Every day", 1);
 
     try_day(&mut project, cycle, 1, "The day").expect("position 1");
     assert!(try_day(&mut project, cycle, 2, "The other day").is_err());
@@ -245,7 +247,7 @@ fn an_edit_is_range_checked_too_not_only_a_create() {
     // Requirement 6 is about what a direct IPC call can do, and `setup_cycle_day_update`
     // is as direct a route to an out-of-range ordinal as `create` is.
     let mut project = Project::new();
-    let cycle = project.cycle("Rotation", 5);
+    let cycle = project.bare_cycle("Rotation", 5);
     let day = project.day(cycle, 2, "Day 2");
 
     for ordinal in [0, -5, 6, 99] {
@@ -278,10 +280,15 @@ fn an_edit_is_range_checked_too_not_only_a_create() {
 
 // ================================================================== changing the length
 
+/// Lengthening a custom cycle now *creates* the positions it adds (ADR 0017).
+///
+/// It used to merely make them legal to add by hand, which is what this test asserted
+/// before. The range rule it was really about is unchanged and still asserted at both
+/// ends: position 6 does not exist before the resize, and position 7 is refused after it.
 #[test]
-fn increasing_the_length_opens_the_positions_it_adds() {
+fn increasing_the_length_creates_the_positions_it_adds() {
     let mut project = Project::new();
-    let cycle = project.cycle("Rotation", 5);
+    let cycle = project.bare_cycle("Rotation", 5);
     for ordinal in 1..=5 {
         project.day(cycle, ordinal, &format!("Day {ordinal}"));
     }
@@ -290,24 +297,26 @@ fn increasing_the_length_opens_the_positions_it_adds() {
 
     try_resize(&mut project, cycle, 6).expect("lengthening is always safe");
 
-    let created = try_day(&mut project, cycle, 6, "Day 6").expect("position 6 is now real");
-    assert_eq!(created.ordinal, 6);
-
     // The five that already existed are byte-for-byte what they were: lengthening a cycle
-    // renumbers nothing.
+    // renumbers nothing and rewrites nothing.
     let after = snapshot(&mut project, cycle);
-    assert_eq!(after.len(), 6);
+    assert_eq!(after.len(), 6, "position 6 was laid out by the resize");
     for existing in &before {
         assert!(after.contains(existing), "day {existing:?} was altered");
     }
-    // And position 7 is still refused.
+    let sixth = after.last().expect("six days");
+    assert_eq!(sixth.0, 6);
+    assert_eq!(sixth.2, "Day 6", "and labelled by the repository");
+    assert_eq!(sixth.3, 1, "a brand-new row, at revision 1");
+
+    // And position 7 is still refused, by the declared length rather than by what exists.
     assert!(try_day(&mut project, cycle, 7, "Day 7").is_err());
 }
 
 #[test]
 fn reducing_the_length_below_an_occupied_position_is_refused() {
     let mut project = Project::new();
-    let cycle = project.cycle("Rotation", 6);
+    let cycle = project.bare_cycle("Rotation", 6);
     for ordinal in 1..=6 {
         project.day(cycle, ordinal, &format!("Day {ordinal}"));
     }
@@ -341,7 +350,7 @@ fn reducing_the_length_below_an_occupied_position_is_refused() {
 fn reducing_the_length_to_the_highest_occupied_position_is_allowed() {
     // The boundary: a 6-day cycle whose days stop at 4 may be shortened to 4, but not 3.
     let mut project = Project::new();
-    let cycle = project.cycle("Rotation", 6);
+    let cycle = project.bare_cycle("Rotation", 6);
     for ordinal in 1..=4 {
         project.day(cycle, ordinal, &format!("Day {ordinal}"));
     }
@@ -363,7 +372,7 @@ fn reducing_the_length_to_the_highest_occupied_position_is_allowed() {
 #[test]
 fn an_empty_cycle_can_be_shortened_freely() {
     let mut project = Project::new();
-    let cycle = project.cycle("Rotation", 10);
+    let cycle = project.bare_cycle("Rotation", 10);
 
     try_resize(&mut project, cycle, 1).expect("no days, nothing in the way");
     assert!(try_day(&mut project, cycle, 2, "Day 2").is_err());
@@ -436,8 +445,8 @@ fn a_refused_day_disturbs_no_calendar_mapping_or_timeslot() {
 #[test]
 fn the_limit_is_per_cycle_not_per_school() {
     let mut project = Project::new();
-    let short = project.cycle("Weekly", 2);
-    let long = project.cycle("Fortnight", 10);
+    let short = project.bare_cycle("Weekly", 2);
+    let long = project.bare_cycle("Fortnight", 10);
 
     project.day(short, 1, "Mon");
     project.day(short, 2, "Tue");
@@ -477,7 +486,7 @@ fn the_school_fixture_is_untouched_by_all_of_this() {
         .school()
         .expect("read")
         .expect("exists");
-    let cycle = project.cycle("Rotation", 2);
+    let cycle = project.bare_cycle("Rotation", 2);
     project.day(cycle, 1, "Day 1");
     assert!(try_day(&mut project, cycle, 3, "Day 3").is_err());
 

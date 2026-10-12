@@ -28,7 +28,7 @@ use crate::tests_time_model::Project;
 #[test]
 fn a_full_cycle_reports_itself_complete() {
     let mut project = Project::new();
-    let cycle = project.cycle("Five-day week", 5);
+    let cycle = project.bare_cycle("Five-day week", 5);
     for ordinal in 1..=5 {
         project.day(cycle, ordinal, &format!("Day {ordinal}"));
     }
@@ -48,7 +48,7 @@ fn a_full_cycle_reports_itself_complete() {
 #[test]
 fn a_half_built_cycle_names_the_positions_with_no_day() {
     let mut project = Project::new();
-    let cycle = project.cycle("Six-day rotation", 6);
+    let cycle = project.bare_cycle("Six-day rotation", 6);
     project.day(cycle, 1, "Day A");
     project.day(cycle, 2, "Day B");
     project.day(cycle, 5, "Day E");
@@ -70,7 +70,7 @@ fn a_half_built_cycle_names_the_positions_with_no_day() {
 #[test]
 fn coverage_of_a_ten_day_fortnight_is_not_a_special_case() {
     let mut project = Project::new();
-    let cycle = project.cycle("Ten-day fortnight", 10);
+    let cycle = project.bare_cycle("Ten-day fortnight", 10);
     for ordinal in 1..=10 {
         project.day(cycle, ordinal, &format!("Day {ordinal}"));
     }
@@ -88,7 +88,7 @@ fn coverage_of_a_ten_day_fortnight_is_not_a_special_case() {
 #[test]
 fn coverage_of_a_one_day_cycle_is_complete_with_one_day() {
     let mut project = Project::new();
-    let cycle = project.cycle("Every day the same", 1);
+    let cycle = project.bare_cycle("Every day the same", 1);
     project.day(cycle, 1, "Every day");
 
     let coverage = project
@@ -119,7 +119,7 @@ fn coverage_of_an_unknown_cycle_is_not_found_rather_than_empty() {
 #[test]
 fn coverage_survives_closing_and_reopening_the_project() {
     let mut project = Project::new();
-    let cycle = project.cycle("Six-day rotation", 6);
+    let cycle = project.bare_cycle("Six-day rotation", 6);
     project.day(cycle, 1, "Day A");
     project.day(cycle, 2, "Day B");
 
@@ -687,7 +687,7 @@ fn a_preview_of_a_built_grid_reports_every_cell_present() {
 #[test]
 fn a_preview_over_an_incomplete_cycle_is_never_complete() {
     let mut project = Project::new();
-    let cycle = project.cycle("Six-day rotation", 6);
+    let cycle = project.bare_cycle("Six-day rotation", 6);
     let _ = project.day(cycle, 1, "Day A");
     let _ = project.day(cycle, 2, "Day B");
     let structure = project.structure("Standard bells", None);
@@ -720,7 +720,7 @@ fn a_preview_over_an_incomplete_cycle_is_never_complete() {
 #[test]
 fn a_preview_with_no_periods_is_not_complete_despite_missing_nothing() {
     let mut project = Project::new();
-    let cycle = project.cycle("One-day cycle", 1);
+    let cycle = project.bare_cycle("One-day cycle", 1);
     project.day(cycle, 1, "Every day");
     let structure = project.structure("Empty bells", None);
 
@@ -788,7 +788,7 @@ fn a_preview_marks_only_teaching_cells_as_teachable() {
 #[test]
 fn two_grids_over_one_cycle_do_not_see_each_others_slots() {
     let mut project = Project::new();
-    let cycle = project.cycle("Five-day week", 5);
+    let cycle = project.bare_cycle("Five-day week", 5);
     for ordinal in 1..=5 {
         project.day(cycle, ordinal, &format!("Day {ordinal}"));
     }

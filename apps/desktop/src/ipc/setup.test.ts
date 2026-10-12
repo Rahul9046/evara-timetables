@@ -48,6 +48,13 @@ describe("command names and payloads", () => {
     ["setup_period_list", () => setup.listPeriods(ID), { periodStructureId: ID }],
     ["setup_cycle_coverage", () => setup.cycleCoverage(ID), { cycleId: ID }],
     [
+      // The working week travels with the question. A cycle is shared, so the backend
+      // must never go looking for "the" school's week on the caller's behalf.
+      "setup_cycle_shape",
+      () => setup.cycleShape(ID, [1, 2, 3, 4, 5]),
+      { cycleId: ID, workingDays: [1, 2, 3, 4, 5] },
+    ],
+    [
       "setup_calendar_day_list",
       () => setup.listCalendarDays("2027-09-01", "2028-07-20"),
       { from: "2027-09-01", to: "2028-07-20" },

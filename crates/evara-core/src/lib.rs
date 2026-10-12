@@ -24,6 +24,11 @@
 //! interface because it is a question about the model, and a scheduling rule in the view
 //! layer is an architecture bug.
 //!
+//! [`time::CycleRotation`] joins it with the other such rule: the order a cycle's positions
+//! run in and where the rotation comes back round. Day 5 of a five-day cycle is followed by
+//! Day 1, and "what follows the last day" is stated once, here, rather than worked out again
+//! by whichever screen draws the sequence.
+//!
 //! [`branding::LogoImage`] decides whether an uploaded school logo is one the project
 //! will carry, reading the bytes' own header rather than a filename or an extension.
 //!
@@ -31,6 +36,14 @@
 //! two modules are deliberately separate, because a cycle position and a weekday are
 //! different kinds of thing and only one of them schedules anything — see the
 //! [`calendar`] header.
+//!
+//! [`calendar::WeeklyPosition`] is the one place the two meet, and the header there sets out
+//! why that is not a contradiction: a weekly cycle's positions are *named* by the calendar —
+//! position 1 is Monday — while `ordinal` remains the whole of a day's scheduling identity.
+//! All seven exist, always, so that one cycle definition can be shared by schools keeping
+//! different weeks; [`calendar::WeeklyPosition::applies_to`] answers "and which of those does
+//! this school teach on?" without storing the answer anywhere. See
+//! [ADR 0017](../../../docs/adr/0017-weekly-and-custom-cycles.md).
 
 pub mod branding;
 pub mod calendar;

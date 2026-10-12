@@ -104,6 +104,7 @@ pub fn run() {
             commands::time_model::setup_cycle_update,
             commands::time_model::setup_cycle_delete,
             commands::time_model::setup_cycle_coverage,
+            commands::time_model::setup_cycle_shape,
             commands::time_model::setup_cycle_day_create,
             commands::time_model::setup_cycle_day_get,
             commands::time_model::setup_cycle_day_list,

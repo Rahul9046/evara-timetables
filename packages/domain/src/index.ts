@@ -39,6 +39,9 @@ export type {
   CycleDay,
   CycleDayInput,
   CycleInput,
+  CycleKind,
+  CycleRotation,
+  CycleShape,
   GridCell,
   GridPreview,
   LogoLimits,
@@ -68,6 +71,7 @@ export type {
   TermInput,
   Timeslot,
   TimeslotInput,
+  WeeklyCycleDay,
 } from './generated/index';
 
 import type { AppInfo } from './generated/index';

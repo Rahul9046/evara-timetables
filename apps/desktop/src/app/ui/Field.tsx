@@ -40,6 +40,19 @@ export type FieldSpec =
       required?: boolean;
       /** Label for the null option. Omit to make the field non-nullable. */
       emptyLabel?: string;
+      /**
+       * Shows the stored value but refuses to change it.
+       *
+       * For a value that is real, is worth seeing, and is genuinely immutable — a cycle's
+       * type, which is fixed when the cycle is created. Hiding it on an edit would leave
+       * the form silent about what it is editing; a free select would offer a change the
+       * backend refuses.
+       *
+       * A disabled control is not focusable, so the `hint` must say *why* rather than
+       * leaving the reason to a tooltip nobody can reach. Same rule as
+       * `CrudSpec.addBlockedBy`.
+       */
+      disabled?: boolean;
       choices: readonly Choice[];
     }
   /**
@@ -234,6 +247,7 @@ export function Field(props: {
           ) : spec.kind === "select" ? (
             <select
               {...shared}
+              disabled={disabled || spec.disabled === true}
               value={asText}
               onChange={(e) => onChange(spec.key, e.currentTarget.value)}
             >

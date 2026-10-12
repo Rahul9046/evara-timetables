@@ -17,8 +17,8 @@ use evara_core::calendar::WorkingDays;
 
 use crate::repo::structure::{AcademicYearInput, CampusInput, SchoolInput, TermInput};
 use crate::repo::time_model::{
-    CalendarDayInput, CalendarDayKind, CycleDayInput, CycleInput, MaterialisationRequest,
-    PeriodInput, PeriodKind, PeriodStructureInput, Timeslot,
+    CalendarDayInput, CalendarDayKind, CycleDayInput, CycleInput, CycleKind,
+    MaterialisationRequest, PeriodInput, PeriodKind, PeriodStructureInput, Timeslot,
 };
 use crate::workspace::Workspace;
 use crate::{Database, DbError, PROJECT_EXTENSION};
@@ -105,19 +105,63 @@ impl Project {
         self.workspace.open_database_for_test()
     }
 
+    /// A custom cycle of `day_count` positions, with the days creation lays out.
+    ///
+    /// `Day 1` … `Day N`, labelled by the repository. This is what the interface produces.
     pub(crate) fn cycle(&mut self, name: &str, day_count: i64) -> Uuid {
+        self.cycle_of(CycleKind::Custom, name, day_count)
+    }
+
+    /// A weekly cycle: seven positions, Monday through Sunday, created with it.
+    ///
+    /// `day_count` is deliberately not a parameter. A week is seven days, the repository
+    /// says so, and a test that could ask for a six-day week would be testing a state the
+    /// schema forbids.
+    pub(crate) fn weekly_cycle(&mut self, name: &str) -> Uuid {
+        // 1 rather than 7, so this also pins that the requested length is ignored.
+        self.cycle_of(CycleKind::Weekly, name, 1)
+    }
+
+    fn cycle_of(&mut self, kind: CycleKind, name: &str, day_count: i64) -> Uuid {
         let school = self.school;
         self.db()
             .time_model()
             .create_cycle(&CycleInput {
                 school_id: school,
                 name: name.to_owned(),
+                kind,
                 day_count,
                 week_count: 1,
                 is_default: false,
             })
             .expect("cycle")
             .id
+    }
+
+    /// A custom cycle with no days at all, for the tests that build one by hand.
+    ///
+    /// Creation now lays the positions out, so this removes them again. That is not a
+    /// workaround: a part-built cycle is a legal state (ADR 0011 Q4) that the tests below
+    /// are largely about, and reaching it by removing days is how a user reaches it too —
+    /// rather than by writing rows past the repository, which would prove nothing about
+    /// the repository.
+    pub(crate) fn bare_cycle(&mut self, name: &str, day_count: i64) -> Uuid {
+        let cycle = self.cycle(name, day_count);
+        let days: Vec<Uuid> = self
+            .db()
+            .time_model()
+            .cycle_days(cycle)
+            .expect("the days creation laid out")
+            .iter()
+            .map(|day| day.id)
+            .collect();
+        for day in days {
+            self.db()
+                .time_model()
+                .delete_cycle_day(day)
+                .expect("a brand-new day is referenced by nothing");
+        }
+        cycle
     }
 
     pub(crate) fn day(&mut self, cycle: Uuid, ordinal: i64, label: &str) -> Uuid {
@@ -173,7 +217,7 @@ impl Project {
 
     /// A six-day rotation with four periods: deliberately not a Monday-to-Friday week.
     pub(crate) fn six_day_grid(&mut self) -> (Uuid, Uuid, Vec<Uuid>, Vec<Uuid>) {
-        let cycle = self.cycle("Six-day rotation", 6);
+        let cycle = self.bare_cycle("Six-day rotation", 6);
         let days: Vec<Uuid> = ["Day A", "Day B", "Day C", "Day D", "Day E", "Day F"]
             .iter()
             .enumerate()
@@ -252,7 +296,7 @@ impl Project {
 #[test]
 fn a_cycle_may_be_longer_than_a_week() {
     let mut project = Project::new();
-    let cycle = project.cycle("Ten-day fortnight", 10);
+    let cycle = project.bare_cycle("Ten-day fortnight", 10);
     for ordinal in 1..=10 {
         project.day(cycle, ordinal, &format!("Day {ordinal}"));
     }
@@ -269,7 +313,7 @@ fn a_cycle_may_be_longer_than_a_week() {
 #[test]
 fn a_one_day_cycle_works() {
     let mut project = Project::new();
-    let cycle = project.cycle("Every day the same", 1);
+    let cycle = project.bare_cycle("Every day the same", 1);
     project.day(cycle, 1, "Day");
     assert_eq!(
         project.db().time_model().cycle_days(cycle).unwrap().len(),
@@ -281,7 +325,7 @@ fn a_one_day_cycle_works() {
 #[test]
 fn cycle_day_order_is_deterministic_and_independent_of_insertion_order() {
     let mut project = Project::new();
-    let cycle = project.cycle("Rotation", 4);
+    let cycle = project.bare_cycle("Rotation", 4);
     project.day(cycle, 3, "Zebra");
     project.day(cycle, 1, "Yak");
     project.day(cycle, 4, "Xerus");
@@ -324,7 +368,7 @@ fn period_order_is_deterministic() {
 #[test]
 fn a_cycle_day_beyond_the_declared_length_is_refused() {
     let mut project = Project::new();
-    let cycle = project.cycle("Five-day week", 5);
+    let cycle = project.bare_cycle("Five-day week", 5);
 
     let error = project
         .db()
@@ -344,7 +388,7 @@ fn a_cycle_day_beyond_the_declared_length_is_refused() {
 #[test]
 fn a_cycle_cannot_be_shortened_below_a_day_it_already_has() {
     let mut project = Project::new();
-    let cycle = project.cycle("Rotation", 6);
+    let cycle = project.bare_cycle("Rotation", 6);
     project.day(cycle, 6, "Day F");
 
     let school = project.school;
@@ -356,6 +400,7 @@ fn a_cycle_cannot_be_shortened_below_a_day_it_already_has() {
             &CycleInput {
                 school_id: school,
                 name: "Rotation".to_owned(),
+                kind: CycleKind::Custom,
                 day_count: 5,
                 week_count: 1,
                 is_default: false,
@@ -369,8 +414,8 @@ fn a_cycle_cannot_be_shortened_below_a_day_it_already_has() {
 #[test]
 fn uniqueness_is_scoped_to_the_parent_not_the_table() {
     let mut project = Project::new();
-    let first = project.cycle("First", 5);
-    let second = project.cycle("Second", 5);
+    let first = project.bare_cycle("First", 5);
+    let second = project.bare_cycle("Second", 5);
 
     project.day(first, 1, "Day A");
     // Same ordinal and same label, different cycle: fine.
@@ -481,6 +526,7 @@ fn only_one_cycle_may_be_the_default() {
         .create_cycle(&CycleInput {
             school_id: school,
             name: "First".to_owned(),
+            kind: CycleKind::Custom,
             day_count: 5,
             week_count: 1,
             is_default: true,
@@ -493,6 +539,7 @@ fn only_one_cycle_may_be_the_default() {
         .create_cycle(&CycleInput {
             school_id: school,
             name: "Second".to_owned(),
+            kind: CycleKind::Custom,
             day_count: 6,
             week_count: 1,
             is_default: true,
@@ -536,6 +583,7 @@ fn editing_the_default_cycle_leaves_it_the_default() {
         .create_cycle(&CycleInput {
             school_id: school,
             name: "Rotation".to_owned(),
+            kind: CycleKind::Custom,
             day_count: 6,
             week_count: 2,
             is_default: true,
@@ -551,6 +599,7 @@ fn editing_the_default_cycle_leaves_it_the_default() {
             &CycleInput {
                 school_id: school,
                 name: "Six-day rotation".to_owned(),
+                kind: CycleKind::Custom,
                 day_count: 6,
                 // Both of these are read from the row and sent back unchanged, which is
                 // exactly what the form now does.
@@ -599,6 +648,7 @@ fn the_first_cycle_is_not_made_the_default_by_the_repository() {
         .create_cycle(&CycleInput {
             school_id: school,
             name: "Weekly".to_owned(),
+            kind: CycleKind::Custom,
             day_count: 5,
             week_count: 1,
             is_default: false,
@@ -660,7 +710,7 @@ fn a_default_period_structure_is_per_campus() {
 #[test]
 fn a_created_row_starts_at_revision_one() {
     let mut project = Project::new();
-    let cycle = project.cycle("Rotation", 6);
+    let cycle = project.bare_cycle("Rotation", 6);
     let day = project.day(cycle, 1, "Day A");
 
     assert_eq!(
@@ -682,7 +732,7 @@ fn a_created_row_starts_at_revision_one() {
 #[test]
 fn an_update_consumes_exactly_one_revision() {
     let mut project = Project::new();
-    let cycle = project.cycle("Rotation", 6);
+    let cycle = project.bare_cycle("Rotation", 6);
     let day = project.day(cycle, 1, "Day A");
     let before = project.db().time_model().cycle_day(day).unwrap().unwrap();
 
@@ -870,7 +920,7 @@ fn adding_a_period_preserves_old_identifiers_and_creates_only_the_new_tuples() {
 #[test]
 fn adding_a_cycle_day_preserves_old_identifiers_and_creates_only_the_new_tuples() {
     let mut project = Project::new();
-    let cycle = project.cycle("Growing rotation", 7);
+    let cycle = project.bare_cycle("Growing rotation", 7);
     for ordinal in 1..=6 {
         project.day(cycle, ordinal, &format!("Day {ordinal}"));
     }
@@ -1388,7 +1438,7 @@ fn changing_a_periods_kind_refreshes_the_grid_without_renaming_anything() {
 #[test]
 fn explicit_dates_map_onto_arbitrarily_named_cycle_days() {
     let mut project = Project::new();
-    let cycle = project.cycle("Three-day rotation", 3);
+    let cycle = project.bare_cycle("Three-day rotation", 3);
     let a = project.day(cycle, 1, "Day A");
     let b = project.day(cycle, 2, "Day B");
     let c = project.day(cycle, 3, "Day C");
@@ -1502,7 +1552,7 @@ fn one_date_cannot_be_recorded_twice_for_the_same_campus() {
 #[test]
 fn a_mapped_date_blocks_deleting_the_cycle_day_it_names() {
     let mut project = Project::new();
-    let cycle = project.cycle("Rotation", 3);
+    let cycle = project.bare_cycle("Rotation", 3);
     let day = project.day(cycle, 1, "Day A");
     let school = project.school;
 

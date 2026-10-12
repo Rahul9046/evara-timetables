@@ -7,13 +7,19 @@
 //! Thin for the same reason as [`super::structure`]: the rules are in `evara-db`, where
 //! the CLI and the tests reach them too.
 //!
-//! # Nothing here knows what a week is
+//! # Nothing here schedules by a weekday
 //!
 //! A cycle day's `ordinal` is its whole scheduling identity; `label` and `weekdayHint` are
 //! display. These commands pass all three through untouched and never derive one from
 //! another, so a one-day cycle, a six-day rotation and a ten-day fortnight are the same
 //! code path. Real dates reach the model only through `calendar_day`, below, and only as
 //! an explicit mapping a human made.
+//!
+//! A weekly cycle does not change that. Its positions are *named* by the calendar --
+//! position 1 is Monday -- but they are still positions, and [`setup_cycle_shape`] is a
+//! read-only projection: it reports which of them a school keeping a given working week
+//! teaches on, and writes nothing. No date acquires a cycle day from a weekday, here or
+//! anywhere.
 
 // See `project.rs` for why this lint is inapplicable to a module of command handlers.
 #![allow(clippy::needless_pass_by_value)]
@@ -21,7 +27,7 @@
 use evara_core::calendar::WorkingDays;
 use evara_core::time::CycleCoverage;
 use evara_db::{
-    CalendarDay, CalendarDayInput, Cycle, CycleDay, CycleDayInput, CycleInput,
+    CalendarDay, CalendarDayInput, Cycle, CycleDay, CycleDayInput, CycleInput, CycleShape,
     NonWorkingInstructionalDay, Period, PeriodInput, PeriodStructure, PeriodStructureInput,
 };
 use tauri::State;
@@ -33,10 +39,14 @@ use super::workspace;
 
 // ----------------------------------------------------------------------------- cycle
 
-/// Creates a cycle.
+/// Creates a cycle **and the positions its kind declares**, in one transaction.
 ///
-/// `dayCount` is the *declared* length. The cycle is legal before it has that many days —
-/// adding them one at a time has to work — and
+/// `kind` is `WEEKLY` or `CUSTOM` and is fixed from here on. A weekly cycle gets the seven
+/// weekdays and ignores `dayCount` entirely; a custom cycle gets `Day 1` ... `Day N`,
+/// whose labels the user may then change.
+///
+/// `dayCount` remains the *declared* length, and a cycle is still legal with fewer days
+/// than it declares -- a day removed later leaves a gap, and
 /// [`setup_cycle_coverage`] is how the interface says so.
 #[tauri::command]
 pub fn setup_cycle_create(state: State<'_, AppState>, input: CycleInput) -> SetupResult<Cycle> {
@@ -58,7 +68,12 @@ pub fn setup_cycle_list(state: State<'_, AppState>) -> SetupResult<Vec<Cycle>> {
     Ok(ws.time_model()?.cycles()?)
 }
 
-/// Replaces a cycle's details.
+/// Replaces a cycle's details. Its kind is not among them.
+///
+/// A `kind` that differs from the stored one is refused rather than ignored: converting
+/// between a week and a rotation would mean creating or deleting days, which is never a
+/// side effect of an edit. Raising a custom cycle's `dayCount` creates the positions it
+/// adds and touches no existing day.
 ///
 /// Marking it default clears the previous default in the same transaction. Shortening it
 /// below a day it already has is refused rather than silently dropping the day.
@@ -91,6 +106,27 @@ pub fn setup_cycle_coverage(
 ) -> SetupResult<CycleCoverage> {
     let mut ws = workspace(&state)?;
     Ok(ws.time_model()?.cycle_coverage(cycle_id)?)
+}
+
+/// What kind of cycle this is, how its rotation runs, and — for a weekly cycle — which of
+/// its seven positions a school keeping `workingDays` teaches on.
+///
+/// One projection rather than several commands, because the screen's questions are all
+/// about the same cycle at the same moment; see
+/// [`TimeModel::cycle_shape`](evara_db::TimeModel::cycle_shape).
+///
+/// `workingDays` is an argument, not something read from the school. That is what makes it
+/// structurally impossible for this to bind a school's week to a shared cycle: ask about
+/// two different weeks and you get two different answers and one unchanged cycle. The same
+/// arrangement, for the same reason, as [`setup_calendar_non_working_days`].
+#[tauri::command]
+pub fn setup_cycle_shape(
+    state: State<'_, AppState>,
+    cycle_id: Uuid,
+    working_days: WorkingDays,
+) -> SetupResult<CycleShape> {
+    let mut ws = workspace(&state)?;
+    Ok(ws.time_model()?.cycle_shape(cycle_id, working_days)?)
 }
 
 // ------------------------------------------------------------------------- cycle day

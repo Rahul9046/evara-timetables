@@ -141,15 +141,16 @@ fn main() -> ExitCode {
 /// Grouped the way the repositories are, so a reader can check the list against
 /// `evara-db` rather than against nothing.
 fn write_all() -> (Vec<Generated>, Vec<String>) {
-    use evara_core::time::CycleCoverage;
+    use evara_core::time::{CycleCoverage, CycleRotation};
     use evara_db::{
         AcademicYear, AcademicYearInput, Building, BuildingInput, BuildingWithCampuses,
         CalendarDay, CalendarDayInput, CalendarDayKind, Campus, CampusInput, Cycle, CycleDay,
-        CycleDayInput, CycleInput, GridCell, GridPreview, MaterialisationCounts,
-        MaterialisationPlan, MaterialisationRequest, NonWorkingInstructionalDay, Period,
-        PeriodInput, PeriodKind, PeriodStructure, PeriodStructureInput, PlanFingerprint,
-        PlannedSlot, Resource, ResourceInput, Room, RoomInput, RoomType, RoomTypeInput,
-        RoomWithCampuses, School, SchoolInput, Term, TermInput, Timeslot, TimeslotInput,
+        CycleDayInput, CycleInput, CycleKind, CycleShape, GridCell, GridPreview,
+        MaterialisationCounts, MaterialisationPlan, MaterialisationRequest,
+        NonWorkingInstructionalDay, Period, PeriodInput, PeriodKind, PeriodStructure,
+        PeriodStructureInput, PlanFingerprint, PlannedSlot, Resource, ResourceInput, Room,
+        RoomInput, RoomType, RoomTypeInput, RoomWithCampuses, School, SchoolInput, Term, TermInput,
+        Timeslot, TimeslotInput, WeeklyCycleDay,
     };
     use evara_desktop_lib::commands::AppInfo;
     use evara_desktop_lib::commands::error::SetupError;
@@ -188,7 +189,11 @@ fn write_all() -> (Vec<Generated>, Vec<String>) {
         CalendarDay,
         CalendarDayInput,
         CalendarDayKind,
+        CycleKind,
         CycleCoverage,
+        CycleRotation,
+        CycleShape,
+        WeeklyCycleDay,
         NonWorkingInstructionalDay,
         // The materialised grid.
         Timeslot,

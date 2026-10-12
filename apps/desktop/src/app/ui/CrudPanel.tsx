@@ -38,7 +38,19 @@ export interface CrudSpec<T extends { id: string }, I> {
   /** Title shown above the table. */
   readonly title: string;
   readonly columns: readonly Column<T>[];
-  readonly fields: readonly FieldSpec[];
+  /**
+   * The form's fields, or a function of the draft when they depend on it.
+   *
+   * The function form exists for one real case: a choice early in the form that decides
+   * which later fields are *meaningful at all*. A cycle's type is the example — a weekly
+   * cycle has no length to set, because a week is seven days, so offering the field would
+   * invite a number the backend is going to ignore.
+   *
+   * It is deliberately not a general-purpose "show this if that": a field whose value is
+   * merely irrelevant should stay visible and be explained by its hint. Reach for this
+   * only when the field would otherwise ask for something the model does not accept.
+   */
+  readonly fields: readonly FieldSpec[] | ((draft: Draft) => readonly FieldSpec[]);
   /** A human-readable name for one row, for confirmations and screen readers. */
   readonly describe: (row: T) => string;
   readonly validate: (draft: Draft) => Problems;
@@ -209,7 +221,7 @@ export function CrudPanel<T extends { id: string }, I>(props: {
       // show the message. Either way the form stays open with the values intact.
       const field = offendingField(e);
       if (field) {
-        const key = fieldKeyFor(spec.fields, field);
+        const key = fieldKeyFor(fieldsOf(spec, draft), field);
         setProblems({ [key]: describeSetupError(e) });
       } else {
         setError(describeSetupError(e));
@@ -294,7 +306,7 @@ export function CrudPanel<T extends { id: string }, I>(props: {
         <EntityForm
           idPrefix={idPrefix}
           legend={editing.row ? `Edit ${spec.describe(editing.row)}` : `New ${spec.noun}`}
-          fields={spec.fields}
+          fields={fieldsOf(spec, draft)}
           draft={draft}
           problems={problems}
           busy={busy}
@@ -407,6 +419,20 @@ function PanelHead(props: {
       )}
     </div>
   );
+}
+
+/**
+ * The fields this draft should be rendered with.
+ *
+ * One place resolves {@link CrudSpec.fields}, so the form, the validator's error
+ * attachment and anything added later cannot disagree about which fields are on screen —
+ * which is how a backend message ends up pinned to a field the user cannot see.
+ */
+function fieldsOf<T extends { id: string }, I>(
+  spec: CrudSpec<T, I>,
+  draft: Draft,
+): readonly FieldSpec[] {
+  return typeof spec.fields === "function" ? spec.fields(draft) : spec.fields;
 }
 
 /**

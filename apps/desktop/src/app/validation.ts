@@ -292,9 +292,16 @@ function withDateOrder(found: Problems, draft: Draft): Problems {
  * one; the column's `CHECK (week_count >= 1)` remains the authority either way.
  */
 export function validateCycle(draft: Draft): Problems {
+  // A weekly cycle has no length to give. It is seven days because a week is seven days,
+  // the backend derives it from the type, and the form does not show the field — so
+  // insisting on a value here would mark a field that is not on screen. The *rule* that a
+  // week is seven days stays in `evara_core::calendar`; this only declines to ask.
+  if (text(draft, "kind") === "WEEKLY") {
+    return problems([["name", required(text(draft, "name"), "Cycle name")]]);
+  }
   return problems([
     ["name", required(text(draft, "name"), "Cycle name")],
-    ["dayCount", wholeNumber(text(draft, "dayCount"), "Days in the cycle", { min: 1 })],
+    ["dayCount", wholeNumber(text(draft, "dayCount"), "Rotation length", { min: 1 })],
   ]);
 }
 

@@ -86,9 +86,73 @@ impl CycleCoverage {
     }
 }
 
+/// The order a cycle's positions run in, and where the rotation comes back round.
+///
+/// A rotation is not a list with an end. Day 5 of a five-day cycle is followed by Day 1,
+/// which is the whole reason a cycle exists rather than a timetable per week. That wrap is
+/// the only non-obvious fact about the sequence, and it is stated here — once, in the
+/// bottom crate — so that the screen which draws the rotation preview reads an answer
+/// rather than working one out. `CLAUDE.md` names a rule implemented twice as an
+/// architecture bug, and "what follows the last day" is a rule.
+///
+/// Positions, never weekdays. A weekly cycle's rotation is `1..=7` for the same reason a
+/// six-day rotation's is `1..=6`: nothing here knows what a week is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct CycleRotation {
+    /// The cycle's declared length, straight from `cycle.day_count`.
+    pub day_count: i64,
+    /// The declared positions in order: `1..=day_count`.
+    ///
+    /// The *declared* positions, not the days that exist — a half-built cycle still
+    /// rotates through the positions it claims, and [`CycleCoverage`] is what says which
+    /// of them are still empty.
+    pub sequence: Vec<i64>,
+    /// The position the last one hands over to, or `None` for a cycle with no positions.
+    ///
+    /// Always 1 for a cycle of one or more days, including a one-day cycle, which hands
+    /// over to itself. Reported rather than assumed so a renderer never has to decide
+    /// whether a degenerate cycle wraps.
+    pub wraps_to: Option<i64>,
+}
+
+impl CycleRotation {
+    /// The rotation of a cycle of `day_count` declared positions.
+    #[must_use]
+    pub fn of(day_count: i64) -> Self {
+        let sequence: Vec<i64> = (1..=day_count).collect();
+        Self {
+            day_count,
+            wraps_to: sequence.first().copied(),
+            sequence,
+        }
+    }
+
+    /// The position that follows `ordinal`, wrapping at the end of the cycle.
+    ///
+    /// `None` when `ordinal` is not a position of this cycle. A cycle has no position 0,
+    /// and a position past the declared length has no successor to speak of — ADR 0011 Q4
+    /// allows such a row to exist in a damaged file, and guessing that it comes round to
+    /// Day 1 would make the sequence look sound.
+    #[must_use]
+    pub fn next_position(ordinal: i64, day_count: i64) -> Option<i64> {
+        if day_count < 1 || ordinal < 1 || ordinal > day_count {
+            return None;
+        }
+        Some(ordinal % day_count + 1)
+    }
+
+    /// The position after the last one, or `None` for an empty cycle.
+    #[must_use]
+    pub fn next_after_last(&self) -> Option<i64> {
+        Self::next_position(self.day_count, self.day_count)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::CycleCoverage;
+    use super::{CycleCoverage, CycleRotation};
 
     #[test]
     fn a_full_five_day_cycle_is_complete() {
@@ -159,5 +223,67 @@ mod tests {
     #[test]
     fn a_cycle_declared_as_zero_days_is_never_complete() {
         assert!(!CycleCoverage::of(0, &[]).is_complete());
+    }
+
+    // ===================================================================== rotation
+
+    #[test]
+    fn a_five_day_rotation_runs_one_to_five_and_comes_back_to_one() {
+        let rotation = CycleRotation::of(5);
+        assert_eq!(rotation.day_count, 5);
+        assert_eq!(rotation.sequence, vec![1, 2, 3, 4, 5]);
+        assert_eq!(rotation.wraps_to, Some(1));
+        assert_eq!(rotation.next_after_last(), Some(1));
+    }
+
+    /// The brief's worked example: Day 1 → … → Day 5 → Day 1.
+    #[test]
+    fn day_five_is_followed_by_day_one() {
+        assert_eq!(CycleRotation::next_position(1, 5), Some(2));
+        assert_eq!(CycleRotation::next_position(2, 5), Some(3));
+        assert_eq!(CycleRotation::next_position(3, 5), Some(4));
+        assert_eq!(CycleRotation::next_position(4, 5), Some(5));
+        assert_eq!(CycleRotation::next_position(5, 5), Some(1), "it wraps");
+    }
+
+    #[test]
+    fn a_one_day_cycle_hands_over_to_itself() {
+        let rotation = CycleRotation::of(1);
+        assert_eq!(rotation.sequence, vec![1]);
+        assert_eq!(rotation.wraps_to, Some(1));
+        assert_eq!(CycleRotation::next_position(1, 1), Some(1));
+    }
+
+    #[test]
+    fn a_weekly_rotation_is_seven_positions_and_nothing_about_a_week() {
+        let rotation = CycleRotation::of(7);
+        assert_eq!(rotation.sequence, vec![1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(CycleRotation::next_position(7, 7), Some(1));
+    }
+
+    #[test]
+    fn a_ten_day_fortnight_wraps_at_ten() {
+        assert_eq!(CycleRotation::next_position(9, 10), Some(10));
+        assert_eq!(CycleRotation::next_position(10, 10), Some(1));
+    }
+
+    #[test]
+    fn a_position_the_cycle_does_not_have_has_no_successor() {
+        assert_eq!(CycleRotation::next_position(0, 5), None);
+        assert_eq!(CycleRotation::next_position(-1, 5), None);
+        assert_eq!(
+            CycleRotation::next_position(6, 5),
+            None,
+            "past the declared length"
+        );
+        assert_eq!(CycleRotation::next_position(1, 0), None);
+    }
+
+    #[test]
+    fn a_cycle_with_no_positions_does_not_wrap() {
+        let rotation = CycleRotation::of(0);
+        assert_eq!(rotation.sequence, Vec::<i64>::new());
+        assert_eq!(rotation.wraps_to, None);
+        assert_eq!(rotation.next_after_last(), None);
     }
 }
