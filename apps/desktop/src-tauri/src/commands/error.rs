@@ -103,7 +103,7 @@ impl From<DbError> for SetupError {
         let message = error.to_string();
         match error {
             DbError::NoProjectOpen => Self::NoProjectOpen {
-                message: "No project is open. Open or create a project first.".to_owned(),
+                message: "No campus is open. Open or create one first.".to_owned(),
             },
             DbError::NotFound { entity } => Self::NotFound {
                 entity: entity.to_owned(),
@@ -127,15 +127,15 @@ impl From<DbError> for SetupError {
             DbError::ReviewRequired { .. } => Self::ReviewRequired { message },
             DbError::CorruptIdentifier { .. } | DbError::InvalidMetadata { .. } => {
                 Self::CorruptProject {
-                    message: "This project contains a damaged value and cannot be read safely. \
-                              Restore a backup if you have one."
+                    message: "This campus contains a damaged value and cannot be read \
+                              safely. Restore a backup if you have one."
                         .to_owned(),
                 }
             }
             // These carry engine detail — SQL text, file paths — in their source chain,
             // so the wording is replaced rather than forwarded.
             DbError::Internal(_) | DbError::Migration(_) | DbError::Open { .. } => Self::Failed {
-                message: "The project could not be updated. It may be damaged or in use by \
+                message: "This campus could not be updated. It may be damaged or in use by \
                           another program."
                     .to_owned(),
             },

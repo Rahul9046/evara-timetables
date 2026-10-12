@@ -15,7 +15,7 @@
  *
  * ## Everything except School Details needs a school
  *
- * There is exactly one school per project and it owns everything else, so until it exists
+ * There is exactly one school per campus file and it owns everything else, so until it exists
  * the only thing to do is create it. Rather than letting seven sections each discover
  * that, the shell holds the school record and shows the first-run state once.
  */
@@ -159,7 +159,7 @@ export function SchoolSetup() {
       <div className="setupBody">
         {error && <Banner tone="error">{error}</Banner>}
         {school === undefined ? (
-          <Loading what="the project" />
+          <Loading what="this campus file" />
         ) : active?.id === "school" ? (
           <SchoolDetails onChanged={reload} />
         ) : school === null ? (

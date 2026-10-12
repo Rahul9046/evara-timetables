@@ -1,13 +1,35 @@
 /**
  * The application shell.
  *
- * Two states, and the project decides which: with nothing open there is a start screen,
- * and with a project open there is the School Setup workflow under a title bar. The
+ * Two states, and the open file decides which: with nothing open there is a start screen,
+ * and with something open there is the School Setup workflow under a title bar. The
  * Phase 1B shell proved the lifecycle worked; this is the first version with something to
- * do once a project is open.
+ * do once a file is open.
  *
- * The shell holds no rules. It opens and closes projects, and renders whichever of the
- * two states applies.
+ * The shell holds no rules. It opens and closes files, and renders whichever of the two
+ * states applies.
+ *
+ * ## "Campus" on screen, `project` in the code
+ *
+ * What a user creates and opens is called a **campus**. Everything underneath still calls
+ * it a project: the `.evaraproj` extension, the `project_*` commands, `ProjectView`,
+ * `RecentProject`, the identifiers in this file. That is deliberate — the rename is
+ * vocabulary, not architecture, and renaming the model would have meant a migration and a
+ * file-format change for a wording decision.
+ *
+ * **The word is overloaded, and the overload is real.** A campus file contains one school,
+ * and that school has its own campuses — the "Campuses and buildings" section of School
+ * Setup. They are different things with the same name. So:
+ *
+ * - on the start screen, where no school is open and no campus entity can be on screen,
+ *   plain "campus" is unambiguous and is what is used;
+ * - inside School Setup, where a list of the school's campuses is a click away, the file
+ *   is called a **"campus file"** rather than a "campus". The extra word is what keeps
+ *   "removed from this campus file" from reading as "removed from the campus you have
+ *   selected".
+ *
+ * Anything added later that names the file while a campus entity is visible should follow
+ * the second rule.
  */
 import { useCallback, useEffect, useState } from "react";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -72,9 +94,11 @@ export function App() {
     run(async () => {
       const extension = await projectExtension();
       const path = await saveDialog({
-        title: "New Evara project",
+        title: "New Evara campus",
         defaultPath: (await defaultProjectFolder()) ?? undefined,
-        filters: [{ name: "Evara project", extensions: [extension] }],
+        // The filter's name labels the file type in the OS dialogue. The extension itself
+        // is unchanged and is not ours to rename here.
+        filters: [{ name: "Evara campus", extensions: [extension] }],
       });
       if (!path) return;
       await createProject(path);
@@ -84,10 +108,10 @@ export function App() {
     run(async () => {
       const extension = await projectExtension();
       const selected = await openDialog({
-        title: "Open Evara project",
+        title: "Open Evara campus",
         multiple: false,
         directory: false,
-        filters: [{ name: "Evara project", extensions: [extension] }],
+        filters: [{ name: "Evara campus", extensions: [extension] }],
       });
       if (typeof selected !== "string") return;
       await openProject(selected);
@@ -153,7 +177,7 @@ function TitleBar(props: {
           different images on load. */}
       <LogoMark className="titleBarLogo" logo={resolveLogo(logo)} size={36} />
       <div className="titleBarMain">
-        <span className="eyebrow">PROJECT</span>
+        <span className="eyebrow">CAMPUS</span>
         <h1 title={project.path}>{project.displayName}</h1>
         <span className="titleBarMeta">
           {project.folder} · schema v{project.schemaVersion}
@@ -161,15 +185,25 @@ function TitleBar(props: {
       </div>
 
       <div className="titleBarActions">
-        <button type="button" className="secondary" onClick={onClose} disabled={busy}>
-          Close project
+        <button
+          type="button"
+          className="secondary"
+          onClick={onClose}
+          disabled={busy}
+          // The title bar sits directly above a "Campuses and buildings" section, so this
+          // button is the one place the two meanings of "campus" could be mistaken for
+          // each other. The label follows the agreed wording; the tooltip says which one
+          // is being closed.
+          title="Close this campus file and return to the start screen"
+        >
+          Close campus
         </button>
       </div>
 
       {project.syncedFolder && (
         <Banner tone="warning">
-          <strong>This project is stored in {project.syncedFolder}.</strong> A live Evara
-          project is a database written continuously, and sync clients can copy its files
+          <strong>This campus is stored in {project.syncedFolder}.</strong> An open Evara
+          campus is a database written continuously, and sync clients can copy its files
           mid-write and corrupt it. Keeping it in a local folder is safer.
         </Banner>
       )}
@@ -199,30 +233,32 @@ function StartScreen(props: {
 
   return (
     <section className="panel">
-      {/* The application's own branding area. Always Evara's mark, whatever project was
+      {/* The application's own branding area. Always Evara's mark, whatever campus was
           last open -- a school's logo never stands in for the product's. */}
       <LogoMark className="startLogo" logo={evaraBrand()} size={64} />
       <span className="eyebrow">OPEN SOURCE · LOCAL FIRST</span>
       <h1>Evara Timetables</h1>
       <p>
-        Create a school project, or open one you already have. Everything stays on this
-        machine.
+        Create a campus to get started, or open one you already have. Everything stays on
+        this machine.
       </p>
 
       <div className="actions">
         <button type="button" onClick={onNew} disabled={busy}>
-          New project
+          New campus
         </button>
         <button type="button" className="secondary" onClick={onOpen} disabled={busy}>
-          Open project…
+          Open campus…
         </button>
       </div>
 
       {error && <Banner tone="error">{error}</Banner>}
 
-      <h2 className="sectionHead">Recent projects</h2>
+      <h2 className="sectionHead">Recent campuses</h2>
       {recents.length === 0 ? (
-        <p className="muted">Nothing yet. Projects you create or open will appear here.</p>
+        <p className="muted">
+          No recent campuses. Ones you create or open will appear here.
+        </p>
       ) : (
         <ul className="recents">
           {recents.map((entry) => (
@@ -242,7 +278,7 @@ function StartScreen(props: {
                 className="linkish"
                 disabled={busy}
                 onClick={() => onForget(entry.path)}
-                aria-label={`Remove ${entry.displayName} from recent projects`}
+                aria-label={`Remove ${entry.displayName} from recent campuses`}
               >
                 Remove
               </button>

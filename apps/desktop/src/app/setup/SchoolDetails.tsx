@@ -183,8 +183,8 @@ export function SchoolDetails(props: { onChanged: () => void }) {
       <header className="sectionIntro">
         <h2>School details</h2>
         <p>
-          The project describes one school. Everything else in setup — campuses, rooms,
-          years, the timetable cycle — belongs to it.
+          A campus file describes one school. Everything else in setup — that school&rsquo;s
+          campuses, its rooms, years and timetable cycle — belongs to it.
         </p>
       </header>
 
@@ -211,8 +211,9 @@ export function SchoolDetails(props: { onChanged: () => void }) {
           title="Start here"
           action={{ label: "Describe the school", onClick: () => open(null) }}
         >
-          Nothing has been set up in this project yet. Give the school a name, a time zone,
-          a locale and its working days, and the rest of the setup sections will open up.
+          Nothing has been set up in this campus file yet. Give the school a name, a time
+          zone, a locale and its working days, and the rest of the setup sections will open
+          up.
         </EmptyState>
       ) : (
         <>

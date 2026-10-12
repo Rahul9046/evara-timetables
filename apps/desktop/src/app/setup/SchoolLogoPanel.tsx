@@ -249,8 +249,8 @@ export function SchoolLogoPanel(props: { school: School }) {
         onCancel={() => setConfirmingRemove(false)}
       >
         <p>
-          The uploaded image is deleted from this project. Evara&rsquo;s own logo will be
-          used instead, and you can upload a new one at any time.
+          The uploaded image is deleted from this campus file. Evara&rsquo;s own logo will
+          be used instead, and you can upload a new one at any time.
         </p>
       </ConfirmDialog>
     </section>
