@@ -19,8 +19,8 @@ use crate::repo::structure::{
     SchoolInput, TermInput,
 };
 use crate::repo::time_model::{
-    CalendarDayInput, CalendarDayKind, CycleDayInput, CycleInput, MaterialisationRequest,
-    PeriodInput, PeriodKind, PeriodStructureInput,
+    CalendarDayInput, CalendarDayKind, CycleDayInput, CycleInput, CycleKind,
+    MaterialisationRequest, PeriodInput, PeriodKind, PeriodStructureInput,
 };
 use crate::workspace::Workspace;
 use crate::{DbError, PROJECT_EXTENSION};
@@ -178,12 +178,32 @@ fn a_school_can_be_set_up_from_an_empty_project_and_survives_a_reopen() {
         .create_cycle(&CycleInput {
             school_id: school,
             name: "Six-day rotation".to_owned(),
+            kind: CycleKind::Custom,
             day_count: 6,
             week_count: 2,
             is_default: true,
         })
         .expect("cycle")
         .id;
+
+    // Creation lays out all six positions as `Day 1`..`Day 6`. Clear them, because the
+    // state this walkthrough is about is the half-built cycle a school really has partway
+    // through setup: four days named the school's own way, and two positions still empty.
+    let laid_out: Vec<uuid::Uuid> = workspace
+        .time_model()
+        .expect("open")
+        .cycle_days(cycle)
+        .expect("the days creation laid out")
+        .iter()
+        .map(|day| day.id)
+        .collect();
+    for day in laid_out {
+        workspace
+            .time_model()
+            .expect("open")
+            .delete_cycle_day(day)
+            .expect("a brand-new day is referenced by nothing");
+    }
 
     // Add four of the six days, as someone building it a bit at a time would.
     let mut days = Vec::new();
@@ -416,28 +436,29 @@ fn removing_a_cycle_day_takes_the_whole_guarded_route() {
         .create_cycle(&CycleInput {
             school_id: school,
             name: "Three-day rotation".to_owned(),
+            kind: CycleKind::Custom,
             day_count: 3,
             week_count: 1,
             is_default: true,
         })
         .expect("cycle")
         .id;
-    let mut days = Vec::new();
-    for ordinal in 1..=3 {
-        days.push(
-            workspace
-                .time_model()
-                .expect("open")
-                .create_cycle_day(&CycleDayInput {
-                    cycle_id: cycle,
-                    ordinal,
-                    label: format!("Day {ordinal}"),
-                    weekday_hint: None,
-                })
-                .expect("cycle day")
-                .id,
-        );
-    }
+    // `Day 1`..`Day 3`, laid out by creation. Read back rather than added again: this
+    // fixture wants a finished three-day cycle, which is now what creating one gives.
+    let days: Vec<uuid::Uuid> = workspace
+        .time_model()
+        .expect("open")
+        .cycle_days(cycle)
+        .expect("the days creation laid out")
+        .iter()
+        .map(|day| day.id)
+        .collect();
+    assert_eq!(
+        days.len(),
+        3,
+        "a three-day cycle is created with three days"
+    );
+
     let bells = workspace
         .time_model()
         .expect("open")

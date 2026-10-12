@@ -34,6 +34,7 @@ import type {
   CycleDay,
   CycleDayInput,
   CycleInput,
+  CycleShape,
   GridPreview,
   LogoLimits,
   MaterialisationPlan,
@@ -461,6 +462,24 @@ export function deleteCycle(id: string): Promise<void> {
  */
 export function cycleCoverage(cycleId: string): Promise<CycleCoverage> {
   return invoke<CycleCoverage>("setup_cycle_coverage", { cycleId });
+}
+
+/**
+ * What kind of cycle this is, how its rotation runs, and which of a weekly cycle's seven
+ * positions a school keeping `workingDays` teaches on.
+ *
+ * One call rather than several, because the Cycles screen's questions are all about the
+ * same cycle at the same moment.
+ *
+ * `workingDays` is sent rather than looked up, which is what keeps a shared cycle shared:
+ * the backend compares it and writes nothing, so two schools asking about the same cycle
+ * get two answers and the cycle holds neither.
+ */
+export function cycleShape(
+  cycleId: string,
+  workingDays: readonly number[],
+): Promise<CycleShape> {
+  return invoke<CycleShape>("setup_cycle_shape", { cycleId, workingDays });
 }
 
 // ------------------------------------------------------------------------ cycle day

@@ -4,13 +4,28 @@
 //! `calendar_day` projection of real dates onto cycle days. The static half — places and
 //! the coarse academic calendar — is [`super::structure`].
 //!
-//! # The model knows nothing about weekdays
+//! # The model never schedules by a weekday
 //!
 //! [`CycleDay::ordinal`] is the whole of a day's scheduling identity. `label` ("Monday",
 //! "Day A", "Day 1") is a display string and `weekday_hint` is documented as display only.
 //! Nothing here reads either of them for ordering, identity or materialisation, so a
 //! one-day cycle, a six-day rotation and a ten-day fortnight are the same code path with a
 //! different row count.
+//!
+//! [`CycleKind::Weekly`] does not change that. Such a cycle's positions are *named* by the
+//! calendar — position 1 is Monday, published by [`WeeklyPosition`] — and `weekday_hint` is
+//! held equal to `ordinal` so the two cannot disagree. But it is still the ordinal that
+//! schedules: no real date acquires a cycle day from a weekday, `calendar_day` remains the
+//! only bridge from dates to the model, and a weekly cycle materialises through exactly the
+//! same code as a six-day rotation.
+//!
+//! # A cycle holds no school's calendar
+//!
+//! Not a start date, not a starting rotation position, not a working week, not a holiday
+//! policy. A cycle is a reusable definition, which is why a weekly one stores all seven
+//! weekdays rather than the five one school teaches on, and why
+//! [`TimeModel::cycle_shape`] takes the working week as an argument and writes nothing. See
+//! [ADR 0017](../../../docs/adr/0017-weekly-and-custom-cycles.md).
 //!
 //! # Materialisation
 //!
@@ -26,8 +41,8 @@
 
 use std::collections::HashMap;
 
-use evara_core::calendar::WorkingDays;
-use evara_core::time::CycleCoverage;
+use evara_core::calendar::{WEEKLY_DAY_COUNT, WeeklyPosition, WorkingDays};
+use evara_core::time::{CycleCoverage, CycleRotation};
 use rusqlite::types::{ToSql, ToSqlOutput};
 use rusqlite::{Row, Transaction};
 use serde::{Deserialize, Serialize};
@@ -54,6 +69,65 @@ impl<'a> TimeModel<'a> {
 }
 
 // =============================================================================== kinds
+
+/// What decides a cycle's positions.
+///
+/// The two kinds are the same entity, with the same days, the same materialised grid and
+/// the same calendar mapping. What differs is *who decides what the positions are*, and
+/// that is one question, so it is one discriminator rather than two tables or a scattering
+/// of flags. See [ADR 0017](../../../docs/adr/0017-weekly-and-custom-cycles.md).
+///
+/// # Neither kind holds anything about a school's calendar
+///
+/// A cycle is a reusable definition. It carries no start date, no starting rotation
+/// position, no working-week selection and no holiday policy, and that is what lets two
+/// schools — or two campuses keeping different weeks — share one cycle. Which real date is
+/// which cycle day is settled by an explicit `calendar_day` row and nothing else; which of
+/// a weekly cycle's seven positions a given school teaches on is read from
+/// `school.working_days` when asked, never stored here.
+// Spelled as stored, for the reason given above `PeriodKind`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub enum CycleKind {
+    /// The week. Seven positions, position N being ISO weekday N, created with the cycle
+    /// and not user-managed.
+    ///
+    /// All seven, always — not the five a particular school teaches on. See
+    /// [`evara_core::calendar::WeeklyPosition`] for why storing a subset would bind the
+    /// shared definition to one institution's working week.
+    #[serde(rename = "WEEKLY")]
+    Weekly,
+    /// A named rotation of whatever length the school repeats: 3, 6, 10 days.
+    ///
+    /// The user chooses how many positions there are and what each is called. This is what
+    /// every cycle written before the kind existed is, which is why it is the migration's
+    /// default: it asserts nothing beyond what those rows already were.
+    #[serde(rename = "CUSTOM")]
+    Custom,
+}
+
+impl CycleKind {
+    /// The declared length this kind implies, or `None` when the user chooses it.
+    ///
+    /// The authority on how long a cycle of each kind is. A weekly cycle is seven days
+    /// because a week is seven days; the interface neither asks nor is believed.
+    #[must_use]
+    pub const fn fixed_day_count(self) -> Option<i64> {
+        match self {
+            Self::Weekly => Some(WEEKLY_DAY_COUNT),
+            Self::Custom => None,
+        }
+    }
+
+    /// The length a cycle of this kind gets, given what the caller asked for.
+    #[must_use]
+    pub const fn day_count_for(self, requested: i64) -> i64 {
+        match self.fixed_day_count() {
+            Some(fixed) => fixed,
+            None => requested,
+        }
+    }
+}
 
 /// What a period is for.
 ///
@@ -155,6 +229,11 @@ macro_rules! stored_as {
     };
 }
 
+stored_as!(CycleKind, "cycle", {
+    CycleKind::Weekly => "WEEKLY",
+    CycleKind::Custom => "CUSTOM",
+});
+
 stored_as!(PeriodKind, "period", {
     PeriodKind::Teaching => "TEACHING",
     PeriodKind::Break => "BREAK",
@@ -182,10 +261,19 @@ entity! {
         school_id: Uuid,
         /// Display name, unique within the school.
         name: String,
-        /// Declared length in days: 5 weekly, 10 for a fortnight, 6 for a rotation.
+        /// What decides the cycle's positions. Fixed at creation and never edited.
+        ///
+        /// On a [`CycleInput`] used for an update it must equal the stored kind;
+        /// [`TimeModel::update_cycle`] refuses a change rather than ignoring it.
+        kind: CycleKind,
+        /// Declared length in days: 7 for a week, 10 for a fortnight, 6 for a rotation.
         ///
         /// The *declared* length. The materialiser uses the cycle days that exist, and a
         /// partly built cycle is legal — see ADR 0011 Q4.
+        ///
+        /// On a [`CycleInput`] this is **not consulted for a weekly cycle**: a week is
+        /// seven days, and [`CycleKind::fixed_day_count`] is the authority. For a custom
+        /// cycle it is the user's choice, and raising it creates the positions it adds.
         day_count: i64,
         /// How many calendar weeks the pattern spans, for display and grouping.
         week_count: i64,
@@ -309,11 +397,28 @@ entity! {
 
 // =============================================================================== cycle
 
-const CYCLE_COLUMNS: &str =
-    "id, school_id, name, day_count, week_count, is_default, created_at, updated_at, rev";
+const CYCLE_COLUMNS: &str = "id, school_id, name, kind, day_count, week_count, is_default, \
+                             created_at, updated_at, rev";
 
 impl TimeModel<'_> {
-    /// Creates a cycle.
+    /// Creates a cycle **and the positions its kind declares**, in one transaction.
+    ///
+    /// # Why the days are not a separate call
+    ///
+    /// A [`CycleKind::Weekly`] cycle whose days are not the seven weekdays is not an
+    /// unfinished weekly cycle, it is a false claim: every reader — the grid, the calendar
+    /// picker, the applicability report — would believe position 6 is Saturday when no such
+    /// row exists. The only way to make that unrepresentable is to write the cycle and its
+    /// days in the same transaction, which is why laying them out is part of creation
+    /// rather than something a caller remembers to do afterwards.
+    ///
+    /// [`CycleKind::Custom`] is laid out too, for a different reason: it is what the user
+    /// asked for. Declaring a six-day rotation and then being made to add six days by hand,
+    /// one form at a time, is work the application can simply do. Labels start as `Day 1`
+    /// … `Day N` and are the user's to rename.
+    ///
+    /// The declared length comes from [`CycleKind::day_count_for`], so a weekly cycle is
+    /// seven days whatever `input.day_count` says.
     ///
     /// Marking it default clears any existing default for the school in the same
     /// transaction, with a proper revision bump, so the schema's single-default index is a
@@ -325,20 +430,22 @@ impl TimeModel<'_> {
     /// - [`DbError::Invalid`] if `day_count` or `week_count` is below 1.
     pub fn create_cycle(&mut self, input: &CycleInput) -> Result<Cycle> {
         let stamp = Stamp::new();
+        let day_count = input.kind.day_count_for(input.day_count);
         self.db.write(|tx| {
             if input.is_default {
                 clear_default_cycle(tx, input.school_id)?;
             }
             tx.execute(
                 "INSERT INTO cycle
-                     (id, school_id, name, day_count, week_count, is_default,
+                     (id, school_id, name, kind, day_count, week_count, is_default,
                       created_at, updated_at, rev)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     text(stamp.id),
                     text(input.school_id),
                     &input.name,
-                    input.day_count,
+                    input.kind,
+                    day_count,
                     input.week_count,
                     input.is_default,
                     &stamp.created_at,
@@ -347,6 +454,8 @@ impl TimeModel<'_> {
                 ),
             )
             .map_err(|error| translate(error, "cycle"))?;
+            // From position 1, because the cycle is new and has none.
+            lay_out_cycle_days(tx, stamp.id, input.kind, day_count, 1)?;
             Ok(())
         })?;
         self.cycle(stamp.id)?
@@ -383,24 +492,58 @@ impl TimeModel<'_> {
         })
     }
 
-    /// Replaces a cycle's details. Its school never changes.
+    /// Replaces a cycle's details. Its school and its kind never change.
     ///
-    /// Shortening `day_count` below an existing cycle day's ordinal is refused: the days
-    /// are the reality, and silently leaving a day outside the declared length would make
-    /// the two disagree with nothing noticing.
+    /// # The kind is immutable, and says so
+    ///
+    /// A kind that differs from the stored one is [`DbError::Invalid`], not silently
+    /// ignored. Converting a six-day rotation into a weekly cycle would mean deleting days
+    /// — which `timeslot` and `calendar_day` hold with `RESTRICT` exactly so that removing
+    /// one is a deliberate, confirmed act — and converting the other way would drop the
+    /// invariant the surviving rows were created under. The honest answer is a new cycle,
+    /// and the refusal is what says so rather than leaving a user to wonder why the picker
+    /// snapped back.
+    ///
+    /// # Lengthening a custom cycle creates the positions it adds
+    ///
+    /// Raising `day_count` from 5 to 7 creates positions 6 and 7, because asking for a
+    /// seven-day rotation *is* asking for seven days. Existing days are untouched: no
+    /// identifier moves, no label is rewritten, and a gap below the old length is left
+    /// exactly where it was — ADR 0011 Q4 makes a part-built cycle legal, and quietly
+    /// filling holes the user has not mentioned would reinterpret a project while renaming
+    /// it. Those are offered as a repair the user asks for, not performed on an edit.
+    ///
+    /// Shortening below an existing cycle day's ordinal is refused: the days are the
+    /// reality, and silently leaving a day outside the declared length would make the two
+    /// disagree with nothing noticing. For a weekly cycle the length is not the caller's to
+    /// set at all, so a missing weekday is re-created here and the length stays seven.
     ///
     /// # Errors
     ///
     /// [`DbError::NotFound`], [`DbError::DuplicateValue`] or [`DbError::Invalid`].
     pub fn update_cycle(&mut self, id: Uuid, input: &CycleInput) -> Result<Cycle> {
+        let stored = self
+            .cycle(id)?
+            .ok_or(DbError::NotFound { entity: "cycle" })?;
+        if input.kind != stored.kind {
+            return Err(DbError::Invalid {
+                message: format!(
+                    "a cycle's type cannot be changed after it is created: this one is {}, \
+                     not {}. Create a new cycle instead.",
+                    describe_kind(stored.kind),
+                    describe_kind(input.kind)
+                ),
+            });
+        }
+
+        let day_count = stored.kind.day_count_for(input.day_count);
         self.db.write(|tx| {
             let highest = highest_cycle_day_ordinal(tx, id)?;
-            if highest > input.day_count {
+            if highest > day_count {
                 return Err(DbError::Invalid {
                     message: format!(
                         "this cycle already has a day {highest}, so its length cannot be \
-                         reduced to {}",
-                        input.day_count
+                         reduced to {day_count}"
                     ),
                 });
             }
@@ -415,11 +558,21 @@ impl TimeModel<'_> {
                 "name = ?, day_count = ?, week_count = ?, is_default = ?",
                 &[
                     &input.name,
-                    &input.day_count,
+                    &day_count,
                     &input.week_count,
                     &input.is_default,
                 ],
             )?;
+            // For a custom cycle: only the positions this edit added. A gap below the old
+            // length is left exactly where it was. For a weekly cycle, whose length never
+            // moves: the whole week, so a weekday whose row was removed comes back — the
+            // kind owns its positions, so a missing one is damage rather than a choice.
+            let first = if stored.kind.fixed_day_count().is_some() {
+                1
+            } else {
+                stored.day_count + 1
+            };
+            lay_out_cycle_days(tx, id, stored.kind, day_count, first)?;
             Ok(())
         })?;
         self.cycle(id)?.ok_or(DbError::NotFound { entity: "cycle" })
@@ -460,6 +613,254 @@ impl TimeModel<'_> {
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(CycleCoverage::of(declared, &ordinals))
         })
+    }
+
+    /// Everything the Cycles screen needs to render one cycle of either kind.
+    ///
+    /// # Why one projection rather than three commands
+    ///
+    /// The screen's questions — what kind is this, how long is the rotation, where does it
+    /// come back round, which positions are still empty, and (for a weekly cycle) which of
+    /// the seven days does *this* school teach on — are all about the same cycle at the same
+    /// moment. Answered separately they would arrive at different moments, and a screen
+    /// showing a five-day rotation's preview beside a seven-position coverage report is
+    /// worse than one that waits.
+    ///
+    /// # The working week is an argument, not a lookup
+    ///
+    /// `working_days` is passed in rather than read from the school, for the reason
+    /// [`TimeModel::non_working_instructional_days`] does the same: it keeps this honest
+    /// about being a projection over a value the caller already holds, it lets the interface
+    /// preview a week before saving it, and — the load-bearing one — it makes it structurally
+    /// impossible for this to write a school's week onto a cycle. The cycle is a reusable
+    /// definition; ask it about two different weeks and you get two different answers and
+    /// one unchanged cycle.
+    ///
+    /// # Errors
+    ///
+    /// [`DbError::NotFound`] if there is no such cycle.
+    pub fn cycle_shape(&self, cycle_id: Uuid, working_days: WorkingDays) -> Result<CycleShape> {
+        let cycle = self
+            .cycle(cycle_id)?
+            .ok_or(DbError::NotFound { entity: "cycle" })?;
+        let coverage = self.cycle_coverage(cycle_id)?;
+        let days = self.cycle_days(cycle_id)?;
+
+        let weekdays = match cycle.kind {
+            CycleKind::Custom => Vec::new(),
+            CycleKind::Weekly => WeeklyPosition::ALL
+                .into_iter()
+                .map(|position| {
+                    // Matched on `ordinal`, the scheduling identity, and never on the
+                    // stored label or hint: a renamed Monday is still position 1.
+                    let stored = days.iter().find(|day| day.ordinal == position.ordinal);
+                    WeeklyCycleDay {
+                        cycle_day_id: stored.map(|day| day.id),
+                        ordinal: position.ordinal,
+                        weekday: position.weekday,
+                        label: stored.map(|day| day.label.clone()),
+                        canonical_label: position.label.to_owned(),
+                        applies: position.applies_to(working_days),
+                    }
+                })
+                .collect(),
+        };
+
+        Ok(CycleShape {
+            cycle_id,
+            kind: cycle.kind,
+            day_count: cycle.day_count,
+            rotation: CycleRotation::of(cycle.day_count),
+            coverage,
+            weekdays,
+        })
+    }
+}
+
+/// One position of a weekly cycle, as it stands in this project for this working week.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct WeeklyCycleDay {
+    /// The stored day at this position, or `None` if the row is missing.
+    ///
+    /// Missing is abnormal — the kind creates all seven and
+    /// [`TimeModel::update_cycle`] restores any that have gone — but it is reported rather
+    /// than skipped, because a weekly cycle short of a day is exactly the state a user
+    /// needs to see named.
+    pub cycle_day_id: Option<Uuid>,
+    /// Position in the cycle, from 1. **The scheduling identity.**
+    pub ordinal: i64,
+    /// The ISO weekday this position names: 1 Monday through 7 Sunday. Display.
+    pub weekday: i64,
+    /// The stored label, which the user may have changed, or `None` if the row is missing.
+    pub label: Option<String>,
+    /// What the position is called when nothing has renamed it: "Monday" … "Sunday".
+    pub canonical_label: String,
+    /// Whether the school whose week was asked about teaches on this position.
+    ///
+    /// **Advisory, and not stored anywhere.** It is recomputed from the week handed in, so
+    /// two schools sharing this cycle see different values and the cycle holds neither.
+    pub applies: bool,
+}
+
+/// What one cycle is, for the screen that configures it.
+///
+/// A read-only projection, assembled in the crate that owns SQL so the command handler
+/// stays a translation and the interface does not have to work anything out. Nothing here
+/// is stored: [`Self::rotation`] is arithmetic over the declared length and
+/// [`Self::weekdays`] is a comparison against a working week the caller supplied.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct CycleShape {
+    /// The cycle this describes.
+    pub cycle_id: Uuid,
+    /// What decides its positions.
+    pub kind: CycleKind,
+    /// Its declared length. Always 7 for a weekly cycle.
+    pub day_count: i64,
+    /// The order the positions run in, and where the rotation wraps.
+    pub rotation: CycleRotation,
+    /// Which declared positions have a day, and which are missing.
+    pub coverage: CycleCoverage,
+    /// The seven weekday positions. **Empty for a custom cycle**, which has no weekdays.
+    pub weekdays: Vec<WeeklyCycleDay>,
+}
+
+/// Creates the cycle days for positions `first_ordinal..=day_count` that do not exist.
+///
+/// # What it will not do
+///
+/// It never deletes, never renumbers, and never rewrites a row that is already there. A
+/// position that has a day is skipped whatever that day is called, so an auto-created
+/// `Day 3` the user renamed to `Red Day` stays `Red Day` through every later edit. That is
+/// the whole of why this takes a starting ordinal rather than "fill every gap": the two are
+/// indistinguishable on a complete cycle and very different on a half-built one.
+///
+/// # Labels
+///
+/// A weekly position is named by the calendar — `Monday` … `Sunday`, from
+/// [`WeeklyPosition`], with `weekday_hint` set to match so the schema's weekly-identity
+/// trigger holds. A custom position starts as `Day N`.
+///
+/// Labels are unique within a cycle, and a user who renamed a day to `Day 7` before
+/// lengthening the cycle to seven would otherwise make this insert fail and take the whole
+/// edit with it. So the label is disambiguated against what is already stored rather than
+/// assumed free — see [`available_day_label`].
+fn lay_out_cycle_days(
+    tx: &Transaction<'_>,
+    cycle_id: Uuid,
+    kind: CycleKind,
+    day_count: i64,
+    first_ordinal: i64,
+) -> Result<()> {
+    if day_count < first_ordinal {
+        return Ok(());
+    }
+
+    let present = existing_cycle_day_ordinals(tx, cycle_id)?;
+    for ordinal in first_ordinal.max(1)..=day_count {
+        if present.contains(&ordinal) {
+            continue;
+        }
+
+        let (preferred, weekday_hint) = match kind {
+            // `for_ordinal` cannot be `None` here: a weekly cycle is seven days long, by
+            // `day_count_for` above and by the schema's own trigger. Reported rather than
+            // defaulted all the same — a weekly position with no weekday would be a cycle
+            // that lies about its own kind, which is the one thing this function exists to
+            // prevent.
+            CycleKind::Weekly => match WeeklyPosition::for_ordinal(ordinal) {
+                Some(day) => (day.label.to_owned(), Some(day.weekday)),
+                None => {
+                    return Err(DbError::Invalid {
+                        message: format!(
+                            "a weekly cycle has {WEEKLY_DAY_COUNT} positions, so it has no \
+                             day {ordinal}"
+                        ),
+                    });
+                }
+            },
+            CycleKind::Custom => (format!("Day {ordinal}"), None),
+        };
+
+        let label = available_day_label(tx, cycle_id, &preferred)?;
+        let stamp = Stamp::new();
+        tx.execute(
+            "INSERT INTO cycle_day
+                 (id, cycle_id, ordinal, label, weekday_hint, created_at, updated_at, rev)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                text(stamp.id),
+                text(cycle_id),
+                ordinal,
+                &label,
+                weekday_hint,
+                &stamp.created_at,
+                &stamp.updated_at,
+                stamp.rev,
+            ),
+        )
+        .map_err(|error| translate(error, "cycle day"))?;
+    }
+    Ok(())
+}
+
+/// The ordinals a cycle already has a day at.
+fn existing_cycle_day_ordinals(tx: &Transaction<'_>, cycle_id: Uuid) -> Result<Vec<i64>> {
+    let mut stmt = tx.prepare("SELECT ordinal FROM cycle_day WHERE cycle_id = ?")?;
+    let ordinals = stmt
+        .query_map([text(cycle_id)], |row| row.get::<_, i64>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(ordinals)
+}
+
+/// How many times a preferred label is retried before the attempt is abandoned.
+///
+/// Reached only if a cycle genuinely contains `Day 4`, `Day 4 (2)`, … all the way up,
+/// which takes deliberate effort. Bounded rather than looping forever, because an
+/// unbounded search inside a write transaction is a worse failure than a refused insert.
+const LABEL_ATTEMPTS: u32 = 64;
+
+/// A label starting from `preferred` that no day of this cycle already uses.
+///
+/// `UNIQUE (cycle_id, label)` is a real rule — two days called `Day 4` is a mistake, not a
+/// preference — and nothing here weakens it. What this avoids is a *generated* label
+/// colliding with a *chosen* one and failing an edit the user cannot see the cause of: a
+/// cycle whose day 3 was renamed `Day 4` would otherwise make "lengthen to four days"
+/// unperformable, with a duplicate-label error pointing at a field the form never showed.
+///
+/// Falls back to the preferred label after [`LABEL_ATTEMPTS`], so the unique index reports
+/// the collision rather than this looping. A user meeting that has forty-odd days named
+/// around one number and can rename one.
+fn available_day_label(tx: &Transaction<'_>, cycle_id: Uuid, preferred: &str) -> Result<String> {
+    for attempt in 1..=LABEL_ATTEMPTS {
+        let candidate = if attempt == 1 {
+            preferred.to_owned()
+        } else {
+            format!("{preferred} ({attempt})")
+        };
+        let taken: bool = tx.query_row(
+            "SELECT EXISTS (SELECT 1 FROM cycle_day WHERE cycle_id = ? AND label = ?)",
+            (text(cycle_id), &candidate),
+            |row| row.get(0),
+        )?;
+        if !taken {
+            return Ok(candidate);
+        }
+    }
+    Ok(preferred.to_owned())
+}
+
+/// How a cycle kind is named in a message a user reads.
+///
+/// The stored spelling is `WEEKLY`; a refusal that said so would be reporting a column
+/// value rather than explaining anything.
+const fn describe_kind(kind: CycleKind) -> &'static str {
+    match kind {
+        CycleKind::Weekly => "weekly",
+        CycleKind::Custom => "custom",
     }
 }
 

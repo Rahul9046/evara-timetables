@@ -326,7 +326,7 @@ impl Mapped {
     /// the point: nothing in the model relates them.
     fn new(day_count: i64, dates: &[&str]) -> Self {
         let mut project = Project::new();
-        let cycle = project.cycle("Rotation", day_count);
+        let cycle = project.bare_cycle("Rotation", day_count);
 
         let mut cycle_days = Vec::new();
         for ordinal in 1..=day_count {

@@ -1423,6 +1423,27 @@ button:focus-visible,
   color: var(--text-faint);
 }
 
+/* ---- the rotation preview ----------------------------------------------- */
+
+/*
+ * Day 1 -> Day 2 -> ... -> Day 1, on the Cycles screen.
+ *
+ * Wraps rather than scrolls, because a ten-day fortnight's sequence is longer than the
+ * panel and a horizontal scrollbar on a line of prose reads as a mistake. The arrows are
+ * real text in the markup with `aria-hidden`, not generated content: a `::after` would be
+ * invisible to a screen reader and, as the weekday toggles once proved, invisible to the
+ * tests as well.
+ */
+.rotationPreview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 0;
+  align-items: baseline;
+  margin: 0 0 8px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
 .yes {
   color: var(--ok);
   font-weight: 650;

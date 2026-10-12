@@ -308,13 +308,25 @@ term (id, academic_year_id -> academic_year, name, ordinal, starts_on, ends_on)
 ### Cycle, period structure, timeslot
 
 ```sql
--- A cycle is the repeating pattern. day_count = 5 weekly; 10 for a two-week cycle;
+-- A cycle is the repeating pattern. day_count = 7 for a week; 10 for a two-week cycle;
 -- 6 for a six-day rotation that drifts against the calendar week. No upper bound.
 -- day_count is the *declared* length: the materialiser uses the cycle_day rows that
 -- actually exist, and the repository refuses an ordinal beyond it (ADR 0011 Q4).
+--
+-- kind decides who owns the positions (ADR 0017). WEEKLY means the week itself: seven
+-- positions, position N being ISO weekday N, written by create_cycle from
+-- evara_core::calendar::WeeklyPosition and not user-managed. CUSTOM means a numbered
+-- rotation whose length and labels the user chooses. Creating a cycle of either kind lays
+-- out its positions in the same transaction. The kind is immutable once set.
+--
+-- All seven, never the five a school happens to work. A cycle is a reusable definition and
+-- holds NO school's calendar: no start date, no starting rotation position, no working
+-- week, no holiday policy. Which of a weekly cycle's positions a given school teaches on is
+-- asked (TimeModel::cycle_shape, with a WorkingDays argument) and never stored.
 cycle (id, school_id, name, day_count INTEGER, week_count INTEGER DEFAULT 1, is_default,
-       -- week_count is no longer collected by the interface (ADR 0015). The column
-       -- stays; existing values are preserved on edit.
+       kind TEXT CHECK (kind IN ('WEEKLY','CUSTOM')) DEFAULT 'CUSTOM',  -- V9
+       -- week_count and is_default are no longer collected by the interface (ADR 0015,
+       -- ADR 0017 consequences). The columns stay; existing values are preserved on edit.
        UNIQUE(school_id, name))
 cycle_day (id, cycle_id -> cycle, ordinal INTEGER, label,
            weekday_hint INTEGER NULL,          -- 1..7, display only, never logic
@@ -364,6 +376,14 @@ CREATE UNIQUE INDEX idx_period_structure_single_default
 A trigger additionally requires a timeslot's denormalised `school_id`, `cycle_id` and
 `campus_id` to agree with the cycle day and period it was built from, so the grid cannot
 drift from the cycle it claims to belong to. Same approach as room/building in V3.
+
+Four more triggers hold the cycle kinds (V9, [adr/0017](adr/0017-weekly-and-custom-cycles.md)):
+a `WEEKLY` cycle is seven days long, a cycle's `kind` never changes, and a `WEEKLY` cycle's
+day carries the weekday of its position — so `weekday_hint` and `ordinal` cannot disagree
+there. `ordinal` is still the only scheduling identity; nothing in materialisation, ordering
+or the solver reads a weekday. On a `CUSTOM` cycle `weekday_hint` remains optional, free and
+display-only. These are triggers rather than table `CHECK`s because `ALTER TABLE` cannot add
+one and `cycle` cannot be rebuilt inside refinery's transaction.
 
 ### Timeslot identity, and how the grid is rebuilt
 

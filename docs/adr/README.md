@@ -22,6 +22,7 @@ tempted to undo it without knowing why.
 | [0014](0014-rooms-shared-across-campuses.md) | A room may serve many campuses; one identity, so occupancy is global | Accepted |
 | [0015](0015-school-working-days.md) | School working days are a calendar default, stored as a seven-bit set; `cycle.week_count` retired from the UI only | Accepted |
 | [0016](0016-school-logos-in-the-project.md) | School logos are BLOBs in the project, validated from their bytes; Evara's mark is the fallback | Accepted |
+| [0017](0017-weekly-and-custom-cycles.md) | A cycle is weekly or custom; a weekly cycle holds all seven weekdays and no school's calendar | Accepted |
 
 Statuses: **Proposed** (awaiting a decision), **Accepted**, **Superseded by NNNN**,
 **Deprecated**. Accepted records are not edited to reflect a change of mind — a new
