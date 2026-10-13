@@ -106,11 +106,13 @@ mod tests {
     #[test]
     fn detects_common_providers() {
         let cases: &[(&str, SyncedFolder)] = &[
-            (r"C:\Users\sam\OneDrive\school.evdb", SyncedFolder::OneDrive),
+            // The account-label branch, in a shape every platform can parse: a OneDrive
+            // folder on a machine that is not Windows is an ordinary arrangement.
             (
-                r"C:\Users\sam\OneDrive - Contoso Ltd\school.evdb",
+                "/home/sam/OneDrive - Contoso Ltd/school.evdb",
                 SyncedFolder::OneDrive,
             ),
+            ("/home/sam/OneDrive/school.evdb", SyncedFolder::OneDrive),
             ("/Users/sam/Dropbox/school.evdb", SyncedFolder::Dropbox),
             (
                 "/Users/sam/Dropbox (Personal)/school.evdb",
@@ -125,6 +127,37 @@ mod tests {
                 SyncedFolder::GoogleDrive,
             ),
             ("/home/sam/Nextcloud/school.evdb", SyncedFolder::Nextcloud),
+        ];
+        for (path, expected) in cases {
+            assert_eq!(detect(Path::new(path)), Some(*expected), "path: {path}");
+        }
+    }
+
+    /// The same, for the paths only a Windows build can parse.
+    ///
+    /// `Path::components` is platform-specific: on a Unix target, `\` is an ordinary
+    /// character in a file name, so `C:\Users\sam\OneDrive\school.evdb` is **one**
+    /// component and no marker can match inside it. Asserting otherwise made this test
+    /// fail on every macOS and Linux run while passing on Windows — which is a statement
+    /// about `std`, not about [`detect`], whose job is the path the user actually gave the
+    /// build they are running.
+    ///
+    /// Splitting both separators everywhere was the alternative and was rejected: it would
+    /// teach a Unix build to parse Windows paths it can never be handed, to make a test
+    /// literal portable.
+    #[cfg(windows)]
+    #[test]
+    fn detects_providers_in_windows_paths() {
+        let cases: &[(&str, SyncedFolder)] = &[
+            (r"C:\Users\sam\OneDrive\school.evdb", SyncedFolder::OneDrive),
+            (
+                r"C:\Users\sam\OneDrive - Contoso Ltd\school.evdb",
+                SyncedFolder::OneDrive,
+            ),
+            (
+                r"C:\Users\sam\Dropbox (Personal)\school.evdb",
+                SyncedFolder::Dropbox,
+            ),
         ];
         for (path, expected) in cases {
             assert_eq!(detect(Path::new(path)), Some(*expected), "path: {path}");
