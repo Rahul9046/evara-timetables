@@ -104,11 +104,14 @@ pub fn setup_grid_rebuild(
 #[tauri::command]
 pub fn setup_grid_release_orphans(
     state: State<'_, AppState>,
+    school_id: Uuid,
     request: MaterialisationRequest,
     reviewed: PlanFingerprint,
 ) -> SetupResult<Vec<Uuid>> {
     let mut ws = workspace(&state)?;
-    Ok(ws.time_model()?.release_orphans(&request, &reviewed)?)
+    Ok(ws
+        .time_model()?
+        .release_orphans(school_id, &request, &reviewed)?)
 }
 
 /// Every stored slot of one grid, in cycle order.

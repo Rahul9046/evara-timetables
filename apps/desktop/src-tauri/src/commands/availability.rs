@@ -51,22 +51,28 @@ pub fn setup_availability_clear(
 #[tauri::command]
 pub fn setup_availability_list(
     state: State<'_, AppState>,
+    school_id: Uuid,
     entity_kind: AvailabilityEntity,
     entity_id: Uuid,
 ) -> SetupResult<Vec<AvailabilityRule>> {
     let mut ws = workspace(&state)?;
-    Ok(ws.availability()?.rules_for(entity_kind, entity_id)?)
+    Ok(ws
+        .availability()?
+        .rules_for(school_id, entity_kind, entity_id)?)
 }
 
 /// How many rules one entity has, for a listing that marks who has been configured.
 #[tauri::command]
 pub fn setup_availability_count(
     state: State<'_, AppState>,
+    school_id: Uuid,
     entity_kind: AvailabilityEntity,
     entity_id: Uuid,
 ) -> SetupResult<i64> {
     let mut ws = workspace(&state)?;
-    Ok(ws.availability()?.count_for(entity_kind, entity_id)?)
+    Ok(ws
+        .availability()?
+        .count_for(school_id, entity_kind, entity_id)?)
 }
 
 /// Rules whose entity no longer exists.

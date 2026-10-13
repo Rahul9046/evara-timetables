@@ -133,10 +133,10 @@ export function AvailabilityGrid(props: {
 }) {
   const { school, entityKind, entityId, entityName } = props;
 
-  const loadCycles = useCallback(() => listCycles(), []);
+  const loadCycles = useCallback(() => listCycles(school.id), [school.id]);
   const cycles = useList<Cycle>(loadCycles);
 
-  const loadStructures = useCallback(() => listPeriodStructures(), []);
+  const loadStructures = useCallback(() => listPeriodStructures(school.id), [school.id]);
   const structures = useList<PeriodStructure>(loadStructures);
 
   const [cycleId, setCycleId] = useState<string | null>(null);
@@ -169,7 +169,7 @@ export function AvailabilityGrid(props: {
   }, [structureId, structures.items]);
 
   const reloadRules = useCallback(() => {
-    void listAvailability(entityKind, entityId)
+    void listAvailability(school.id, entityKind, entityId)
       .then((rows) => {
         setRules(rows);
         setError(null);

@@ -108,14 +108,14 @@ export function SchoolLogoPanel(props: { school: School }) {
 
   const reload = useCallback(async () => {
     try {
-      setLogo(await getSchoolLogo());
+      setLogo(await getSchoolLogo(school.id));
     } catch (e: unknown) {
       // A logo that cannot be read is not worth blocking the screen for: the fallback is
       // a correct answer, so the panel shows Evara's mark and says what went wrong.
       setLogo(null);
       setError(describeSetupError(e));
     }
-  }, []);
+  }, [school.id]);
 
   useEffect(() => {
     void reload();
@@ -155,7 +155,7 @@ export function SchoolLogoPanel(props: { school: School }) {
     setBusy(true);
     setError(null);
     try {
-      await clearSchoolLogo();
+      await clearSchoolLogo(school.id);
       setLogo(null);
       schoolLogoChanged();
     } catch (e: unknown) {

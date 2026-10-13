@@ -21,7 +21,7 @@
 //! and the change-log rows it produces share its fate. Nothing in this module opens or
 //! commits a transaction of its own.
 
-use rusqlite::{Transaction, types::ToSql};
+use rusqlite::{OptionalExtension, Transaction, types::ToSql};
 use uuid::Uuid;
 
 use crate::error::{DbError, Result};
@@ -147,6 +147,77 @@ pub(crate) fn update(
     )?;
 
     Ok((updated_at, rev))
+}
+
+/// Refuses a write whose target row belongs to a different school.
+///
+/// Called at the top of every `update_*` and every `delete_*` for a school-owned entity,
+/// inside the same transaction as the write itself. The identifier alone stopped being
+/// sufficient authority at `V12`: a project now holds several schools, and a screen scoped
+/// to one of them must not be able to touch another's rows just because it was handed an
+/// identifier from it.
+///
+/// For an update, `school_id` comes from the input the caller already supplies, so no
+/// signature changed to get the guard. A delete has no input, so it takes the expected
+/// school as a parameter — which is the whole of the follow-up to Stage 0A.
+///
+/// This form reads the column directly, for the tables that name their school. A child
+/// whose ownership is only reachable through a parent uses [`require_school_owner`].
+///
+/// # Errors
+///
+/// - [`DbError::NotFound`] if no row has that identifier.
+/// - [`DbError::WrongSchool`] if one does and another school owns it.
+pub(crate) fn require_same_school(
+    tx: &Transaction<'_>,
+    entity: &'static str,
+    table: &str,
+    id: Uuid,
+    school_id: Uuid,
+) -> Result<()> {
+    let table = identifier(table)?;
+    require_school_owner(
+        tx,
+        entity,
+        &format!("SELECT school_id FROM {table} WHERE id = ?"),
+        id,
+        school_id,
+    )
+}
+
+/// Refuses a write whose target row is owned, through whatever chain, by another school.
+///
+/// `owner_query` takes the row's identifier as its single parameter and returns the
+/// identifier of the school that owns it, or no row at all when the target does not exist.
+/// Each repository writes its own, next to the entity it is about, because the chain *is*
+/// the domain statement: a period belongs to a school only by way of its bell schedule,
+/// and a term only by way of its academic year.
+///
+/// Deliberately **not** solved by adding `school_id` columns to the children. A second
+/// place to record the same ownership is a second place for it to be wrong, and the chain
+/// is already enforced by foreign keys.
+///
+/// # Errors
+///
+/// - [`DbError::NotFound`] if the query returns no row — the target is not there, or its
+///   parent chain is broken, and neither is a licence to delete anything.
+/// - [`DbError::WrongSchool`] if it returns a different school.
+pub(crate) fn require_school_owner(
+    tx: &Transaction<'_>,
+    entity: &'static str,
+    owner_query: &str,
+    id: Uuid,
+    school_id: Uuid,
+) -> Result<()> {
+    let owner: Option<String> = tx
+        .query_row(owner_query, [&id.to_string()], |row| row.get(0))
+        .optional()?;
+
+    match owner {
+        None => Err(DbError::NotFound { entity }),
+        Some(raw) if raw == school_id.to_string() => Ok(()),
+        Some(_) => Err(DbError::WrongSchool { entity }),
+    }
 }
 
 /// Deletes one row.

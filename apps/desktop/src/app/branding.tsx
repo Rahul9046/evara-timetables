@@ -24,7 +24,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import evaraLogo from "../assets/evara-logo.png";
 import type { SchoolLogoView } from "@evara/domain";
-import { getSchoolLogo } from "../ipc/setup";
+import { getSchoolLogo, listSchools } from "../ipc/setup";
 
 /**
  * The Evara application mark.
@@ -133,7 +133,15 @@ export function useSchoolLogo(): {
 
   const reload = useCallback(() => {
     let live = true;
-    getSchoolLogo()
+    // A project may hold several schools since V12, and the application shell is outside
+    // any one school's context. One school means one unambiguous answer, which keeps the
+    // single-school case exactly as it was; several means there is no answer, and Evara's
+    // own mark is the honest fallback rather than an arbitrary school's.
+    listSchools()
+      .then((schools) => {
+        const only = schools.length === 1 ? schools[0] : undefined;
+        return only ? getSchoolLogo(only.id) : Promise.resolve(null);
+      })
       .then((value) => {
         if (live) setLogo(value);
       })

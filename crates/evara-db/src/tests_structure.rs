@@ -16,6 +16,7 @@ use crate::repo::structure::{
     AcademicYearInput, BuildingInput, CampusInput, ResourceInput, RoomInput, RoomTypeInput,
     SchoolInput, TermInput,
 };
+use crate::tests_support;
 use crate::workspace::Workspace;
 use crate::{Database, DbError, PROJECT_EXTENSION, change_log};
 
@@ -57,6 +58,7 @@ impl Project {
             .structure()
             .create_school(&SchoolInput {
                 name: "Northgate Secondary".to_owned(),
+                code: None,
                 timezone: "Europe/London".to_owned(),
                 locale: "en-GB".to_owned(),
                 working_days: WorkingDays::MONDAY_TO_FRIDAY,
@@ -346,18 +348,14 @@ fn campus_create_read_list_update_delete() {
         })
         .expect("create");
 
-    let listed = project.db().structure().campuses().expect("list");
+    let listed = tests_support::campuses_here(project.db());
     assert_eq!(
         listed.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
         vec!["Annexe", "Main"],
         "listing is ordered by name, deterministically"
     );
 
-    project
-        .db()
-        .structure()
-        .delete_campus(second.id)
-        .expect("delete");
+    tests_support::delete_campus_here(project.db(), second.id).expect("delete");
     assert!(
         project
             .db()
@@ -366,7 +364,7 @@ fn campus_create_read_list_update_delete() {
             .unwrap()
             .is_none()
     );
-    assert_eq!(project.db().structure().campuses().unwrap().len(), 1);
+    assert_eq!(tests_support::campuses_here(project.db()).len(), 1);
     assert!(project.db().structure().campus(first).unwrap().is_some());
 }
 
@@ -427,7 +425,7 @@ fn a_campus_that_still_owns_buildings_cannot_be_deleted() {
         )
         .expect("create building");
 
-    let outcome = project.db().structure().delete_campus(campus);
+    let outcome = tests_support::delete_campus_here(project.db(), campus);
     assert!(
         matches!(outcome, Err(DbError::StillReferenced { entity: "campus" })),
         "deleting a campus with buildings must be refused, not cascaded: {outcome:?}"
@@ -445,7 +443,7 @@ fn a_campus_that_still_owns_rooms_cannot_be_deleted() {
         .create_room(&room(campus, "R1"), &[])
         .expect("create room");
 
-    let outcome = project.db().structure().delete_campus(campus);
+    let outcome = tests_support::delete_campus_here(project.db(), campus);
     assert!(
         matches!(outcome, Err(DbError::StillReferenced { .. })),
         "{outcome:?}"
@@ -468,7 +466,7 @@ fn a_campus_that_still_owns_resources_cannot_be_deleted() {
         })
         .expect("create resource");
 
-    let outcome = project.db().structure().delete_campus(campus);
+    let outcome = tests_support::delete_campus_here(project.db(), campus);
     assert!(
         matches!(outcome, Err(DbError::StillReferenced { .. })),
         "campus deletion means the same thing everywhere: {outcome:?}"
@@ -499,11 +497,7 @@ fn deleting_a_room_type_unclassifies_its_rooms_and_advances_their_revision() {
         .expect("create room");
     assert_eq!(created.rev, 1);
 
-    project
-        .db()
-        .structure()
-        .delete_room_type(lab.id)
-        .expect("delete room type");
+    tests_support::delete_room_type_here(project.db(), lab.id).expect("delete room type");
 
     let after = project
         .db()
@@ -546,11 +540,7 @@ fn deleting_a_building_detaches_its_rooms() {
         .create_room(&input, &[])
         .expect("create room");
 
-    project
-        .db()
-        .structure()
-        .delete_building(block.id)
-        .expect("delete building");
+    tests_support::delete_building_here(project.db(), block.id).expect("delete building");
 
     let after = project
         .db()
@@ -589,7 +579,7 @@ fn an_academic_year_with_terms_cannot_be_deleted() {
         })
         .expect("create term");
 
-    let outcome = project.db().structure().delete_academic_year(year.id);
+    let outcome = tests_support::delete_academic_year_here(project.db(), year.id);
     assert!(
         matches!(
             outcome,
@@ -725,21 +715,105 @@ fn room_codes_are_unique_within_a_campus_but_not_across_them() {
     );
 }
 
+/// The restriction this test used to assert is gone.
+///
+/// It read `only_one_school_can_exist_per_project`, and it was right until `V12`: ADR 0003
+/// said multiple schools meant multiple project files, and `school.only_one` enforced it.
+/// ADR 0019 supersedes that one claim, so the assertion is inverted rather than deleted --
+/// the behaviour it guarded is exactly the behaviour that changed, and a reader of this
+/// file should be able to see that it changed on purpose.
 #[test]
-fn only_one_school_can_exist_per_project() {
+fn a_project_can_hold_more_than_one_school() {
     let mut project = Project::new();
     project.with_school();
 
-    let second = project.db().structure().create_school(&SchoolInput {
-        name: "Another School".to_owned(),
+    let second = project
+        .db()
+        .structure()
+        .create_school(&SchoolInput {
+            name: "Another School".to_owned(),
+            code: None,
+            timezone: "Europe/London".to_owned(),
+            locale: "en-GB".to_owned(),
+            working_days: WorkingDays::MONDAY_TO_FRIDAY,
+        })
+        .expect("a project may describe several schools since V12");
+
+    let schools = project.db().structure().schools().expect("list schools");
+    assert_eq!(schools.len(), 2);
+    assert!(
+        schools.iter().any(|s| s.id == second.id),
+        "the second school is readable through the same project"
+    );
+    assert_ne!(
+        schools[0].id, schools[1].id,
+        "each school keeps its own stable identity"
+    );
+}
+
+#[test]
+fn two_schools_cannot_share_a_name_or_a_given_code() {
+    let mut project = Project::new();
+    let (first, _) = project.with_school();
+    let existing = project
+        .db()
+        .structure()
+        .school(first)
+        .expect("read")
+        .expect("exists");
+
+    let duplicate_name = project.db().structure().create_school(&SchoolInput {
+        name: existing.name.clone(),
+        code: None,
         timezone: "Europe/London".to_owned(),
         locale: "en-GB".to_owned(),
         working_days: WorkingDays::MONDAY_TO_FRIDAY,
     });
     assert!(
-        second.is_err(),
-        "a project describes one school; multiple schools means multiple project files"
+        matches!(duplicate_name, Err(DbError::DuplicateValue { .. })),
+        "a name is what a selector shows, so two schools cannot share one: {duplicate_name:?}"
     );
+
+    project
+        .db()
+        .structure()
+        .update_school(
+            first,
+            &SchoolInput {
+                name: existing.name.clone(),
+                code: Some("NGS".to_owned()),
+                timezone: existing.timezone.clone(),
+                locale: existing.locale.clone(),
+                working_days: existing.working_days,
+            },
+        )
+        .expect("give the first school a code");
+
+    let duplicate_code = project.db().structure().create_school(&SchoolInput {
+        name: "Southmoor College".to_owned(),
+        code: Some("NGS".to_owned()),
+        timezone: "Europe/London".to_owned(),
+        locale: "en-GB".to_owned(),
+        working_days: WorkingDays::MONDAY_TO_FRIDAY,
+    });
+    assert!(
+        matches!(duplicate_code, Err(DbError::DuplicateValue { .. })),
+        "a code is unique when given: {duplicate_code:?}"
+    );
+
+    // ...but absent codes do not collide with each other, which is the whole reason the
+    // index is partial rather than wrapped in COALESCE. ADR 0018 section 4.
+    project
+        .db()
+        .structure()
+        .create_school(&SchoolInput {
+            name: "Eastbrook Free School".to_owned(),
+            code: None,
+            timezone: "Europe/London".to_owned(),
+            locale: "en-GB".to_owned(),
+            working_days: WorkingDays::MONDAY_TO_FRIDAY,
+        })
+        .expect("a school with no code must not collide with the other school with no code");
 }
 
 #[test]
@@ -840,11 +914,7 @@ fn change_log_follows_a_row_through_update_and_delete() {
             },
         )
         .expect("update");
-    project
-        .db()
-        .structure()
-        .delete_building(block.id)
-        .expect("delete");
+    tests_support::delete_building_here(project.db(), block.id).expect("delete");
 
     let changes = project.db().changes_since(0, 100).expect("read feed");
     let ours: Vec<_> = changes
@@ -895,7 +965,7 @@ fn a_rejected_write_leaves_neither_a_row_nor_a_change_log_entry() {
         "a rolled-back write must leave the change feed untouched"
     );
     assert_eq!(
-        project.db().structure().campuses().expect("list").len(),
+        tests_support::campuses_here(project.db()).len(),
         1,
         "and must leave no row behind"
     );
@@ -927,11 +997,7 @@ fn a_multi_step_delete_is_one_transaction() {
     }
 
     let before = project.db().changes_since(0, 1000).expect("feed").len();
-    project
-        .db()
-        .structure()
-        .delete_room_type(lab.id)
-        .expect("delete");
+    tests_support::delete_room_type_here(project.db(), lab.id).expect("delete");
     let after = project.db().changes_since(0, 1000).expect("feed");
 
     // Three room updates plus one room_type delete, all from one logical operation.
@@ -993,12 +1059,9 @@ fn structure_survives_closing_and_reopening_the_project() {
         .expect("the room is still there");
 
     assert_eq!(reloaded, created, "every field survives a close and reopen");
-    assert_eq!(
-        project.db().structure().school().unwrap().unwrap().id,
-        school
-    );
+    assert_eq!(tests_support::only_school_id(project.db()), school);
     assert_eq!(project.db().structure().buildings(campus).unwrap().len(), 1);
-    assert_eq!(project.db().structure().room_types().unwrap().len(), 1);
+    assert_eq!(tests_support::room_types_here(project.db()).len(), 1);
 }
 
 // =================================================== stored identifier corruption
@@ -1031,10 +1094,11 @@ fn a_malformed_stored_identifier_is_an_error_never_the_nil_uuid() {
         "UPDATE campus SET id = 'not-a-uuid' WHERE id IS NOT NULL",
     );
 
+    let school = tests_support::only_school_id(project.db());
     let error = project
         .db()
         .structure()
-        .campuses()
+        .campuses(school)
         .expect_err("reading a damaged identifier must fail");
 
     match error {
@@ -1066,10 +1130,11 @@ fn a_malformed_stored_identifier_is_not_a_generic_internal_error() {
     // Empty text rather than rubbish text: the other end of the same hole.
     corrupt(project.db(), "UPDATE campus SET id = ''");
 
+    let school = tests_support::only_school_id(project.db());
     let error = project
         .db()
         .structure()
-        .campuses()
+        .campuses(school)
         .expect_err("reading a damaged identifier must fail");
 
     assert!(
@@ -1206,10 +1271,7 @@ fn detaching_a_reference_reports_corruption_rather_than_a_missing_row() {
          UPDATE room_campus SET room_id = 'broken';",
     );
 
-    let error = project
-        .db()
-        .structure()
-        .delete_room_type(lab.id)
+    let error = tests_support::delete_room_type_here(project.db(), lab.id)
         .expect_err("detaching a damaged room must fail");
 
     assert!(
@@ -1230,7 +1292,8 @@ fn a_failed_read_leaves_the_project_untouched() {
 
     corrupt(project.db(), "UPDATE campus SET id = 'not-a-uuid'");
 
-    assert!(project.db().structure().campuses().is_err());
+    let school = tests_support::only_school_id(project.db());
+    assert!(project.db().structure().campuses(school).is_err());
 
     let still_there: i64 = project
         .db()

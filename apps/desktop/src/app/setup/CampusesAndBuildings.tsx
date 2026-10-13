@@ -64,7 +64,7 @@ export function CampusesAndBuildings(props: { school: School }) {
   const { school } = props;
   const [campusId, setCampusId] = useState<string | null>(null);
 
-  const loadCampuses = useCallback(() => listCampuses(), []);
+  const loadCampuses = useCallback(() => listCampuses(school.id), [school.id]);
   const campuses = useList<Campus>(loadCampuses);
 
   const campusSpec = useMemo<CrudSpec<Campus, Parameters<typeof createCampus>[0]>>(
@@ -101,10 +101,10 @@ export function CampusesAndBuildings(props: { school: School }) {
         code: text(draft, "code"),
         address: textOrNull(draft, "address"),
       }),
-      list: listCampuses,
+      list: () => listCampuses(school.id),
       create: createCampus,
       update: updateCampus,
-      remove: deleteCampus,
+      remove: (id) => deleteCampus(school.id, id),
       emptyHint:
         "A school needs at least one campus before rooms or bell schedules can be recorded against it. A single-site school has exactly one.",
       deleteNote: () => (
@@ -216,12 +216,12 @@ export function CampusesAndBuildings(props: { school: School }) {
           if (!before.has(campus)) await shareBuilding(id, campus);
         }
         for (const campus of before) {
-          if (!after.has(campus)) await unshareBuilding(id, campus);
+          if (!after.has(campus)) await unshareBuilding(school.id, id, campus);
         }
 
         return { ...building, campusIds: [building.campusId, ...after] };
       },
-      remove: deleteBuilding,
+      remove: (id) => deleteBuilding(school.id, id),
       // Withdrawing a share is reversible but it is not nothing: a campus loses a building
       // its rooms may be organised around. Asking first is the same courtesy a delete gets.
       confirmSubmit: (draft, row) => {
@@ -280,7 +280,7 @@ export function CampusesAndBuildings(props: { school: School }) {
         </p>
       </header>
 
-      <CrudPanel spec={campusSpec} onChanged={campuses.reload} />
+      <CrudPanel spec={campusSpec} reloadKey={school.id} onChanged={campuses.reload} />
 
       <hr />
 
@@ -301,7 +301,7 @@ export function CampusesAndBuildings(props: { school: School }) {
           hint: "Add a campus above, then its buildings can be recorded here.",
         }}
       >
-        <CrudPanel spec={buildingSpec} reloadKey={campusId ?? ""} />
+        <CrudPanel spec={buildingSpec} reloadKey={`${school.id}:${campusId ?? ""}`} />
       </ParentPicker>
     </div>
   );

@@ -58,10 +58,10 @@ export function PeriodStructuresAndPeriods(props: { school: School }) {
   const { school } = props;
   const [structureId, setStructureId] = useState<string | null>(null);
 
-  const loadCampuses = useCallback(() => listCampuses(), []);
+  const loadCampuses = useCallback(() => listCampuses(school.id), [school.id]);
   const campuses = useList<Campus>(loadCampuses);
 
-  const loadStructures = useCallback(() => listPeriodStructures(), []);
+  const loadStructures = useCallback(() => listPeriodStructures(school.id), [school.id]);
   const structures = useList<PeriodStructure>(loadStructures);
 
   const loadPeriods = useCallback(
@@ -134,10 +134,10 @@ export function PeriodStructuresAndPeriods(props: { school: School }) {
         name: text(draft, "name"),
         isDefault: flag(draft, "isDefault"),
       }),
-      list: listPeriodStructures,
+      list: () => listPeriodStructures(school.id),
       create: createPeriodStructure,
       update: updatePeriodStructure,
-      remove: deletePeriodStructure,
+      remove: (id) => deletePeriodStructure(school.id, id),
       emptyHint:
         "A bell schedule is the shape of a single day: period 1, period 2, break, and so on. Add one, then its periods — the timetable grid is the cycle's days crossed with this schedule's periods.",
       deleteNote: () => (
@@ -225,7 +225,7 @@ export function PeriodStructuresAndPeriods(props: { school: School }) {
       list: loadPeriods,
       create: createPeriod,
       update: updatePeriod,
-      remove: deletePeriod,
+      remove: (id) => deletePeriod(school.id, id),
       emptyHint:
         "Add every period of the day, breaks included. Breaks keep the grid honest about when the school is actually running, even though nothing is scheduled into them.",
       deleteNote: () => (
@@ -249,7 +249,11 @@ export function PeriodStructuresAndPeriods(props: { school: School }) {
         </p>
       </header>
 
-      <CrudPanel spec={structureSpec} onChanged={structures.reload} />
+      <CrudPanel
+        spec={structureSpec}
+        reloadKey={school.id}
+        onChanged={structures.reload}
+      />
 
       <hr />
 
@@ -273,7 +277,7 @@ export function PeriodStructuresAndPeriods(props: { school: School }) {
         <OrderNote periods={periods.items} />
         <CrudPanel
           spec={periodSpec}
-          reloadKey={structureId ?? ""}
+          reloadKey={`${school.id}:${structureId ?? ""}`}
           onChanged={periods.reload}
         />
       </ParentPicker>

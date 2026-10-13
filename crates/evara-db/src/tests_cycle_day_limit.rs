@@ -26,6 +26,7 @@ use crate::repo::time_model::{
     CalendarDayInput, CalendarDayKind, CycleDay, CycleDayInput, CycleInput, CycleKind,
     MaterialisationRequest,
 };
+use crate::tests_support;
 use crate::tests_time_model::Project;
 
 /// Attempts a cycle day, returning the failure rather than panicking on it.
@@ -60,13 +61,7 @@ fn snapshot(project: &mut Project, cycle: Uuid) -> Vec<(i64, Uuid, String, i64)>
 
 /// Sets a cycle's declared length, returning the failure rather than panicking.
 fn try_resize(project: &mut Project, cycle: Uuid, day_count: i64) -> Result<(), DbError> {
-    let school = project
-        .db()
-        .structure()
-        .school()
-        .expect("read school")
-        .expect("a school exists")
-        .id;
+    let school = tests_support::only_school_id(project.db());
     project
         .db()
         .time_model()
@@ -391,13 +386,7 @@ fn a_refused_day_disturbs_no_calendar_mapping_or_timeslot() {
         .time_model()
         .apply_materialisation(&MaterialisationRequest::new(cycle, structure, None))
         .expect("materialise");
-    let school = project
-        .db()
-        .structure()
-        .school()
-        .expect("read")
-        .expect("exists")
-        .id;
+    let school = tests_support::only_school_id(project.db());
 
     // A real date pointing at a real cycle day, which is the thing a renumbering would
     // silently invalidate.
@@ -417,11 +406,8 @@ fn a_refused_day_disturbs_no_calendar_mapping_or_timeslot() {
 
     let days_before = snapshot(&mut project, cycle);
     let slots_before = project.slots(cycle, None);
-    let calendar_before = project
-        .db()
-        .time_model()
-        .calendar_days("0000-01-01", "9999-12-31")
-        .expect("read calendar");
+    let calendar_before =
+        tests_support::calendar_days_here(project.db(), "0000-01-01", "9999-12-31");
     assert_ne!(slots_before, Vec::new());
 
     // Every refusal this file is about, one after another.
@@ -433,11 +419,7 @@ fn a_refused_day_disturbs_no_calendar_mapping_or_timeslot() {
     assert_eq!(snapshot(&mut project, cycle), days_before);
     assert_eq!(project.slots(cycle, None), slots_before);
     assert_eq!(
-        project
-            .db()
-            .time_model()
-            .calendar_days("0000-01-01", "9999-12-31")
-            .expect("read calendar"),
+        tests_support::calendar_days_here(project.db(), "0000-01-01", "9999-12-31"),
         calendar_before
     );
 }
@@ -480,26 +462,17 @@ fn the_school_fixture_is_untouched_by_all_of_this() {
     // A guard on the helpers rather than on the rule: `try_resize` writes a cycle name, so
     // this makes sure the tests above are not quietly editing the school record too.
     let mut project = Project::new();
-    let before = project
-        .db()
-        .structure()
-        .school()
-        .expect("read")
-        .expect("exists");
+    let before = tests_support::only_school(project.db()).expect("a school exists");
     let cycle = project.bare_cycle("Rotation", 2);
     project.day(cycle, 1, "Day 1");
     assert!(try_day(&mut project, cycle, 3, "Day 3").is_err());
 
-    let after = project
-        .db()
-        .structure()
-        .school()
-        .expect("read")
-        .expect("exists");
+    let after = tests_support::only_school(project.db()).expect("a school exists");
     assert_eq!(after.rev, before.rev);
     assert_eq!(after.updated_at, before.updated_at);
     let _ = SchoolInput {
         name: after.name.clone(),
+        code: None,
         timezone: after.timezone.clone(),
         locale: after.locale.clone(),
         working_days: after.working_days,

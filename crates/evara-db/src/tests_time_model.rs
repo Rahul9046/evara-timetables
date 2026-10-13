@@ -20,6 +20,7 @@ use crate::repo::time_model::{
     CalendarDayInput, CalendarDayKind, CycleDayInput, CycleInput, CycleKind,
     MaterialisationRequest, PeriodInput, PeriodKind, PeriodStructureInput, Timeslot,
 };
+use crate::tests_support;
 use crate::workspace::Workspace;
 use crate::{Database, DbError, PROJECT_EXTENSION};
 
@@ -53,6 +54,7 @@ impl Project {
             .structure()
             .create_school(&SchoolInput {
                 name: "Northgate Secondary".to_owned(),
+                code: None,
                 timezone: "Europe/London".to_owned(),
                 locale: "en-GB".to_owned(),
                 working_days: WorkingDays::MONDAY_TO_FRIDAY,
@@ -156,9 +158,7 @@ impl Project {
             .map(|day| day.id)
             .collect();
         for day in days {
-            self.db()
-                .time_model()
-                .delete_cycle_day(day)
+            tests_support::delete_cycle_day_here(self.db(), day)
                 .expect("a brand-new day is referenced by nothing");
         }
         cycle
@@ -658,7 +658,7 @@ fn the_first_cycle_is_not_made_the_default_by_the_repository() {
     assert!(!only.is_default);
     assert_eq!(only.rev, 1, "and no second write to promote it");
 
-    let cycles = project.db().time_model().cycles().expect("list");
+    let cycles = tests_support::cycles_here(project.db());
     assert_eq!(cycles.len(), 1);
     assert!(
         cycles.iter().all(|cycle| !cycle.is_default),
@@ -1076,17 +1076,11 @@ fn a_materialised_grid_blocks_deleting_the_day_or_period_it_came_from() {
         .apply_materialisation(&MaterialisationRequest::new(cycle, structure, Some(term)))
         .expect("materialise");
 
-    let day = project
-        .db()
-        .time_model()
-        .delete_cycle_day(days[0])
+    let day = tests_support::delete_cycle_day_here(project.db(), days[0])
         .expect_err("a materialised day cannot just vanish");
     assert!(matches!(day, DbError::StillReferenced { .. }), "{day:?}");
 
-    let period = project
-        .db()
-        .time_model()
-        .delete_period(periods[0])
+    let period = tests_support::delete_period_here(project.db(), periods[0])
         .expect_err("nor a materialised period");
     assert!(
         matches!(period, DbError::StillReferenced { .. }),
@@ -1117,18 +1111,11 @@ fn releasing_orphans_explicitly_is_what_finally_allows_a_removal() {
         .expect("plan");
 
     // Step 2: a human has now seen the counts and agreed.
-    project
-        .db()
-        .time_model()
-        .delete_timeslots(&plan.orphaned_ids())
+    tests_support::delete_timeslots_here(project.db(), &plan.orphaned_ids())
         .expect("release the slots the plan named");
 
     // Step 3: only now will the day go.
-    project
-        .db()
-        .time_model()
-        .delete_cycle_day(doomed)
-        .expect("the obstruction is gone");
+    tests_support::delete_cycle_day_here(project.db(), doomed).expect("the obstruction is gone");
 
     let remaining = project.slots(cycle, Some(term));
     assert_eq!(
@@ -1154,10 +1141,7 @@ fn releasing_orphans_explicitly_is_what_finally_allows_a_removal() {
 #[test]
 fn deleting_a_timeslot_that_does_not_exist_is_an_error_not_a_silent_no_op() {
     let mut project = Project::new();
-    let error = project
-        .db()
-        .time_model()
-        .delete_timeslots(&[Uuid::now_v7()])
+    let error = tests_support::delete_timeslots_here(project.db(), &[Uuid::now_v7()])
         .expect_err("a phantom identifier must not pass quietly");
     assert!(matches!(error, DbError::NotFound { .. }), "{error:?}");
 }
@@ -1467,11 +1451,7 @@ fn explicit_dates_map_onto_arbitrarily_named_cycle_days() {
             .expect("calendar day");
     }
 
-    let mapped = project
-        .db()
-        .time_model()
-        .calendar_days("2027-09-01", "2027-09-30")
-        .expect("read calendar");
+    let mapped = tests_support::calendar_days_here(project.db(), "2027-09-01", "2027-09-30");
 
     assert_eq!(
         mapped
@@ -1570,21 +1550,14 @@ fn a_mapped_date_blocks_deleting_the_cycle_day_it_names() {
         })
         .expect("calendar day");
 
-    let error = project
-        .db()
-        .time_model()
-        .delete_cycle_day(day)
+    let error = tests_support::delete_cycle_day_here(project.db(), day)
         .expect_err("ADR 0011 Q2: RESTRICT, not a silent reinterpretation");
     assert!(
         matches!(error, DbError::StillReferenced { .. }),
         "{error:?}"
     );
 
-    let still_mapped = project
-        .db()
-        .time_model()
-        .calendar_days("2027-09-01", "2027-09-01")
-        .expect("read");
+    let still_mapped = tests_support::calendar_days_here(project.db(), "2027-09-01", "2027-09-01");
     assert_eq!(
         still_mapped[0].cycle_day_id,
         Some(day),

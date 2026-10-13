@@ -54,9 +54,9 @@ vi.mock("../../ipc/setup", () => ({
     order.push(`share:${campusId}`);
     return shareRoom(roomId, campusId);
   },
-  unshareRoom: (roomId: string, campusId: string) => {
+  unshareRoom: (schoolId: string, roomId: string, campusId: string) => {
     order.push(`unshare:${campusId}`);
-    return unshareRoom(roomId, campusId);
+    return unshareRoom(schoolId, roomId, campusId);
   },
   deleteRoom: (id: string) => deleteRoom(id),
   createRoomType: vi.fn(() => Promise.resolve({})),
@@ -507,7 +507,7 @@ describe("withdrawing a share", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(unshareRoom).toHaveBeenCalled());
-    expect(unshareRoom).toHaveBeenCalledWith("r-hall", "south");
+    expect(unshareRoom).toHaveBeenCalledWith("school-1", "r-hall", "south");
   });
 
   it("abandons it on cancel, with the edit still on screen", async () => {

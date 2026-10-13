@@ -147,7 +147,7 @@ export function CyclesAndCycleDays(props: { school: School }) {
   const { school } = props;
   const [cycleId, setCycleId] = useState<string | null>(null);
 
-  const loadCycles = useCallback(() => listCycles(), []);
+  const loadCycles = useCallback(() => listCycles(school.id), [school.id]);
   const cycles = useList<Cycle>(loadCycles);
 
   // The working week is part of the question, not something the backend looks up. Keyed on
@@ -247,10 +247,10 @@ export function CyclesAndCycleDays(props: { school: School }) {
           isDefault: flag(draft, "isDefault"),
         };
       },
-      list: listCycles,
+      list: () => listCycles(school.id),
       create: createCycle,
       update: updateCycle,
-      remove: deleteCycle,
+      remove: (id) => deleteCycle(school.id, id),
       emptyHint:
         "A cycle is the pattern the timetable repeats. Most schools have one. Choose Weekly for an ordinary school week, or Custom for a rotation — either way its days are created with it.",
       deleteNote: () => (
@@ -343,7 +343,7 @@ export function CyclesAndCycleDays(props: { school: School }) {
       list: () => (cycleId ? listCycleDays(cycleId) : Promise.resolve([])),
       create: createCycleDay,
       update: updateCycleDay,
-      remove: deleteCycleDay,
+      remove: (id) => deleteCycleDay(school.id, id),
       emptyHint: weekly
         ? "A weekly cycle is created with all seven days. If none are listed, edit the cycle above and they will be put back."
         : "A cycle needs one day per position in its pattern. Name them however the school does — the position is what the timetable uses.",
@@ -382,6 +382,7 @@ export function CyclesAndCycleDays(props: { school: School }) {
 
       <CrudPanel
         spec={cycleSpec}
+        reloadKey={school.id}
         // The shape as well as the list. Editing a cycle changes its `dayCount`, which is
         // what decides whether the cycle is full -- and `loadShape` is keyed on the
         // selected cycle's id, which an edit does not change. Without this, lengthening a
@@ -437,7 +438,7 @@ export function CyclesAndCycleDays(props: { school: School }) {
 
         <CrudPanel
           spec={daySpec}
-          reloadKey={cycleId ?? ""}
+          reloadKey={`${school.id}:${cycleId ?? ""}`}
           onChanged={shape.reload}
         />
       </ParentPicker>

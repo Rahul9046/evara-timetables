@@ -21,6 +21,7 @@ use uuid::Uuid;
 
 use crate::DbError;
 use crate::repo::time_model::{MaterialisationRequest, PeriodKind, PlanFingerprint};
+use crate::tests_support;
 use crate::tests_time_model::Project;
 
 // ===================================================================== cycle coverage
@@ -432,10 +433,7 @@ fn releasing_orphans_deletes_exactly_what_the_reviewed_plan_named() {
         .expect("plan");
     assert_eq!(plan.orphaned.len(), 4, "Day F has four slots");
 
-    let removed = project
-        .db()
-        .time_model()
-        .release_orphans(&proposal, &plan.fingerprint())
+    let removed = tests_support::release_orphans_here(project.db(), &proposal, &plan.fingerprint())
         .expect("release");
 
     assert_eq!(removed.len(), 4);
@@ -464,10 +462,7 @@ fn releasing_orphans_is_refused_when_the_plan_has_moved_and_deletes_nothing() {
     // The grid moves underneath the confirmation.
     project.period(structure, 5, "4", PeriodKind::Teaching);
 
-    let error = project
-        .db()
-        .time_model()
-        .release_orphans(&proposal, &reviewed)
+    let error = tests_support::release_orphans_here(project.db(), &proposal, &reviewed)
         .expect_err("a stale destructive confirmation must be refused");
 
     assert!(matches!(error, DbError::ReviewRequired { .. }), "{error:?}");
@@ -509,10 +504,7 @@ fn a_stale_orphan_list_cannot_delete_a_slot_that_is_wanted_again() {
     // Meanwhile the configuration changes, so the proposal describes something else.
     project.period(structure, 5, "4", PeriodKind::Teaching);
 
-    let error = project
-        .db()
-        .time_model()
-        .release_orphans(&proposal, &stale)
+    let error = tests_support::release_orphans_here(project.db(), &proposal, &stale)
         .expect_err("the stale agreement must not be honoured");
     assert!(matches!(error, DbError::ReviewRequired { .. }), "{error:?}");
 
@@ -548,10 +540,7 @@ fn releasing_nothing_is_a_success_not_a_failure() {
         .expect("plan");
     assert!(!plan.would_orphan());
 
-    let removed = project
-        .db()
-        .time_model()
-        .release_orphans(&request, &plan.fingerprint())
+    let removed = tests_support::release_orphans_here(project.db(), &request, &plan.fingerprint())
         .expect("a proposal that strands nothing is not an error");
 
     assert_eq!(removed, Vec::<Uuid>::new());
@@ -570,10 +559,7 @@ fn releasing_orphans_is_what_finally_allows_the_day_to_be_deleted() {
         .expect("build");
 
     // The grid blocks the deletion, which is the whole reason the preview exists.
-    let blocked = project
-        .db()
-        .time_model()
-        .delete_cycle_day(days[5])
+    let blocked = tests_support::delete_cycle_day_here(project.db(), days[5])
         .expect_err("a materialised grid holds the day");
     assert!(
         matches!(blocked, DbError::StillReferenced { .. }),
@@ -586,16 +572,10 @@ fn releasing_orphans_is_what_finally_allows_the_day_to_be_deleted() {
         .time_model()
         .plan_materialisation(&proposal)
         .expect("plan");
-    project
-        .db()
-        .time_model()
-        .release_orphans(&proposal, &plan.fingerprint())
+    tests_support::release_orphans_here(project.db(), &proposal, &plan.fingerprint())
         .expect("release");
 
-    project
-        .db()
-        .time_model()
-        .delete_cycle_day(days[5])
+    tests_support::delete_cycle_day_here(project.db(), days[5])
         .expect("with its slots gone, the day can go");
 }
 
@@ -937,20 +917,10 @@ fn preview_survives_closing_and_reopening_the_project() {
 #[test]
 fn the_repositories_are_reachable_through_the_workspace() {
     let mut project = Project::new();
-    let campuses = project
-        .workspace
-        .structure()
-        .expect("a project is open")
-        .campuses()
-        .expect("read");
+    let campuses = tests_support::campuses_here(project.db());
     assert_eq!(campuses.len(), 1, "the fixture's one campus");
 
-    let cycles = project
-        .workspace
-        .time_model()
-        .expect("a project is open")
-        .cycles()
-        .expect("read");
+    let cycles = tests_support::cycles_here(project.db());
     assert_eq!(cycles, Vec::new());
 }
 
@@ -1011,11 +981,7 @@ fn kinds_match_their_stored_spelling() {
 #[test]
 fn records_serialise_as_camel_case_for_the_interface() {
     let mut project = Project::new();
-    let campus = project
-        .db()
-        .structure()
-        .campuses()
-        .expect("read")
+    let campus = tests_support::campuses_here(project.db())
         .pop()
         .expect("the fixture's campus");
 

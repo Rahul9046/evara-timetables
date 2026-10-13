@@ -60,11 +60,14 @@ pub fn setup_year_level_get(
     Ok(ws.people()?.year_level(id)?)
 }
 
-/// Every year level, in the school's own progression order.
+/// Every year level of one school, in that school's own progression order.
 #[tauri::command]
-pub fn setup_year_level_list(state: State<'_, AppState>) -> SetupResult<Vec<YearLevel>> {
+pub fn setup_year_level_list(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+) -> SetupResult<Vec<YearLevel>> {
     let mut ws = workspace(&state)?;
-    Ok(ws.people()?.year_levels()?)
+    Ok(ws.people()?.year_levels(school_id)?)
 }
 
 /// Replaces a year level's details.
@@ -80,9 +83,13 @@ pub fn setup_year_level_update(
 
 /// Deletes a year level, detaching anything classified by it.
 #[tauri::command]
-pub fn setup_year_level_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_year_level_delete(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+    id: Uuid,
+) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.people()?.delete_year_level(id)?)
+    Ok(ws.people()?.delete_year_level(school_id, id)?)
 }
 
 // --------------------------------------------------------------------------- teacher
@@ -104,11 +111,17 @@ pub fn setup_teacher_get(state: State<'_, AppState>, id: Uuid) -> SetupResult<Op
     Ok(ws.people()?.teacher(id)?)
 }
 
-/// Every teacher, active and inactive, ordered by name.
+/// Every teacher of one school, active and inactive, ordered by name.
+///
+/// A teacher still belongs to exactly one school in Stage 0A. Membership of several is
+/// Stage 0B (ADR 0021), and nothing here should be read as implying it yet.
 #[tauri::command]
-pub fn setup_teacher_list(state: State<'_, AppState>) -> SetupResult<Vec<Teacher>> {
+pub fn setup_teacher_list(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+) -> SetupResult<Vec<Teacher>> {
     let mut ws = workspace(&state)?;
-    Ok(ws.people()?.teachers()?)
+    Ok(ws.people()?.teachers(school_id)?)
 }
 
 /// Replaces a teacher's details. Their identity is unchanged.
@@ -124,9 +137,13 @@ pub fn setup_teacher_update(
 
 /// Deletes a teacher.
 #[tauri::command]
-pub fn setup_teacher_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_teacher_delete(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+    id: Uuid,
+) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.people()?.delete_teacher(id)?)
+    Ok(ws.people()?.delete_teacher(school_id, id)?)
 }
 
 // --------------------------------------------------------------------------- student
@@ -148,11 +165,17 @@ pub fn setup_student_get(state: State<'_, AppState>, id: Uuid) -> SetupResult<Op
     Ok(ws.people()?.student(id)?)
 }
 
-/// Every student, enrolled and left, ordered by name.
+/// Every student of one school, enrolled and left, ordered by name.
+///
+/// A student still belongs to exactly one school in Stage 0A. Enrolment history across
+/// schools is Stage 0B (ADR 0021).
 #[tauri::command]
-pub fn setup_student_list(state: State<'_, AppState>) -> SetupResult<Vec<Student>> {
+pub fn setup_student_list(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+) -> SetupResult<Vec<Student>> {
     let mut ws = workspace(&state)?;
-    Ok(ws.people()?.students()?)
+    Ok(ws.people()?.students(school_id)?)
 }
 
 /// Replaces a student's details. Their identity is unchanged.
@@ -168,9 +191,13 @@ pub fn setup_student_update(
 
 /// Deletes a student who belongs to no group. Refused otherwise.
 #[tauri::command]
-pub fn setup_student_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_student_delete(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+    id: Uuid,
+) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.people()?.delete_student(id)?)
+    Ok(ws.people()?.delete_student(school_id, id)?)
 }
 
 // --------------------------------------------------------------------- student group
@@ -195,11 +222,14 @@ pub fn setup_student_group_get(
     Ok(ws.people()?.student_group(id)?)
 }
 
-/// Every student group, ordered by name.
+/// Every student group of one school, ordered by name.
 #[tauri::command]
-pub fn setup_student_group_list(state: State<'_, AppState>) -> SetupResult<Vec<StudentGroup>> {
+pub fn setup_student_group_list(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+) -> SetupResult<Vec<StudentGroup>> {
     let mut ws = workspace(&state)?;
-    Ok(ws.people()?.student_groups()?)
+    Ok(ws.people()?.student_groups(school_id)?)
 }
 
 /// Replaces a group's details.
@@ -215,9 +245,13 @@ pub fn setup_student_group_update(
 
 /// Deletes a group and the memberships that only existed because of it.
 #[tauri::command]
-pub fn setup_student_group_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_student_group_delete(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+    id: Uuid,
+) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.people()?.delete_student_group(id)?)
+    Ok(ws.people()?.delete_student_group(school_id, id)?)
 }
 
 // ------------------------------------------------------------------------ membership
@@ -236,13 +270,14 @@ pub fn setup_student_group_member_add(
 #[tauri::command]
 pub fn setup_student_group_member_remove(
     state: State<'_, AppState>,
+    school_id: Uuid,
     student_group_id: Uuid,
     student_id: Uuid,
 ) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
     Ok(ws
         .people()?
-        .remove_student_group_member(student_group_id, student_id)?)
+        .remove_student_group_member(school_id, student_group_id, student_id)?)
 }
 
 /// Every student in one group, ordered by name.

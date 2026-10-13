@@ -34,8 +34,8 @@ vi.mock("../../ipc/setup", () => ({
   updateBuilding: (id: string, input: unknown) => updateBuilding(id, input),
   shareBuilding: (buildingId: string, campusId: string) =>
     shareBuilding(buildingId, campusId),
-  unshareBuilding: (buildingId: string, campusId: string) =>
-    unshareBuilding(buildingId, campusId),
+  unshareBuilding: (schoolId: string, buildingId: string, campusId: string) =>
+    unshareBuilding(schoolId, buildingId, campusId),
   deleteBuilding: (id: string) => deleteBuilding(id),
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
@@ -319,7 +319,9 @@ describe("withdrawing a share", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(unshareBuilding).toHaveBeenCalled());
-    expect(unshareBuilding).toHaveBeenCalledWith("b-sports", "south");
+    // The school doing the withdrawing travels with it: either the school losing
+    // access or the one that owns the building may do this, and a third may not.
+    expect(unshareBuilding).toHaveBeenCalledWith("school-1", "b-sports", "south");
   });
 
   it("abandons it on cancel, with the edit still on screen", async () => {

@@ -62,8 +62,8 @@ vi.mock("../../ipc/setup", () => ({
   listGroupMembers: (groupId: string) => listGroupMembers(groupId),
   countGroupMembers: (groupId: string) => countGroupMembers(groupId),
   addGroupMember: (input: unknown) => addGroupMember(input),
-  removeGroupMember: (groupId: string, studentId: string) =>
-    removeGroupMember(groupId, studentId),
+  removeGroupMember: (schoolId: string, groupId: string, studentId: string) =>
+    removeGroupMember(schoolId, groupId, studentId),
   listGroupsForStudent: (studentId: string) => listGroupsForStudent(studentId),
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
@@ -331,7 +331,9 @@ describe("Student groups", () => {
     await user.click(await openMembers(user));
     await user.click(screen.getByRole("button", { name: "Remove from group" }));
 
-    await waitFor(() => expect(removeGroupMember).toHaveBeenCalledWith("g-1", "s-1"));
+    await waitFor(() =>
+      expect(removeGroupMember).toHaveBeenCalledWith("school-1", "g-1", "s-1"),
+    );
     expect(deleteStudent).not.toHaveBeenCalled();
   });
 

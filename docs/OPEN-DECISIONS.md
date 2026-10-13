@@ -228,7 +228,7 @@ Resolved while implementing, and now reflected in the document:
 | --- | --- |
 | No uniqueness scopes except `campus(school_id, code)` | Applied the documented rule — codes are unique within their parent: `room_type(school_id, code)`, `room(campus_id, code)`, `resource(school_id, code)`, `academic_year(school_id, name)`, `term(academic_year_id, ordinal)` and `(academic_year_id, name)` |
 | `building` has no `code` | Its `name` is unique within the campus instead |
-| Is `school` a singleton? | Yes — ADR 0003 says multiple schools means multiple project files. Enforced with a constant column and a unique index |
+| Is `school` a singleton? | **No longer.** It was, enforced with a constant column and a unique index; `V12` removed both and [ADR 0019](adr/0019-multiple-schools-in-one-project.md) supersedes ADR 0003's claim. A project may describe several schools that share staff and facilities |
 | `room` names both a campus and an optional building, which could disagree | Enforced by a trigger. A composite foreign key cannot be used because `ON DELETE SET NULL` would try to null the NOT NULL `campus_id` |
 | `deleted_at` is "only on tables a future sync must tombstone" — which ones? | None in Phase 1C. Deletes are hard, guarded by RESTRICT, and remain attributable through `change_log`. Revisit when synchronisation is designed |
 

@@ -56,6 +56,7 @@ import type {
   RoomTypeInput,
   RoomWithCampuses,
   School,
+  SchoolDependents,
   SchoolInput,
   SchoolLogoView,
   SetupError,
@@ -122,14 +123,35 @@ export function isStillReferenced(error: unknown): boolean {
 
 // --------------------------------------------------------------------------- school
 
-/** Creates the school record. Exactly one per project. */
+/** Creates a school. A project may hold several since V12. */
 export function createSchool(input: SchoolInput): Promise<School> {
   return invoke<School>("setup_school_create", { input });
 }
 
-/** The school record, or null when setup has not started. */
-export function getSchool(): Promise<School | null> {
-  return invoke<School | null>("setup_school_get");
+/**
+ * Every school in the project, ordered by name.
+ *
+ * An empty array drives the first-run empty state. There is deliberately no "get the
+ * school": with more than one, a call like that would return an arbitrary institution and
+ * silently scope everything downstream to it.
+ */
+export function listSchools(): Promise<School[]> {
+  return invoke<School[]>("setup_school_list");
+}
+
+/** One school by identifier, or null if it is not there. */
+export function getSchool(id: string): Promise<School | null> {
+  return invoke<School | null>("setup_school_get", { id });
+}
+
+/** What a school still owns, so a confirmation can say why it cannot be deleted. */
+export function schoolDependents(id: string): Promise<SchoolDependents> {
+  return invoke<SchoolDependents>("setup_school_dependents", { id });
+}
+
+/** Deletes a school that owns nothing. Refused while it still owns anything. */
+export function deleteSchool(id: string): Promise<void> {
+  return invoke<void>("setup_school_delete", { id });
 }
 
 /** Replaces the school's details. */
@@ -146,8 +168,8 @@ export function updateSchool(id: string, input: SchoolInput): Promise<School> {
  * called by almost every screen. Nothing pays for the bytes unless it is going to show
  * them.
  */
-export function getSchoolLogo(): Promise<SchoolLogoView | null> {
-  return invoke<SchoolLogoView | null>("setup_school_logo_get");
+export function getSchoolLogo(schoolId: string): Promise<SchoolLogoView | null> {
+  return invoke<SchoolLogoView | null>("setup_school_logo_get", { schoolId });
 }
 
 /**
@@ -165,8 +187,8 @@ export function setSchoolLogo(
 }
 
 /** Removes the school's logo, restoring the Evara one. Removing nothing succeeds. */
-export function clearSchoolLogo(): Promise<void> {
-  return invoke<void>("setup_school_logo_clear");
+export function clearSchoolLogo(schoolId: string): Promise<void> {
+  return invoke<void>("setup_school_logo_clear", { schoolId });
 }
 
 /**
@@ -192,8 +214,8 @@ export function getCampus(id: string): Promise<Campus | null> {
 }
 
 /** Every campus. */
-export function listCampuses(): Promise<Campus[]> {
-  return invoke<Campus[]>("setup_campus_list");
+export function listCampuses(schoolId: string): Promise<Campus[]> {
+  return invoke<Campus[]>("setup_campus_list", { schoolId });
 }
 
 /** Replaces a campus's details. */
@@ -202,8 +224,8 @@ export function updateCampus(id: string, input: CampusInput): Promise<Campus> {
 }
 
 /** Deletes a campus. Refused while it still owns buildings, rooms or resources. */
-export function deleteCampus(id: string): Promise<void> {
-  return invoke<void>("setup_campus_delete", { id });
+export function deleteCampus(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_campus_delete", { schoolId, id });
 }
 
 // ------------------------------------------------------------------------- building
@@ -257,13 +279,17 @@ export function shareBuilding(buildingId: string, campusId: string): Promise<voi
  * Refused while rooms on that campus are still in the building, and refused outright for
  * the campus the building was created on. Nothing is detached or deleted either way.
  */
-export function unshareBuilding(buildingId: string, campusId: string): Promise<void> {
-  return invoke<void>("setup_building_unshare", { buildingId, campusId });
+export function unshareBuilding(
+  schoolId: string,
+  buildingId: string,
+  campusId: string,
+): Promise<void> {
+  return invoke<void>("setup_building_unshare", { schoolId, buildingId, campusId });
 }
 
 /** Deletes a building. Its rooms survive, detached rather than deleted. */
-export function deleteBuilding(id: string): Promise<void> {
-  return invoke<void>("setup_building_delete", { id });
+export function deleteBuilding(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_building_delete", { schoolId, id });
 }
 
 // ------------------------------------------------------------------------ room type
@@ -279,8 +305,8 @@ export function getRoomType(id: string): Promise<RoomType | null> {
 }
 
 /** Every room type. */
-export function listRoomTypes(): Promise<RoomType[]> {
-  return invoke<RoomType[]>("setup_room_type_list");
+export function listRoomTypes(schoolId: string): Promise<RoomType[]> {
+  return invoke<RoomType[]>("setup_room_type_list", { schoolId });
 }
 
 /** Replaces a room type's details. */
@@ -289,8 +315,8 @@ export function updateRoomType(id: string, input: RoomTypeInput): Promise<RoomTy
 }
 
 /** Deletes a room type. Rooms that used it survive, unclassified. */
-export function deleteRoomType(id: string): Promise<void> {
-  return invoke<void>("setup_room_type_delete", { id });
+export function deleteRoomType(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_room_type_delete", { schoolId, id });
 }
 
 // ----------------------------------------------------------------------------- room
@@ -348,13 +374,17 @@ export function shareRoom(roomId: string, campusId: string): Promise<void> {
  * Refused outright for the campus the room was created on. Nothing is moved, duplicated
  * or deleted — the room keeps its identity and every other campus keeps it.
  */
-export function unshareRoom(roomId: string, campusId: string): Promise<void> {
-  return invoke<void>("setup_room_unshare", { roomId, campusId });
+export function unshareRoom(
+  schoolId: string,
+  roomId: string,
+  campusId: string,
+): Promise<void> {
+  return invoke<void>("setup_room_unshare", { schoolId, roomId, campusId });
 }
 
 /** Deletes a room. Its campus associations go with it. */
-export function deleteRoom(id: string): Promise<void> {
-  return invoke<void>("setup_room_delete", { id });
+export function deleteRoom(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_room_delete", { schoolId, id });
 }
 
 // ------------------------------------------------------------------------- resource
@@ -370,8 +400,8 @@ export function getResource(id: string): Promise<Resource | null> {
 }
 
 /** Every resource. */
-export function listResources(): Promise<Resource[]> {
-  return invoke<Resource[]>("setup_resource_list");
+export function listResources(schoolId: string): Promise<Resource[]> {
+  return invoke<Resource[]>("setup_resource_list", { schoolId });
 }
 
 /** Replaces a resource's details. */
@@ -380,8 +410,8 @@ export function updateResource(id: string, input: ResourceInput): Promise<Resour
 }
 
 /** Deletes a resource. */
-export function deleteResource(id: string): Promise<void> {
-  return invoke<void>("setup_resource_delete", { id });
+export function deleteResource(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_resource_delete", { schoolId, id });
 }
 
 // -------------------------------------------------------------------- academic year
@@ -397,8 +427,8 @@ export function getAcademicYear(id: string): Promise<AcademicYear | null> {
 }
 
 /** Every academic year, earliest first. */
-export function listAcademicYears(): Promise<AcademicYear[]> {
-  return invoke<AcademicYear[]>("setup_academic_year_list");
+export function listAcademicYears(schoolId: string): Promise<AcademicYear[]> {
+  return invoke<AcademicYear[]>("setup_academic_year_list", { schoolId });
 }
 
 /** Replaces an academic year's details. */
@@ -410,8 +440,8 @@ export function updateAcademicYear(
 }
 
 /** Deletes an academic year. Refused while it still has terms. */
-export function deleteAcademicYear(id: string): Promise<void> {
-  return invoke<void>("setup_academic_year_delete", { id });
+export function deleteAcademicYear(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_academic_year_delete", { schoolId, id });
 }
 
 // ----------------------------------------------------------------------------- term
@@ -437,8 +467,8 @@ export function updateTerm(id: string, input: TermInput): Promise<Term> {
 }
 
 /** Deletes a term. Refused while a timeslot or calendar day still names it. */
-export function deleteTerm(id: string): Promise<void> {
-  return invoke<void>("setup_term_delete", { id });
+export function deleteTerm(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_term_delete", { schoolId, id });
 }
 
 // ---------------------------------------------------------------------------- cycle
@@ -454,8 +484,8 @@ export function getCycle(id: string): Promise<Cycle | null> {
 }
 
 /** Every cycle, the default first. */
-export function listCycles(): Promise<Cycle[]> {
-  return invoke<Cycle[]>("setup_cycle_list");
+export function listCycles(schoolId: string): Promise<Cycle[]> {
+  return invoke<Cycle[]>("setup_cycle_list", { schoolId });
 }
 
 /** Replaces a cycle's details. */
@@ -464,8 +494,8 @@ export function updateCycle(id: string, input: CycleInput): Promise<Cycle> {
 }
 
 /** Deletes a cycle. Refused while it still has days or timeslots. */
-export function deleteCycle(id: string): Promise<void> {
-  return invoke<void>("setup_cycle_delete", { id });
+export function deleteCycle(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_cycle_delete", { schoolId, id });
 }
 
 /**
@@ -518,8 +548,8 @@ export function updateCycleDay(id: string, input: CycleDayInput): Promise<CycleD
 }
 
 /** Deletes a cycle day. Refused while a timeslot or mapped date still names it. */
-export function deleteCycleDay(id: string): Promise<void> {
-  return invoke<void>("setup_cycle_day_delete", { id });
+export function deleteCycleDay(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_cycle_day_delete", { schoolId, id });
 }
 
 // ----------------------------------------------------------------- period structure
@@ -537,8 +567,8 @@ export function getPeriodStructure(id: string): Promise<PeriodStructure | null> 
 }
 
 /** Every bell schedule. */
-export function listPeriodStructures(): Promise<PeriodStructure[]> {
-  return invoke<PeriodStructure[]>("setup_period_structure_list");
+export function listPeriodStructures(schoolId: string): Promise<PeriodStructure[]> {
+  return invoke<PeriodStructure[]>("setup_period_structure_list", { schoolId });
 }
 
 /** Replaces a bell schedule's details. */
@@ -550,8 +580,8 @@ export function updatePeriodStructure(
 }
 
 /** Deletes a bell schedule. Refused while it still has periods. */
-export function deletePeriodStructure(id: string): Promise<void> {
-  return invoke<void>("setup_period_structure_delete", { id });
+export function deletePeriodStructure(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_period_structure_delete", { schoolId, id });
 }
 
 // --------------------------------------------------------------------------- period
@@ -577,8 +607,8 @@ export function updatePeriod(id: string, input: PeriodInput): Promise<Period> {
 }
 
 /** Deletes a period. Refused while a timeslot was materialised from it. */
-export function deletePeriod(id: string): Promise<void> {
-  return invoke<void>("setup_period_delete", { id });
+export function deletePeriod(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_period_delete", { schoolId, id });
 }
 
 // --------------------------------------------------------------------- calendar day
@@ -599,8 +629,12 @@ export function getCalendarDay(id: string): Promise<CalendarDay | null> {
 }
 
 /** Calendar days in an inclusive `YYYY-MM-DD` range, in date order. */
-export function listCalendarDays(from: string, to: string): Promise<CalendarDay[]> {
-  return invoke<CalendarDay[]>("setup_calendar_day_list", { from, to });
+export function listCalendarDays(
+  schoolId: string,
+  from: string,
+  to: string,
+): Promise<CalendarDay[]> {
+  return invoke<CalendarDay[]>("setup_calendar_day_list", { schoolId, from, to });
 }
 
 /** Replaces a calendar day's details. */
@@ -612,8 +646,8 @@ export function updateCalendarDay(
 }
 
 /** Deletes a calendar day. The dates around it are untouched. */
-export function deleteCalendarDay(id: string): Promise<void> {
-  return invoke<void>("setup_calendar_day_delete", { id });
+export function deleteCalendarDay(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_calendar_day_delete", { schoolId, id });
 }
 
 /**
@@ -628,9 +662,11 @@ export function deleteCalendarDay(id: string): Promise<void> {
  * is rejected by the backend rather than treated as "every day".
  */
 export function nonWorkingInstructionalDays(
+  schoolId: string,
   workingDays: readonly number[],
 ): Promise<NonWorkingInstructionalDay[]> {
   return invoke<NonWorkingInstructionalDay[]>("setup_calendar_non_working_days", {
+    schoolId,
     workingDays,
   });
 }
@@ -669,10 +705,15 @@ export function rebuildGrid(
  * confirmation first.
  */
 export function releaseOrphans(
+  schoolId: string,
   request: MaterialisationRequest,
   reviewed: PlanFingerprint,
 ): Promise<string[]> {
-  return invoke<string[]>("setup_grid_release_orphans", { request, reviewed });
+  return invoke<string[]>("setup_grid_release_orphans", {
+    schoolId,
+    request,
+    reviewed,
+  });
 }
 
 /** Every stored slot of one grid, in cycle order. */
@@ -696,8 +737,8 @@ export function getYearLevel(id: string): Promise<YearLevel | null> {
 }
 
 /** Every year level, in the school's own progression order. */
-export function listYearLevels(): Promise<YearLevel[]> {
-  return invoke<YearLevel[]>("setup_year_level_list");
+export function listYearLevels(schoolId: string): Promise<YearLevel[]> {
+  return invoke<YearLevel[]>("setup_year_level_list", { schoolId });
 }
 
 /** Replaces a year level's details. */
@@ -709,8 +750,8 @@ export function updateYearLevel(
 }
 
 /** Deletes a year level, detaching anything classified by it. */
-export function deleteYearLevel(id: string): Promise<void> {
-  return invoke<void>("setup_year_level_delete", { id });
+export function deleteYearLevel(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_year_level_delete", { schoolId, id });
 }
 
 // -------------------------------------------------------------------------- teacher
@@ -731,8 +772,8 @@ export function getTeacher(id: string): Promise<Teacher | null> {
  * Inactive teachers are included deliberately. Deciding who to *offer* is a screen's
  * decision; a list that hid them would also hide a teacher a timetable already names.
  */
-export function listTeachers(): Promise<Teacher[]> {
-  return invoke<Teacher[]>("setup_teacher_list");
+export function listTeachers(schoolId: string): Promise<Teacher[]> {
+  return invoke<Teacher[]>("setup_teacher_list", { schoolId });
 }
 
 /** Replaces a teacher's details. Their identity is unchanged. */
@@ -741,8 +782,8 @@ export function updateTeacher(id: string, input: TeacherInput): Promise<Teacher>
 }
 
 /** Deletes a teacher. */
-export function deleteTeacher(id: string): Promise<void> {
-  return invoke<void>("setup_teacher_delete", { id });
+export function deleteTeacher(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_teacher_delete", { schoolId, id });
 }
 
 // -------------------------------------------------------------------------- student
@@ -758,8 +799,8 @@ export function getStudent(id: string): Promise<Student | null> {
 }
 
 /** Every student, enrolled and left. */
-export function listStudents(): Promise<Student[]> {
-  return invoke<Student[]>("setup_student_list");
+export function listStudents(schoolId: string): Promise<Student[]> {
+  return invoke<Student[]>("setup_student_list", { schoolId });
 }
 
 /** Replaces a student's details. Their identity is unchanged. */
@@ -773,8 +814,8 @@ export function updateStudent(id: string, input: StudentInput): Promise<Student>
  * Rejects when they are still in one; {@link listGroupsForStudent} is how a screen finds
  * that out before offering the action rather than after it.
  */
-export function deleteStudent(id: string): Promise<void> {
-  return invoke<void>("setup_student_delete", { id });
+export function deleteStudent(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_student_delete", { schoolId, id });
 }
 
 // -------------------------------------------------------------------- student group
@@ -792,8 +833,8 @@ export function getStudentGroup(id: string): Promise<StudentGroup | null> {
 }
 
 /** Every student group, ordered by name. */
-export function listStudentGroups(): Promise<StudentGroup[]> {
-  return invoke<StudentGroup[]>("setup_student_group_list");
+export function listStudentGroups(schoolId: string): Promise<StudentGroup[]> {
+  return invoke<StudentGroup[]>("setup_student_group_list", { schoolId });
 }
 
 /** Replaces a group's details. */
@@ -805,8 +846,8 @@ export function updateStudentGroup(
 }
 
 /** Deletes a group and the memberships that only existed because of it. */
-export function deleteStudentGroup(id: string): Promise<void> {
-  return invoke<void>("setup_student_group_delete", { id });
+export function deleteStudentGroup(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_student_group_delete", { schoolId, id });
 }
 
 // ----------------------------------------------------------------------- membership
@@ -820,10 +861,12 @@ export function addGroupMember(
 
 /** Removes one student from one group. The student is untouched. */
 export function removeGroupMember(
+  schoolId: string,
   studentGroupId: string,
   studentId: string,
 ): Promise<void> {
   return invoke<void>("setup_student_group_member_remove", {
+    schoolId,
     studentGroupId,
     studentId,
   });
@@ -874,10 +917,12 @@ export function clearAvailability(
 
 /** Every availability rule for one entity. */
 export function listAvailability(
+  schoolId: string,
   entityKind: AvailabilityEntity,
   entityId: string,
 ): Promise<AvailabilityRule[]> {
   return invoke<AvailabilityRule[]>("setup_availability_list", {
+    schoolId,
     entityKind,
     entityId,
   });
@@ -885,10 +930,15 @@ export function listAvailability(
 
 /** How many rules one entity has, for a listing that marks who has been configured. */
 export function countAvailability(
+  schoolId: string,
   entityKind: AvailabilityEntity,
   entityId: string,
 ): Promise<number> {
-  return invoke<number>("setup_availability_count", { entityKind, entityId });
+  return invoke<number>("setup_availability_count", {
+    schoolId,
+    entityKind,
+    entityId,
+  });
 }
 
 /**

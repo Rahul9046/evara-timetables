@@ -49,7 +49,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::row::{FromColumn, entity, opt_text, text};
-use super::{Stamp, delete, translate, update};
+use super::{Stamp, delete, require_same_school, require_school_owner, translate, update};
 use crate::Database;
 use crate::error::{DbError, Result};
 
@@ -481,12 +481,12 @@ impl TimeModel<'_> {
     /// # Errors
     ///
     /// Propagates any database failure.
-    pub fn cycles(&self) -> Result<Vec<Cycle>> {
+    pub fn cycles(&self, school_id: Uuid) -> Result<Vec<Cycle>> {
         self.db.read(|conn| {
             let mut stmt = conn.prepare(&format!(
-                "SELECT {CYCLE_COLUMNS} FROM cycle ORDER BY name, id"
+                "SELECT {CYCLE_COLUMNS} FROM cycle WHERE school_id = ? ORDER BY name, id"
             ))?;
-            let rows = stmt.query_map([], Cycle::from_row)?;
+            let rows = stmt.query_map([text(school_id)], Cycle::from_row)?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(DbError::from)
         })
@@ -525,6 +525,11 @@ impl TimeModel<'_> {
         let stored = self
             .cycle(id)?
             .ok_or(DbError::NotFound { entity: "cycle" })?;
+        // Checked before the kind comparison below, so a caller editing another school's
+        // cycle is told *that* rather than being told its type cannot change.
+        if stored.school_id != input.school_id {
+            return Err(DbError::WrongSchool { entity: "cycle" });
+        }
         if input.kind != stored.kind {
             return Err(DbError::Invalid {
                 message: format!(
@@ -584,8 +589,11 @@ impl TimeModel<'_> {
     ///
     /// [`DbError::StillReferenced`] if it still has cycle days or timeslots. Ownership is
     /// RESTRICT: the user removes those deliberately.
-    pub fn delete_cycle(&mut self, id: Uuid) -> Result<()> {
-        self.db.write(|tx| delete(tx, "cycle", "cycle", id))
+    pub fn delete_cycle(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+        self.db.write(|tx| {
+            require_same_school(tx, "cycle", "cycle", id, school_id)?;
+            delete(tx, "cycle", "cycle", id)
+        })
     }
 
     /// Which of a cycle's declared positions actually have a day.
@@ -898,6 +906,10 @@ fn default_ids(tx: &Transaction<'_>, sql: &str, params: &[&dyn ToSql]) -> Result
 
 // =========================================================================== cycle day
 
+/// A cycle day belongs to a school only by way of its cycle.
+const CYCLE_DAY_OWNER: &str = "SELECT cycle.school_id FROM cycle_day \
+     JOIN cycle ON cycle.id = cycle_day.cycle_id WHERE cycle_day.id = ?";
+
 const CYCLE_DAY_COLUMNS: &str =
     "id, cycle_id, ordinal, label, weekday_hint, created_at, updated_at, rev";
 
@@ -1000,8 +1012,11 @@ impl TimeModel<'_> {
     /// [`DbError::StillReferenced`] if a timeslot or a calendar day still points at it.
     /// That is deliberate: see [`TimeModel::plan_materialisation`] for how to find out
     /// what is in the way before trying.
-    pub fn delete_cycle_day(&mut self, id: Uuid) -> Result<()> {
-        self.db.write(|tx| delete(tx, "cycle day", "cycle_day", id))
+    pub fn delete_cycle_day(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+        self.db.write(|tx| {
+            require_school_owner(tx, "cycle day", CYCLE_DAY_OWNER, id, school_id)?;
+            delete(tx, "cycle day", "cycle_day", id)
+        })
     }
 }
 
@@ -1116,12 +1131,13 @@ impl TimeModel<'_> {
     /// # Errors
     ///
     /// Propagates any database failure.
-    pub fn period_structures(&self) -> Result<Vec<PeriodStructure>> {
+    pub fn period_structures(&self, school_id: Uuid) -> Result<Vec<PeriodStructure>> {
         self.db.read(|conn| {
             let mut stmt = conn.prepare(&format!(
-                "SELECT {PERIOD_STRUCTURE_COLUMNS} FROM period_structure ORDER BY name, id"
+                "SELECT {PERIOD_STRUCTURE_COLUMNS} FROM period_structure WHERE school_id = ? \
+                 ORDER BY name, id"
             ))?;
-            let rows = stmt.query_map([], PeriodStructure::from_row)?;
+            let rows = stmt.query_map([text(school_id)], PeriodStructure::from_row)?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(DbError::from)
         })
@@ -1141,6 +1157,7 @@ impl TimeModel<'_> {
         input: &PeriodStructureInput,
     ) -> Result<PeriodStructure> {
         self.db.write(|tx| {
+            require_same_school(tx, "bell schedule", "period_structure", id, input.school_id)?;
             if input.is_default {
                 clear_default_period_structure(tx, input.school_id, input.campus_id)?;
             }
@@ -1164,9 +1181,11 @@ impl TimeModel<'_> {
     /// # Errors
     ///
     /// [`DbError::StillReferenced`] if it still has periods.
-    pub fn delete_period_structure(&mut self, id: Uuid) -> Result<()> {
-        self.db
-            .write(|tx| delete(tx, "period structure", "period_structure", id))
+    pub fn delete_period_structure(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+        self.db.write(|tx| {
+            require_same_school(tx, "bell schedule", "period_structure", id, school_id)?;
+            delete(tx, "period structure", "period_structure", id)
+        })
     }
 }
 
@@ -1198,6 +1217,11 @@ fn clear_default_period_structure(
 }
 
 // ============================================================================== period
+
+/// A period belongs to a school only by way of its bell schedule.
+const PERIOD_OWNER: &str = "SELECT period_structure.school_id FROM period \
+     JOIN period_structure ON period_structure.id = period.period_structure_id \
+     WHERE period.id = ?";
 
 const PERIOD_COLUMNS: &str = "id, period_structure_id, ordinal, label, starts_at, ends_at, \
                               kind, counts_as_load, created_at, updated_at, rev";
@@ -1311,8 +1335,11 @@ impl TimeModel<'_> {
     /// [`DbError::StillReferenced`] if a timeslot was materialised from it. Use
     /// [`TimeModel::plan_materialisation`] with the period excluded to see exactly which
     /// slots stand in the way before removing anything.
-    pub fn delete_period(&mut self, id: Uuid) -> Result<()> {
-        self.db.write(|tx| delete(tx, "period", "period", id))
+    pub fn delete_period(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+        self.db.write(|tx| {
+            require_school_owner(tx, "period", PERIOD_OWNER, id, school_id)?;
+            delete(tx, "period", "period", id)
+        })
     }
 }
 
@@ -1416,13 +1443,17 @@ impl TimeModel<'_> {
     /// # Errors
     ///
     /// Propagates any database failure.
-    pub fn calendar_days(&self, from: &str, to: &str) -> Result<Vec<CalendarDay>> {
+    pub fn calendar_days(&self, school_id: Uuid, from: &str, to: &str) -> Result<Vec<CalendarDay>> {
         self.db.read(|conn| {
             let mut stmt = conn.prepare(&format!(
                 "SELECT {CALENDAR_DAY_COLUMNS} FROM calendar_day
-                 WHERE date BETWEEN ? AND ? ORDER BY date, COALESCE(campus_id, ''), id"
+                 WHERE school_id = ? AND date BETWEEN ? AND ?
+                 ORDER BY date, COALESCE(campus_id, ''), id"
             ))?;
-            let rows = stmt.query_map([from, to], CalendarDay::from_row)?;
+            let rows = stmt.query_map(
+                [text(school_id), from.to_owned(), to.to_owned()],
+                CalendarDay::from_row,
+            )?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(DbError::from)
         })
@@ -1459,6 +1490,7 @@ impl TimeModel<'_> {
     /// one impossible and a damaged row is not evidence about the working week.
     pub fn non_working_instructional_days(
         &self,
+        school_id: Uuid,
         working_days: WorkingDays,
     ) -> Result<Vec<NonWorkingInstructionalDay>> {
         self.db.read(|conn| {
@@ -1475,10 +1507,10 @@ impl TimeModel<'_> {
                 // once, in `iso_weekday`.
                 "SELECT date, kind, CAST(strftime('%w', date) AS INTEGER)
                  FROM calendar_day
-                 WHERE cycle_day_id IS NOT NULL
+                 WHERE school_id = ? AND cycle_day_id IS NOT NULL
                  ORDER BY date, COALESCE(campus_id, ''), id",
             )?;
-            let rows = stmt.query_map([], |row| {
+            let rows = stmt.query_map([text(school_id)], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -1517,6 +1549,7 @@ impl TimeModel<'_> {
         input: &CalendarDayInput,
     ) -> Result<CalendarDay> {
         self.db.write(|tx| {
+            require_same_school(tx, "calendar day", "calendar_day", id, input.school_id)?;
             update(
                 tx,
                 "calendar day",
@@ -1544,9 +1577,11 @@ impl TimeModel<'_> {
     /// # Errors
     ///
     /// Propagates any database failure.
-    pub fn delete_calendar_day(&mut self, id: Uuid) -> Result<()> {
-        self.db
-            .write(|tx| delete(tx, "calendar day", "calendar_day", id))
+    pub fn delete_calendar_day(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+        self.db.write(|tx| {
+            require_same_school(tx, "calendar day", "calendar_day", id, school_id)?;
+            delete(tx, "calendar day", "calendar_day", id)
+        })
     }
 }
 
@@ -2028,10 +2063,15 @@ impl TimeModel<'_> {
     ///   disappears.
     pub fn release_orphans(
         &mut self,
+        school_id: Uuid,
         request: &MaterialisationRequest,
         reviewed: &PlanFingerprint,
     ) -> Result<Vec<Uuid>> {
         self.db.write(|tx| {
+            // The orphans are whatever the plan over this cycle names, so the cycle is
+            // the thing that has to belong to the acting school. Checked before the
+            // plan is computed, so another school's grid is never even read.
+            require_same_school(tx, "cycle", "cycle", request.cycle_id, school_id)?;
             let plan = plan(tx, request)?;
             require_unchanged(&plan, reviewed)?;
 
@@ -2095,8 +2135,14 @@ impl TimeModel<'_> {
     ///   one of them. That refusal is why timetable entries will never need a cascade.
     ///
     /// Either way the whole call is rolled back: no subset is deleted.
-    pub fn delete_timeslots(&mut self, ids: &[Uuid]) -> Result<()> {
+    pub fn delete_timeslots(&mut self, school_id: Uuid, ids: &[Uuid]) -> Result<()> {
         self.db.write(|tx| {
+            // Every identifier is checked before any row goes. The call is one
+            // transaction, so a list naming one slot from another school removes
+            // nothing at all rather than part of itself.
+            for id in ids {
+                require_same_school(tx, "timeslot", "timeslot", *id, school_id)?;
+            }
             for id in ids {
                 delete(tx, "timeslot", "timeslot", *id)?;
             }

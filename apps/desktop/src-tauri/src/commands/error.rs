@@ -54,6 +54,21 @@ pub enum SetupError {
         message: String,
     },
 
+    /// The record named belongs to a different school.
+    ///
+    /// Distinct from [`SetupError::NotFound`] on purpose: the record exists, and saying it
+    /// does not would send the user looking for something that is there. Distinct from
+    /// [`SetupError::Failed`] because it is not a failure — it is a boundary working, and
+    /// the next step is to switch school rather than to retry.
+    ///
+    /// Reachable without a bug: a confirmation left open while the active school changed.
+    WrongSchool {
+        /// What kind of record it was.
+        entity: String,
+        /// Message to show.
+        message: String,
+    },
+
     /// A uniqueness rule was broken.
     ///
     /// Carries `field` so the form can mark the offending input rather than showing a
@@ -122,6 +137,12 @@ impl From<DbError> for SetupError {
                 entity: entity.to_owned(),
                 field: field.to_owned(),
                 message: format!("Another {entity} already uses that {field}."),
+            },
+            DbError::WrongSchool { entity } => Self::WrongSchool {
+                entity: entity.to_owned(),
+                message: format!(
+                    "That {entity} belongs to a different school, so nothing was changed.                      Switch to the school it belongs to and try again."
+                ),
             },
             DbError::Invalid { message } => Self::Invalid { message },
             DbError::ReviewRequired { .. } => Self::ReviewRequired { message },
@@ -209,6 +230,15 @@ mod tests {
 
     #[test]
     fn a_restrict_failure_tells_the_user_what_to_do_about_it() {
+        let value = json(DbError::WrongSchool { entity: "teacher" });
+        assert_eq!(value["kind"], "wrongSchool");
+        assert_eq!(value["entity"], "teacher");
+        let message = value["message"].as_str().expect("a message");
+        assert!(
+            message.contains("different school") && message.contains("nothing was changed"),
+            "a wrong-school refusal must say the boundary held and that nothing changed:              {message}"
+        );
+
         let value = json(DbError::StillReferenced { entity: "campus" });
         let message = value["message"].as_str().expect("message");
 

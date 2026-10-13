@@ -35,7 +35,7 @@ use evara_core::branding::{LogoFormat, MAX_BYTES, MAX_EDGE, MIN_EDGE};
 use evara_db::{
     AcademicYear, AcademicYearInput, Building, BuildingInput, BuildingWithCampuses, Campus,
     CampusInput, Resource, ResourceInput, Room, RoomInput, RoomType, RoomTypeInput,
-    RoomWithCampuses, School, SchoolInput, SchoolLogo, Term, TermInput,
+    RoomWithCampuses, School, SchoolDependents, SchoolInput, SchoolLogo, Term, TermInput,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -47,21 +47,52 @@ use super::workspace;
 
 // ---------------------------------------------------------------------------- school
 
-/// Creates the school record. Exactly one per project.
+/// Creates a school. A project may hold several since V12.
 #[tauri::command]
 pub fn setup_school_create(state: State<'_, AppState>, input: SchoolInput) -> SetupResult<School> {
     let mut ws = workspace(&state)?;
     Ok(ws.structure()?.create_school(&input)?)
 }
 
-/// The school record, or `null` when setup has not started.
+/// Every school in the project, ordered by name.
 ///
-/// `null` is what drives the first-run empty state: there is no school yet, so the only
-/// sensible next action is to describe one.
+/// An empty list is what drives the first-run empty state: no school has been described
+/// yet, so the only sensible next action is to describe one.
+///
+/// This replaces the old `setup_school_get`, which returned "the" school from a `LIMIT 1`
+/// read. With more than one school that would hand the interface an arbitrary institution
+/// and silently scope every later request to it.
 #[tauri::command]
-pub fn setup_school_get(state: State<'_, AppState>) -> SetupResult<Option<School>> {
+pub fn setup_school_list(state: State<'_, AppState>) -> SetupResult<Vec<School>> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.school()?)
+    Ok(ws.structure()?.schools()?)
+}
+
+/// One school by identifier, or `null` if it is not there.
+#[tauri::command]
+pub fn setup_school_get(state: State<'_, AppState>, id: Uuid) -> SetupResult<Option<School>> {
+    let mut ws = workspace(&state)?;
+    Ok(ws.structure()?.school(id)?)
+}
+
+/// What a school still owns, so a confirmation can say why it cannot be deleted.
+#[tauri::command]
+pub fn setup_school_dependents(
+    state: State<'_, AppState>,
+    id: Uuid,
+) -> SetupResult<SchoolDependents> {
+    let mut ws = workspace(&state)?;
+    Ok(ws.structure()?.school_dependents(id)?)
+}
+
+/// Deletes a school that owns nothing.
+///
+/// Refused while it still owns anything at all. There is no "delete everything in it":
+/// see `Structure::delete_school`.
+#[tauri::command]
+pub fn setup_school_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+    let mut ws = workspace(&state)?;
+    Ok(ws.structure()?.delete_school(id)?)
 }
 
 /// Replaces the school's details.
@@ -158,11 +189,14 @@ pub struct LogoLimits {
 /// `null` is the ordinary case: a new project, a project upgraded from a schema older than
 /// V8, and a school that removed its logo all return it.
 #[tauri::command]
-pub fn setup_school_logo_get(state: State<'_, AppState>) -> SetupResult<Option<SchoolLogoView>> {
+pub fn setup_school_logo_get(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+) -> SetupResult<Option<SchoolLogoView>> {
     let mut ws = workspace(&state)?;
     Ok(ws
         .structure()?
-        .school_logo()?
+        .school_logo(school_id)?
         .as_ref()
         .and_then(SchoolLogoView::render))
 }
@@ -206,9 +240,9 @@ pub fn setup_school_logo_set(
 
 /// Removes the school's logo, restoring the Evara one. Removing nothing succeeds.
 #[tauri::command]
-pub fn setup_school_logo_clear(state: State<'_, AppState>) -> SetupResult<()> {
+pub fn setup_school_logo_clear(state: State<'_, AppState>, school_id: Uuid) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.clear_school_logo()?)
+    Ok(ws.structure()?.clear_school_logo(school_id)?)
 }
 
 /// The limits the interface should enforce before sending, and state in its hint text.
@@ -242,11 +276,11 @@ pub fn setup_campus_get(state: State<'_, AppState>, id: Uuid) -> SetupResult<Opt
     Ok(ws.structure()?.campus(id)?)
 }
 
-/// Every campus.
+/// Every campus of one school.
 #[tauri::command]
-pub fn setup_campus_list(state: State<'_, AppState>) -> SetupResult<Vec<Campus>> {
+pub fn setup_campus_list(state: State<'_, AppState>, school_id: Uuid) -> SetupResult<Vec<Campus>> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.campuses()?)
+    Ok(ws.structure()?.campuses(school_id)?)
 }
 
 /// Replaces a campus's details.
@@ -266,9 +300,13 @@ pub fn setup_campus_update(
 /// `RESTRICT` by [ADR 0010](../../../../docs/adr/0010-structure-deletion-semantics.md), so
 /// the user removes or reassigns those first.
 #[tauri::command]
-pub fn setup_campus_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_campus_delete(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+    id: Uuid,
+) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.delete_campus(id)?)
+    Ok(ws.structure()?.delete_campus(school_id, id)?)
 }
 
 // -------------------------------------------------------------------------- building
@@ -353,11 +391,14 @@ pub fn setup_building_share(
 #[tauri::command]
 pub fn setup_building_unshare(
     state: State<'_, AppState>,
+    school_id: Uuid,
     building_id: Uuid,
     campus_id: Uuid,
 ) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.unshare_building(building_id, campus_id)?)
+    Ok(ws
+        .structure()?
+        .unshare_building(school_id, building_id, campus_id)?)
 }
 
 /// Deletes a building, detaching its rooms rather than deleting them.
@@ -367,9 +408,13 @@ pub fn setup_building_unshare(
 /// The rooms themselves survive; they simply stop naming a building. Its campus
 /// associations are removed the same way, one change-log entry each.
 #[tauri::command]
-pub fn setup_building_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_building_delete(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+    id: Uuid,
+) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.delete_building(id)?)
+    Ok(ws.structure()?.delete_building(school_id, id)?)
 }
 
 // ------------------------------------------------------------------------- room type
@@ -391,11 +436,14 @@ pub fn setup_room_type_get(state: State<'_, AppState>, id: Uuid) -> SetupResult<
     Ok(ws.structure()?.room_type(id)?)
 }
 
-/// Every room type.
+/// Every room type of one school.
 #[tauri::command]
-pub fn setup_room_type_list(state: State<'_, AppState>) -> SetupResult<Vec<RoomType>> {
+pub fn setup_room_type_list(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+) -> SetupResult<Vec<RoomType>> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.room_types()?)
+    Ok(ws.structure()?.room_types(school_id)?)
 }
 
 /// Replaces a room type's details.
@@ -414,9 +462,13 @@ pub fn setup_room_type_update(
 /// `SET NULL` for the same reason as a building: a classification is not ownership, so
 /// losing the category must not lose the room.
 #[tauri::command]
-pub fn setup_room_type_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_room_type_delete(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+    id: Uuid,
+) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.delete_room_type(id)?)
+    Ok(ws.structure()?.delete_room_type(school_id, id)?)
 }
 
 // ------------------------------------------------------------------------------ room
@@ -500,18 +552,21 @@ pub fn setup_room_share(
 #[tauri::command]
 pub fn setup_room_unshare(
     state: State<'_, AppState>,
+    school_id: Uuid,
     room_id: Uuid,
     campus_id: Uuid,
 ) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.unshare_room(room_id, campus_id)?)
+    Ok(ws
+        .structure()?
+        .unshare_room(school_id, room_id, campus_id)?)
 }
 
 /// Deletes a room. Its campus associations go with it, one change-log entry each.
 #[tauri::command]
-pub fn setup_room_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_room_delete(state: State<'_, AppState>, school_id: Uuid, id: Uuid) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.delete_room(id)?)
+    Ok(ws.structure()?.delete_room(school_id, id)?)
 }
 
 // -------------------------------------------------------------------------- resource
@@ -533,11 +588,14 @@ pub fn setup_resource_get(state: State<'_, AppState>, id: Uuid) -> SetupResult<O
     Ok(ws.structure()?.resource(id)?)
 }
 
-/// Every resource.
+/// Every resource of one school.
 #[tauri::command]
-pub fn setup_resource_list(state: State<'_, AppState>) -> SetupResult<Vec<Resource>> {
+pub fn setup_resource_list(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+) -> SetupResult<Vec<Resource>> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.resources()?)
+    Ok(ws.structure()?.resources(school_id)?)
 }
 
 /// Replaces a resource's details.
@@ -553,9 +611,13 @@ pub fn setup_resource_update(
 
 /// Deletes a resource.
 #[tauri::command]
-pub fn setup_resource_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_resource_delete(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+    id: Uuid,
+) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.delete_resource(id)?)
+    Ok(ws.structure()?.delete_resource(school_id, id)?)
 }
 
 // --------------------------------------------------------------------- academic year
@@ -580,11 +642,14 @@ pub fn setup_academic_year_get(
     Ok(ws.structure()?.academic_year(id)?)
 }
 
-/// Every academic year, earliest first.
+/// Every academic year of one school, earliest first.
 #[tauri::command]
-pub fn setup_academic_year_list(state: State<'_, AppState>) -> SetupResult<Vec<AcademicYear>> {
+pub fn setup_academic_year_list(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+) -> SetupResult<Vec<AcademicYear>> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.academic_years()?)
+    Ok(ws.structure()?.academic_years(school_id)?)
 }
 
 /// Replaces an academic year's details.
@@ -600,9 +665,13 @@ pub fn setup_academic_year_update(
 
 /// Deletes an academic year. Refused while it still has terms.
 #[tauri::command]
-pub fn setup_academic_year_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_academic_year_delete(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+    id: Uuid,
+) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.delete_academic_year(id)?)
+    Ok(ws.structure()?.delete_academic_year(school_id, id)?)
 }
 
 // ------------------------------------------------------------------------------ term
@@ -644,7 +713,7 @@ pub fn setup_term_update(
 
 /// Deletes a term. Refused while a timeslot or calendar day still names it.
 #[tauri::command]
-pub fn setup_term_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_term_delete(state: State<'_, AppState>, school_id: Uuid, id: Uuid) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.delete_term(id)?)
+    Ok(ws.structure()?.delete_term(school_id, id)?)
 }

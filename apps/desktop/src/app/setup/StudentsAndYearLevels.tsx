@@ -67,10 +67,10 @@ import { useList } from "./useList";
 export function StudentsAndYearLevels(props: { school: School }) {
   const { school } = props;
 
-  const loadCampuses = useCallback(() => listCampuses(), []);
+  const loadCampuses = useCallback(() => listCampuses(school.id), [school.id]);
   const campuses = useList<Campus>(loadCampuses);
 
-  const loadYearLevels = useCallback(() => listYearLevels(), []);
+  const loadYearLevels = useCallback(() => listYearLevels(school.id), [school.id]);
   const yearLevels = useList<YearLevel>(loadYearLevels);
 
   /**
@@ -134,10 +134,10 @@ export function StudentsAndYearLevels(props: { school: School }) {
       name: text(draft, "name"),
       ordinal: number(draft, "ordinal"),
     }),
-    list: () => listYearLevels(),
+    list: () => listYearLevels(school.id),
     create: (input) => createYearLevel(input),
     update: (id, input) => updateYearLevel(id, input),
-    remove: (id) => deleteYearLevel(id),
+    remove: (id) => deleteYearLevel(school.id, id),
     emptyHint: "No year levels yet. Add the years this school teaches.",
     deleteNote: () =>
       "Students and groups in this year level are kept. They simply stop naming a year.",
@@ -219,7 +219,7 @@ export function StudentsAndYearLevels(props: { school: School }) {
       isActive: flag(draft, "isActive"),
     }),
     list: () =>
-      listStudents().then((rows) => {
+      listStudents(school.id).then((rows) => {
         // Populate the deletion warning for the rows now on screen, in one pass rather
         // than one call per row at confirmation time.
         for (const row of rows) noteGroups(row.id);
@@ -227,7 +227,7 @@ export function StudentsAndYearLevels(props: { school: School }) {
       }),
     create: (input) => createStudent(input),
     update: (id, input) => updateStudent(id, input),
-    remove: (id) => deleteStudent(id),
+    remove: (id) => deleteStudent(school.id, id),
     emptyHint:
       "No students yet — and a timetable does not need any. Add them when you want per-student timetables.",
     deleteNote: (row) => {
@@ -249,8 +249,11 @@ export function StudentsAndYearLevels(props: { school: School }) {
         sizes alone, so enter students only when you want per-student timetables.
       </p>
       {campuses.error && <p className="muted">Campuses could not be loaded: {campuses.error}</p>}
-      <CrudPanel spec={yearSpec} onChanged={yearLevels.reload} />
-      <CrudPanel spec={studentSpec} reloadKey={String((yearLevels.items ?? []).length)} />
+      <CrudPanel spec={yearSpec} reloadKey={school.id} onChanged={yearLevels.reload} />
+      <CrudPanel
+        spec={studentSpec}
+        reloadKey={`${school.id}:${(yearLevels.items ?? []).length}`}
+      />
     </section>
   );
 }

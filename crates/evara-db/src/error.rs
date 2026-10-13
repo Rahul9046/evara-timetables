@@ -248,6 +248,19 @@ pub enum DbError {
         field: &'static str,
     },
 
+    /// A write named a record that belongs to a different school.
+    ///
+    /// Raised when an update addresses a row by identifier while naming a school that does
+    /// not own it. Since V12 a project holds several schools, so "the identifier exists"
+    /// is no longer the same question as "the identifier is one of mine", and a screen
+    /// scoped to one school must not be able to edit another's rows by supplying an
+    /// identifier from it.
+    #[error("that {entity} belongs to a different school")]
+    WrongSchool {
+        /// Entity kind, for the message.
+        entity: &'static str,
+    },
+
     /// A value failed a domain rule enforced by the schema.
     #[error("{message}")]
     Invalid {
@@ -273,6 +286,25 @@ pub enum DbError {
         reviewed: String,
         /// Fingerprint computed at the moment of applying.
         current: String,
+    },
+
+    /// A safety copy could not be taken before a migration that rebuilds a table.
+    ///
+    /// `V12` is the first migration to drop and recreate an existing table, and it does so
+    /// to `school`. The upgrade is refused outright rather than run unprotected: the
+    /// transaction already makes a half-migrated project impossible, but a school's project
+    /// file is not recreatable, and "we could not protect it so we went ahead anyway" is
+    /// not a trade anyone would accept if asked.
+    #[error(
+        "could not create a safety copy of {name} before upgrading its schema, so the \
+         project was left exactly as it was"
+    )]
+    BackupRefused {
+        /// File name only — never the full path.
+        name: String,
+        /// Why the copy could not be made or verified.
+        #[source]
+        source: InternalError,
     },
 
     /// Schema migration failed. Nothing was applied.

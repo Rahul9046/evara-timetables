@@ -26,6 +26,9 @@ beforeEach(() => {
 
 const ID = "018f3a2c-0000-7000-8000-000000000001";
 const OTHER = "018f3a2c-0000-7000-8000-000000000002";
+/// Deliberately unlike `ID` and `OTHER`: a payload that sent the record identifier
+/// where the school belongs would otherwise pass.
+const SCHOOL = "018f3a2c-0000-7000-8000-00000000000a";
 
 describe("command names and payloads", () => {
   /**
@@ -34,13 +37,29 @@ describe("command names and payloads", () => {
    * on the Rust side must be sent as `campusId` — the mistake this table catches.
    */
   it.each([
-    ["setup_school_get", () => setup.getSchool(), undefined],
-    ["setup_campus_list", () => setup.listCampuses(), undefined],
-    ["setup_room_type_list", () => setup.listRoomTypes(), undefined],
-    ["setup_resource_list", () => setup.listResources(), undefined],
-    ["setup_academic_year_list", () => setup.listAcademicYears(), undefined],
-    ["setup_cycle_list", () => setup.listCycles(), undefined],
-    ["setup_period_structure_list", () => setup.listPeriodStructures(), undefined],
+    // The only list with no scoping key: the project's schools are the thing a school
+    // identifier would be chosen from.
+    ["setup_school_list", () => setup.listSchools(), undefined],
+    ["setup_school_get", () => setup.getSchool(ID), { id: ID }],
+    ["setup_school_dependents", () => setup.schoolDependents(ID), { id: ID }],
+    ["setup_school_delete", () => setup.deleteSchool(ID), { id: ID }],
+    // Every school-owned list carries the school it is about. A missing key here would be
+    // a list that returned another institution's rows, which is the whole risk of V12.
+    ["setup_campus_list", () => setup.listCampuses(ID), { schoolId: ID }],
+    ["setup_room_type_list", () => setup.listRoomTypes(ID), { schoolId: ID }],
+    ["setup_resource_list", () => setup.listResources(ID), { schoolId: ID }],
+    ["setup_academic_year_list", () => setup.listAcademicYears(ID), { schoolId: ID }],
+    ["setup_cycle_list", () => setup.listCycles(ID), { schoolId: ID }],
+    [
+      "setup_period_structure_list",
+      () => setup.listPeriodStructures(ID),
+      { schoolId: ID },
+    ],
+    ["setup_year_level_list", () => setup.listYearLevels(ID), { schoolId: ID }],
+    ["setup_teacher_list", () => setup.listTeachers(ID), { schoolId: ID }],
+    ["setup_student_list", () => setup.listStudents(ID), { schoolId: ID }],
+    ["setup_student_group_list", () => setup.listStudentGroups(ID), { schoolId: ID }],
+    ["setup_school_logo_get", () => setup.getSchoolLogo(ID), { schoolId: ID }],
     ["setup_building_list", () => setup.listBuildings(ID), { campusId: ID }],
     ["setup_room_list", () => setup.listRooms(ID), { campusId: ID }],
     ["setup_term_list", () => setup.listTerms(ID), { academicYearId: ID }],
@@ -56,8 +75,23 @@ describe("command names and payloads", () => {
     ],
     [
       "setup_calendar_day_list",
-      () => setup.listCalendarDays("2027-09-01", "2028-07-20"),
-      { from: "2027-09-01", to: "2028-07-20" },
+      () => setup.listCalendarDays(ID, "2027-09-01", "2028-07-20"),
+      { schoolId: ID, from: "2027-09-01", to: "2028-07-20" },
+    ],
+    [
+      "setup_calendar_non_working_days",
+      () => setup.nonWorkingInstructionalDays(ID, [1, 2, 3, 4, 5]),
+      { schoolId: ID, workingDays: [1, 2, 3, 4, 5] },
+    ],
+    [
+      "setup_availability_list",
+      () => setup.listAvailability(ID, "TEACHER", OTHER),
+      { schoolId: ID, entityKind: "TEACHER", entityId: OTHER },
+    ],
+    [
+      "setup_availability_count",
+      () => setup.countAvailability(ID, "TEACHER", OTHER),
+      { schoolId: ID, entityKind: "TEACHER", entityId: OTHER },
     ],
   ])("%s sends the right payload", async (command, call, payload) => {
     await call();
@@ -68,23 +102,31 @@ describe("command names and payloads", () => {
     }
   });
 
-  /** Every delete: the identifier, and nothing else. */
+  /**
+   * Every delete: the school it acts for, and the identifier.
+   *
+   * The school is the point. An identifier alone stopped being authority to delete
+   * anything when a project gained a second school — a screen scoped to one of them must
+   * not be able to destroy another's rows because it was handed an identifier from it.
+   * The backend checks it (`DbError::WrongSchool`); this asserts the interface actually
+   * sends it, which is the half no Rust test can see.
+   */
   it.each([
-    ["setup_campus_delete", () => setup.deleteCampus(ID)],
-    ["setup_building_delete", () => setup.deleteBuilding(ID)],
-    ["setup_room_type_delete", () => setup.deleteRoomType(ID)],
-    ["setup_room_delete", () => setup.deleteRoom(ID)],
-    ["setup_resource_delete", () => setup.deleteResource(ID)],
-    ["setup_academic_year_delete", () => setup.deleteAcademicYear(ID)],
-    ["setup_term_delete", () => setup.deleteTerm(ID)],
-    ["setup_cycle_delete", () => setup.deleteCycle(ID)],
-    ["setup_cycle_day_delete", () => setup.deleteCycleDay(ID)],
-    ["setup_period_structure_delete", () => setup.deletePeriodStructure(ID)],
-    ["setup_period_delete", () => setup.deletePeriod(ID)],
-    ["setup_calendar_day_delete", () => setup.deleteCalendarDay(ID)],
-  ])("%s sends only the identifier", async (command, call) => {
+    ["setup_campus_delete", () => setup.deleteCampus(SCHOOL, ID)],
+    ["setup_building_delete", () => setup.deleteBuilding(SCHOOL, ID)],
+    ["setup_room_type_delete", () => setup.deleteRoomType(SCHOOL, ID)],
+    ["setup_room_delete", () => setup.deleteRoom(SCHOOL, ID)],
+    ["setup_resource_delete", () => setup.deleteResource(SCHOOL, ID)],
+    ["setup_academic_year_delete", () => setup.deleteAcademicYear(SCHOOL, ID)],
+    ["setup_term_delete", () => setup.deleteTerm(SCHOOL, ID)],
+    ["setup_cycle_delete", () => setup.deleteCycle(SCHOOL, ID)],
+    ["setup_cycle_day_delete", () => setup.deleteCycleDay(SCHOOL, ID)],
+    ["setup_period_structure_delete", () => setup.deletePeriodStructure(SCHOOL, ID)],
+    ["setup_period_delete", () => setup.deletePeriod(SCHOOL, ID)],
+    ["setup_calendar_day_delete", () => setup.deleteCalendarDay(SCHOOL, ID)],
+  ])("%s names the school and the identifier", async (command, call) => {
     await call();
-    expect(invoke).toHaveBeenCalledWith(command, { id: ID });
+    expect(invoke).toHaveBeenCalledWith(command, { schoolId: SCHOOL, id: ID });
   });
 
   /** Every single-record read. */
@@ -189,13 +231,20 @@ describe("room-campus associations", () => {
   });
 
   it.each([
-    ["setup_room_share", () => setup.shareRoom(ID, OTHER)],
-    ["setup_room_unshare", () => setup.unshareRoom(ID, OTHER)],
-  ])("%s names the room and the campus", async (command, call) => {
+    ["setup_room_share", () => setup.shareRoom(ID, OTHER), { roomId: ID, campusId: OTHER }],
+    [
+      // Withdrawing a share names the school doing the withdrawing: either the school
+      // whose campus is losing access, or the one that owns the room. A third school is
+      // refused.
+      "setup_room_unshare",
+      () => setup.unshareRoom(SCHOOL, ID, OTHER),
+      { schoolId: SCHOOL, roomId: ID, campusId: OTHER },
+    ],
+  ])("%s names the room and the campus", async (command, call, payload) => {
     await call();
     // `roomId`, not `id`: these commands act on a pair, and a bare `id` would be
     // ambiguous about which half it meant.
-    expect(invoke).toHaveBeenCalledWith(command, { roomId: ID, campusId: OTHER });
+    expect(invoke).toHaveBeenCalledWith(command, payload);
   });
 
   it("reads one room's campuses by roomId", async () => {
@@ -232,8 +281,9 @@ describe("the grid commands", () => {
   });
 
   it("sends the reviewed fingerprint back with an orphan release", async () => {
-    await setup.releaseOrphans(request, "a1b2c3d4e5f60718");
+    await setup.releaseOrphans(SCHOOL, request, "a1b2c3d4e5f60718");
     expect(invoke).toHaveBeenCalledWith("setup_grid_release_orphans", {
+      schoolId: SCHOOL,
       request,
       reviewed: "a1b2c3d4e5f60718",
     });

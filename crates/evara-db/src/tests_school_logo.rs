@@ -14,6 +14,7 @@
 
 use evara_core::branding::{LogoFormat, MAX_BYTES, MIN_EDGE};
 
+use crate::tests_support;
 use crate::tests_time_model::Project;
 use crate::{DbError, Structure};
 
@@ -43,13 +44,7 @@ fn jpeg(width: u16, height: u16) -> Vec<u8> {
 
 /// The school this project describes.
 fn school_id(project: &mut Project) -> uuid::Uuid {
-    project
-        .db()
-        .structure()
-        .school()
-        .expect("read school")
-        .expect("a school exists")
-        .id
+    tests_support::only_school_id(project.db())
 }
 
 // ============================================================== absence is the default
@@ -59,7 +54,7 @@ fn a_new_project_has_no_logo() {
     let mut project = Project::new();
     // Not an error, not an empty row: nothing at all. This is what the interface reads as
     // "show the Evara logo".
-    assert_eq!(project.db().structure().school_logo().expect("read"), None);
+    assert_eq!(tests_support::logo_here(project.db()), None);
 }
 
 #[test]
@@ -68,15 +63,10 @@ fn a_school_can_be_created_and_edited_without_ever_touching_a_logo() {
     let mut project = Project::new();
     let school = school_id(&mut project);
     assert_ne!(school, uuid::Uuid::nil());
-    assert_eq!(project.db().structure().school_logo().expect("read"), None);
+    assert_eq!(tests_support::logo_here(project.db()), None);
 
     // And the school's own record is untouched by the logo table existing.
-    let before = project
-        .db()
-        .structure()
-        .school()
-        .expect("read")
-        .expect("exists");
+    let before = tests_support::only_school(project.db()).expect("a school exists");
     assert_eq!(before.rev, 1);
 }
 
@@ -138,7 +128,7 @@ fn an_unsupported_file_is_refused_and_nothing_is_stored() {
         );
     }
 
-    assert_eq!(project.db().structure().school_logo().expect("read"), None);
+    assert_eq!(tests_support::logo_here(project.db()), None);
 }
 
 #[test]
@@ -160,7 +150,7 @@ fn an_oversized_file_is_refused_and_nothing_is_stored() {
         }
         other => panic!("expected an Invalid refusal, got {other:?}"),
     }
-    assert_eq!(project.db().structure().school_logo().expect("read"), None);
+    assert_eq!(tests_support::logo_here(project.db()), None);
 }
 
 #[test]
@@ -177,7 +167,7 @@ fn an_image_with_impossible_dimensions_is_refused() {
             "out-of-range dimensions were accepted"
         );
     }
-    assert_eq!(project.db().structure().school_logo().expect("read"), None);
+    assert_eq!(tests_support::logo_here(project.db()), None);
 }
 
 #[test]
@@ -200,12 +190,7 @@ fn a_refused_upload_leaves_an_existing_logo_alone() {
             .is_err()
     );
 
-    let after = project
-        .db()
-        .structure()
-        .school_logo()
-        .expect("read")
-        .expect("still there");
+    let after = tests_support::logo_here(project.db()).expect("still there");
     assert_eq!(after, before);
     assert_eq!(after.bytes, good);
 }
@@ -238,12 +223,7 @@ fn replacing_keeps_the_row_and_advances_its_revision() {
 
     // And exactly one row, whatever happens.
     assert_eq!(
-        project
-            .db()
-            .structure()
-            .school_logo()
-            .expect("read")
-            .expect("exists"),
+        tests_support::logo_here(project.db()).expect("exists"),
         second
     );
 }
@@ -280,10 +260,10 @@ fn removing_a_logo_restores_absence() {
         .set_school_logo(school, &png(128, 128, 1024))
         .expect("set");
 
-    project.db().structure().clear_school_logo().expect("clear");
+    tests_support::clear_logo_here(project.db());
 
     // Absence, which is what the interface reads as "use the Evara logo".
-    assert_eq!(project.db().structure().school_logo().expect("read"), None);
+    assert_eq!(tests_support::logo_here(project.db()), None);
 }
 
 #[test]
@@ -291,13 +271,9 @@ fn removing_a_logo_that_is_not_there_succeeds() {
     // The state asked for is already true. Reporting NotFound would make the interface
     // guard a button for no reason.
     let mut project = Project::new();
-    project.db().structure().clear_school_logo().expect("first");
-    project
-        .db()
-        .structure()
-        .clear_school_logo()
-        .expect("second");
-    assert_eq!(project.db().structure().school_logo().expect("read"), None);
+    tests_support::clear_logo_here(project.db());
+    tests_support::clear_logo_here(project.db());
+    assert_eq!(tests_support::logo_here(project.db()), None);
 }
 
 #[test]
@@ -309,7 +285,7 @@ fn a_logo_can_be_set_again_after_being_removed() {
         .structure()
         .set_school_logo(school, &png(128, 128, 1024))
         .expect("set");
-    project.db().structure().clear_school_logo().expect("clear");
+    tests_support::clear_logo_here(project.db());
 
     let second = project
         .db()
@@ -328,26 +304,16 @@ fn a_logo_can_be_set_again_after_being_removed() {
 fn removing_a_logo_leaves_the_school_untouched() {
     let mut project = Project::new();
     let school = school_id(&mut project);
-    let before = project
-        .db()
-        .structure()
-        .school()
-        .expect("read")
-        .expect("exists");
+    let before = tests_support::only_school(project.db()).expect("a school exists");
 
     project
         .db()
         .structure()
         .set_school_logo(school, &png(128, 128, 1024))
         .expect("set");
-    project.db().structure().clear_school_logo().expect("clear");
+    tests_support::clear_logo_here(project.db());
 
-    let after = project
-        .db()
-        .structure()
-        .school()
-        .expect("read")
-        .expect("exists");
+    let after = tests_support::only_school(project.db()).expect("a school exists");
     // A logo is not part of the school record: neither setting nor removing one consumes
     // the school's revision or rewrites its row.
     assert_eq!(after, before);
@@ -368,12 +334,7 @@ fn a_logo_survives_closing_and_reopening_the_project() {
 
     project.reopen();
 
-    let after = project
-        .db()
-        .structure()
-        .school_logo()
-        .expect("read")
-        .expect("still there");
+    let after = tests_support::logo_here(project.db()).expect("still there");
     // The whole point of storing it in the project rather than beside it.
     assert_eq!(after, stored);
     assert_eq!(after.bytes, bytes);
@@ -388,11 +349,11 @@ fn removal_survives_closing_and_reopening_the_project() {
         .structure()
         .set_school_logo(school, &png(128, 128, 1024))
         .expect("set");
-    project.db().structure().clear_school_logo().expect("clear");
+    tests_support::clear_logo_here(project.db());
 
     project.reopen();
 
-    assert_eq!(project.db().structure().school_logo().expect("read"), None);
+    assert_eq!(tests_support::logo_here(project.db()), None);
 }
 
 #[test]
@@ -409,15 +370,8 @@ fn two_projects_never_see_each_other_s_logo() {
         .set_school_logo(first_school, &png(128, 128, 1024))
         .expect("set");
 
-    assert!(
-        first
-            .db()
-            .structure()
-            .school_logo()
-            .expect("read")
-            .is_some()
-    );
-    assert_eq!(second.db().structure().school_logo().expect("read"), None);
+    assert!(tests_support::logo_here(first.db()).is_some());
+    assert_eq!(tests_support::logo_here(second.db()), None);
 
     // And the second project can have its own, different, logo.
     let second_school = school_id(&mut second);
@@ -427,18 +381,8 @@ fn two_projects_never_see_each_other_s_logo() {
         .set_school_logo(second_school, &jpeg(640, 480))
         .expect("set");
 
-    let a = first
-        .db()
-        .structure()
-        .school_logo()
-        .expect("read")
-        .expect("exists");
-    let b = second
-        .db()
-        .structure()
-        .school_logo()
-        .expect("read")
-        .expect("exists");
+    let a = tests_support::logo_here(first.db()).expect("exists");
+    let b = tests_support::logo_here(second.db()).expect("exists");
     assert_ne!(a.id, b.id);
     assert_eq!(a.media_type, "image/png");
     assert_eq!(b.media_type, "image/jpeg");
@@ -473,7 +417,7 @@ fn the_schema_refuses_a_row_the_module_would_have_refused() {
         assert!(outcome.is_err(), "{label} was accepted by the schema");
     }
 
-    assert_eq!(project.db().structure().school_logo().expect("read"), None);
+    assert_eq!(tests_support::logo_here(project.db()), None);
 }
 
 #[test]
@@ -543,7 +487,7 @@ fn the_change_feed_records_every_logo_write() {
         .structure()
         .set_school_logo(school, &png(128, 128, 512))
         .expect("replace");
-    project.db().structure().clear_school_logo().expect("clear");
+    tests_support::clear_logo_here(project.db());
 
     let ops = project
         .db()
