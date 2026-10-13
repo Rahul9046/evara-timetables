@@ -16,8 +16,10 @@
 //! `time_model` and `grid`, which together are the `crud` row above for the Structure and
 //! Time Model groups.
 
+pub mod availability;
 pub mod error;
 pub mod grid;
+pub mod people;
 pub mod project;
 pub mod structure;
 pub mod time_model;

@@ -154,10 +154,10 @@ fn migration_is_idempotent_across_reopens() {
 
 /// Guards the phase boundary.
 ///
-/// Phase 1C added the static half of the Structure group and Phase 1D the time half, so
-/// the whole group now exists. Everything past it — people, curriculum, activities,
-/// constraints, timetables, operations — belongs to a later phase and must not arrive by
-/// accident alongside something else.
+/// Phase 1C added the static half of the Structure group, Phase 1D the time half, and
+/// Phase 2 the People group and availability. Everything past it — the rest of Phase 2's
+/// curriculum tables, activities, constraints, timetables, operations — belongs to a later
+/// phase and must not arrive by accident alongside something else.
 #[test]
 fn the_schema_contains_exactly_the_phases_shipped_so_far() {
     let (_dir, path) = project();
@@ -181,6 +181,8 @@ fn the_schema_contains_exactly_the_phases_shipped_so_far() {
             "academic_year".to_owned(),
             // V1 — bootstrap.
             "app_meta".to_owned(),
+            // V11 — availability.
+            "availability".to_owned(),
             "building".to_owned(),
             // V5 — buildings shared across campuses.
             "building_campus".to_owned(),
@@ -201,8 +203,14 @@ fn the_schema_contains_exactly_the_phases_shipped_so_far() {
             "school".to_owned(),
             // V8 — the school's own logo.
             "school_logo".to_owned(),
+            // V10 — the People group.
+            "student".to_owned(),
+            "student_group".to_owned(),
+            "student_group_member".to_owned(),
+            "teacher".to_owned(),
             "term".to_owned(),
             "timeslot".to_owned(),
+            "year_level".to_owned(),
         ],
         "the schema has drifted from the phases actually shipped"
     );
@@ -210,14 +218,10 @@ fn the_schema_contains_exactly_the_phases_shipped_so_far() {
     // Named individually rather than inferred from the list above, so that a later
     // domain arriving early fails with the name of the table that jumped the queue.
     for not_yet in [
-        // Phase 2 — people, and the first curriculum table.
-        "teacher",
+        // Phase 2 — the curriculum tables documented alongside the People group, which
+        // arrive with Curriculum rather than with the people themselves.
         "department",
         "teacher_qualification",
-        "year_level",
-        "student",
-        "student_group",
-        "student_group_member",
         "subject",
         // Phase 3 — curriculum.
         "course",
@@ -236,7 +240,6 @@ fn the_schema_contains_exactly_the_phases_shipped_so_far() {
         "line_member",
         "activity_link",
         "activity_link_member",
-        "availability",
         // Phase 5 onwards — constraints, scheduling, operations.
         "constraint_instance",
         "constraint_ref",

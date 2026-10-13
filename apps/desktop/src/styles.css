@@ -1722,3 +1722,141 @@ dialog.confirm h3 {
     padding: 18px 16px 48px;
   }
 }
+
+/* ---- availability editor -------------------------------------------------- */
+
+.availability {
+  margin-top: 18px;
+}
+
+.availabilityControls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+/* Wide cycles scroll inside the panel rather than pushing the window sideways. */
+.availabilityScroll {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.availabilityTable {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.availabilityTable th,
+.availabilityTable td {
+  border: 1px solid var(--border-subtle);
+  padding: 0;
+  text-align: center;
+}
+
+.availabilityTable thead th {
+  background: var(--bg);
+  font-size: 12.5px;
+  font-weight: 700;
+  padding: 8px 10px;
+  white-space: nowrap;
+}
+
+.availabilityTable tbody th {
+  background: var(--bg);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 8px 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* The clock time is secondary to the label, and must not widen the column. */
+.availTime {
+  display: block;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.availCell {
+  display: block;
+  width: 100%;
+  min-width: 56px;
+  height: 38px;
+  border: 0;
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.availCell:disabled {
+  cursor: progress;
+}
+
+/* The focus ring is the only thing telling a keyboard user where they are in a grid of
+   identical cells, so it is drawn inside the cell where nothing can clip it. */
+.availCell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+
+.availCell--free {
+  background: var(--surface);
+}
+
+.availCell--unavailable {
+  background: color-mix(in srgb, #c0392b 18%, var(--surface));
+  color: #8e2a1f;
+}
+
+.availCell--discouraged {
+  background: color-mix(in srgb, #d99100 18%, var(--surface));
+  color: #8a5d00;
+}
+
+.availCell--preferred {
+  background: color-mix(in srgb, var(--ok) 18%, var(--surface));
+  color: var(--ok);
+}
+
+@media (prefers-color-scheme: dark) {
+  .availCell--unavailable {
+    color: #f0a398;
+  }
+
+  .availCell--discouraged {
+    color: #e8c070;
+  }
+}
+
+.availabilityKey {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.availabilityKey li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The swatch in the key is a span, not a button: same colours, no interaction. */
+.availabilityKey .availCell {
+  width: 24px;
+  min-width: 24px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  line-height: 18px;
+  cursor: default;
+}

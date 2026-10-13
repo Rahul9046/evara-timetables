@@ -155,7 +155,22 @@ Three things in it are more than CRUD:
 
 ## Phase 2 — Resources
 
-- Migration `0002`: the People group and `subject`.
+**People ✅ complete.** Migration `V10` adding `year_level`, `teacher`, `student`,
+`student_group` and `student_group_member`, with repositories, commands, generated bindings
+and three School Setup sections — Teachers, Students and year levels, Student groups.
+Membership is many-to-many and edited per group. Deletion semantics and the two departures
+from the documented schema are [adr/0018](adr/0018-people-identity-and-deactivation.md).
+
+**Availability ✅ complete.** Migration `V11`; see
+[adr/0018](adr/0018-people-identity-and-deactivation.md) for the `weight` departure.
+
+Remaining in this phase:
+
+- Migration for `department`, `subject` and `teacher_qualification`, plus
+  `teacher.department_id`, and a Subjects screen. Deferred to the Curriculum work that
+  first reads them.
+- `rev` checking on update, for optimistic concurrency — still outstanding from the item
+  above, and the last thing between this phase and done.
 - ~~Type generation (`ts-rs`) wired into the build, plus the typed `src/ipc/` wrappers.~~
   Done in Phase 1E.
 - ~~One reusable table + form shell in the UI.~~ Done in Phase 1E —
@@ -163,9 +178,12 @@ Three things in it are more than CRUD:
 - Remaining from this item: `rev` checking on update, for optimistic concurrency. Phase 1E
   exposes `rev` to the interface but no command takes it as a precondition yet, so a
   second window can still overwrite the first's edit.
-- Screens: Teachers, Subjects, Rooms, Student Groups, Year Levels.
-- The `availability` table and an availability grid editor shared by teachers, rooms and
-  groups.
+- ~~Screens: Teachers, Student Groups, Year Levels.~~ Done. Subjects remains, with the
+  migration above; Rooms shipped in Phase 1E.
+- ~~The `availability` table and an availability grid editor shared by teachers, rooms and
+  groups.~~ **Done.** Migration `V11`, one polymorphic table for all six entity kinds, and
+  one keyboard-navigable grid wired into Teachers, Rooms and Student groups. Axes come from
+  `GridPreview`, so cycle days and periods are never re-derived.
 
 **Closes M1-3, M1-4, M1-5, M1-6.**
 

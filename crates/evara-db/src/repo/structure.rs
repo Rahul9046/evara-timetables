@@ -27,6 +27,7 @@ use rusqlite::types::ToSql;
 use rusqlite::{OptionalExtension, Transaction};
 use uuid::Uuid;
 
+use super::availability::{AvailabilityEntity, clear_for_entity};
 use super::row::{entity, opt_text, parse_id_text, text};
 use super::{Stamp, delete, translate, update};
 use crate::Database;
@@ -552,7 +553,12 @@ impl Structure<'_> {
     /// [`DbError::StillReferenced`] if buildings, rooms or resources remain on it. Campus
     /// ownership is RESTRICT: the user removes or moves those deliberately.
     pub fn delete_campus(&mut self, id: Uuid) -> Result<()> {
-        self.db.write(|tx| delete(tx, "campus", "campus", id))
+        self.db.write(|tx| {
+            // Availability is polymorphic and so has no foreign key to catch this. A rule
+            // about a campus means nothing once the campus is gone.
+            clear_for_entity(tx, AvailabilityEntity::Campus, id)?;
+            delete(tx, "campus", "campus", id)
+        })
     }
 }
 
@@ -1485,6 +1491,7 @@ impl Structure<'_> {
     /// [`DbError::NotFound`] if there is no such room.
     pub fn delete_room(&mut self, id: Uuid) -> Result<()> {
         self.db.write(|tx| {
+            clear_for_entity(tx, AvailabilityEntity::Room, id)?;
             for association_id in room_associations_of(tx, id)? {
                 delete(tx, "room", "room_campus", association_id)?;
             }
@@ -1757,7 +1764,10 @@ impl Structure<'_> {
     ///
     /// [`DbError::NotFound`] if there is no such resource.
     pub fn delete_resource(&mut self, id: Uuid) -> Result<()> {
-        self.db.write(|tx| delete(tx, "resource", "resource", id))
+        self.db.write(|tx| {
+            clear_for_entity(tx, AvailabilityEntity::Resource, id)?;
+            delete(tx, "resource", "resource", id)
+        })
     }
 }
 

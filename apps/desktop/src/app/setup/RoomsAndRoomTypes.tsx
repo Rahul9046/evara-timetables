@@ -76,6 +76,7 @@ import {
 } from "../validation";
 import { Absent, CampusShareList } from "./CampusesAndBuildings";
 import { ParentPicker } from "./ParentPicker";
+import { AvailabilityPanel } from "./AvailabilityGrid";
 import { useList } from "./useList";
 
 /**
@@ -170,6 +171,10 @@ export function RoomsAndRoomTypes(props: { school: School }) {
         : Promise.resolve([]),
     [campusId],
   );
+
+  // The same rows again, held here rather than only inside `CrudPanel`, because the
+  // availability picker below needs to offer them and `CrudPanel` keeps its list private.
+  const rooms = useList<RoomRow>(loadRooms);
 
   const roomSpec = useMemo<CrudSpec<RoomRow, RoomDraft>>(() => {
     // Buildings *available to* this campus, which since ADR 0013 includes any shared
@@ -409,7 +414,19 @@ export function RoomsAndRoomTypes(props: { school: School }) {
         <CrudPanel
           spec={roomSpec}
           reloadKey={campusId ?? ""}
-          onChanged={buildings.reload}
+          onChanged={() => {
+            buildings.reload();
+            rooms.reload();
+          }}
+        />
+        <AvailabilityPanel
+          school={school}
+          entityKind="ROOM"
+          noun="room"
+          options={(rooms.items ?? []).map((room) => ({
+            id: room.id,
+            name: `${room.name} (${room.code})`,
+          }))}
         />
       </ParentPicker>
     </div>

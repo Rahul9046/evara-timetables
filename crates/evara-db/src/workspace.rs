@@ -23,6 +23,8 @@ use uuid::Uuid;
 use crate::Database;
 use crate::cloud_sync::{self, SyncedFolder};
 use crate::error::{DbError, Result};
+use crate::repo::availability::Availability;
+use crate::repo::people::People;
 use crate::repo::structure::Structure;
 use crate::repo::time_model::TimeModel;
 use crate::settings::{RecentProject, Settings};
@@ -233,6 +235,28 @@ impl Workspace {
             .as_mut()
             .ok_or(DbError::NoProjectOpen)?
             .time_model())
+    }
+
+    /// The People repository for the open project.
+    ///
+    /// # Errors
+    ///
+    /// [`DbError::NoProjectOpen`] if nothing is open.
+    pub fn people(&mut self) -> Result<People<'_>> {
+        Ok(self.open.as_mut().ok_or(DbError::NoProjectOpen)?.people())
+    }
+
+    /// The availability repository for the open project.
+    ///
+    /// # Errors
+    ///
+    /// [`DbError::NoProjectOpen`] if nothing is open.
+    pub fn availability(&mut self) -> Result<Availability<'_>> {
+        Ok(self
+            .open
+            .as_mut()
+            .ok_or(DbError::NoProjectOpen)?
+            .availability())
     }
 
     /// Removes a project from the recent list. The file itself is untouched.

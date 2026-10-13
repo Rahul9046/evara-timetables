@@ -449,16 +449,17 @@ later phase.
 
 ```sql
 department (id, school_id, name, code)
-teacher (id, school_id, code, given_name, family_name, email NULL,
-         department_id NULL, home_campus_id NULL, fte REAL,
+teacher (id, school_id, code NULL, given_name, family_name, email NULL,
+         home_campus_id NULL, fte_percent INTEGER,
          max_periods_per_day INTEGER NULL, max_periods_per_cycle INTEGER NULL,
-         max_consecutive_periods INTEGER NULL, notes,
-         UNIQUE(school_id, code))
+         max_consecutive_periods INTEGER NULL, notes, is_active,
+         UNIQUE(school_id, code) WHERE code IS NOT NULL)
 teacher_qualification (teacher_id, subject_id, PRIMARY KEY(teacher_id, subject_id))
 
 year_level (id, school_id, name, ordinal)
-student (id, school_id, code, given_name, family_name, year_level_id NULL,
-         campus_id NULL, UNIQUE(school_id, code))
+student (id, school_id, code NULL, given_name, family_name, email NULL,
+         year_level_id NULL, campus_id NULL, is_active,
+         UNIQUE(school_id, code) WHERE code IS NOT NULL)
 
 -- One table for every audience: a class, a whole cohort, a homeroom, an elective set.
 student_group (id, school_id, name, code,
@@ -467,8 +468,8 @@ student_group (id, school_id, name, code,
                year_level_id NULL, parent_group_id -> student_group NULL,
                size INTEGER,                    -- declared size when membership is not modelled
                campus_id NULL)
-student_group_member (student_group_id, student_id,
-                      PRIMARY KEY(student_group_id, student_id))
+student_group_member (id, student_group_id, student_id,
+                      UNIQUE(student_group_id, student_id))
 ```
 
 `parent_group_id` gives the hierarchy that drives student clash detection: a cohort split
@@ -479,6 +480,28 @@ other. Clash detection resolves a group to its **leaf student set** — either r
 
 Student records are optional in Milestone 1 and exist so individual request-driven
 scheduling can be added without a schema break. Fixtures use synthetic names only.
+
+**As implemented in V10** — see
+[adr/0018](adr/0018-people-identity-and-deactivation.md) for all five departures from the
+sketch above:
+
+- `is_active` on `teacher` and `student`. Employment and enrolment state, not a soft
+  delete: nothing filters on it, and an inactive person keeps every row they ever had.
+- `code` is optional, with a **partial** unique index rather than a `COALESCE` one. This
+  is the documented exception to CLAUDE.md's COALESCE rule: that rule is for unset rows
+  that must still collide, and here a school with no staff numbers must be able to enter
+  more than one teacher.
+- `fte_percent INTEGER` rather than `fte REAL`, because the Phase 4 load constraints sum
+  and compare it and that arithmetic is integer everywhere else.
+- `student_group_member` carries its own `id` and audit columns rather than a composite
+  primary key, so it is visible to the change-log triggers — the same reason
+  `building_campus` does, recorded in V5.
+- `department`, `subject` and `teacher_qualification` arrive with Curriculum, not here, and
+  `teacher.department_id` with them.
+
+`delete_student_group` removes its own membership rows and refuses while child groups
+remain; `delete_student` refuses while the student is in any group, because a membership is
+the only record that they ever were.
 
 ---
 
@@ -595,6 +618,42 @@ Available is the default, so only exceptions are stored. The nullable triple exp
 "all of Monday" (`cycle_day_id` only), "period 1 every day" (`period_id` only) or one
 exact slot. `entity_id` is polymorphic and therefore cannot carry a foreign key — the
 repository validates it and an integrity check sweeps for orphans.
+
+**As implemented in V11**, with two departures recorded in
+[adr/0018](adr/0018-people-identity-and-deactivation.md):
+
+- `weight` is `INTEGER`, not `REAL`, extending the same rule that made `teacher.fte_percent`
+  an integer: the solver sums and compares it, that arithmetic is integer everywhere else,
+  and a float would make the record the only non-`Eq` entity in the crate. `NULL` means
+  unset — Phase 4 supplies the constraint's own default.
+- A `CHECK` requires at least one of `timeslot_id`, `cycle_day_id` and `period_id`. A rule
+  naming no time at all is a rule about nothing.
+
+Identity is an expression index over `COALESCE`, and this is the **opposite** case to
+`teacher_code_unique`:
+
+```sql
+CREATE UNIQUE INDEX idx_availability_identity ON availability (
+    entity_kind, entity_id,
+    COALESCE(timeslot_id, ''), COALESCE(cycle_day_id, ''),
+    COALESCE(period_id, ''), COALESCE(term_id, ''));
+```
+
+A staff code is unique *when given*, so rows without one must not collide and the index is
+partial. Two availability rules that both say "all of Monday, all year" are the same rule
+written twice and **must** collide, so the unset columns are folded to a value that compares
+equal. Both follow from the same reading of CLAUDE.md's rule; they differ because the
+question differs.
+
+The three time references and `term_id` are `RESTRICT`. That is what stops a cycle-day
+deletion from silently discarding the availability configured against it: the delete is
+refused and the user is told. `entity_id` has no such protection, so every repository that
+deletes something which can carry rules clears them in the same transaction, and
+`Availability::orphans` sweeps for any that got through.
+
+The editor writes **recurring cell rules only** — `cycle_day_id` and `period_id` both set.
+The whole-day, whole-period and exact-slot forms remain writable through the repository and
+readable by the solver; the grid reports how many such rules exist rather than hiding them.
 
 ---
 

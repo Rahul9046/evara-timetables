@@ -31,7 +31,7 @@ macro_rules! from_column_via_driver {
     };
 }
 
-from_column_via_driver!(String, Option<String>, i64, Option<i64>, bool, Vec<u8>);
+from_column_via_driver!(String, Option<String>, i64, Option<i64>, f64, bool, Vec<u8>);
 
 impl FromColumn for Uuid {
     fn read(row: &Row<'_>, index: usize) -> rusqlite::Result<Self> {
