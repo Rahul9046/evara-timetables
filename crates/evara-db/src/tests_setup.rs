@@ -21,6 +21,7 @@ use uuid::Uuid;
 
 use crate::DbError;
 use crate::repo::time_model::{MaterialisationRequest, PeriodKind, PlanFingerprint};
+use crate::tests_support;
 use crate::tests_time_model::Project;
 
 // ===================================================================== cycle coverage
@@ -937,20 +938,10 @@ fn preview_survives_closing_and_reopening_the_project() {
 #[test]
 fn the_repositories_are_reachable_through_the_workspace() {
     let mut project = Project::new();
-    let campuses = project
-        .workspace
-        .structure()
-        .expect("a project is open")
-        .campuses()
-        .expect("read");
+    let campuses = tests_support::campuses_here(project.db());
     assert_eq!(campuses.len(), 1, "the fixture's one campus");
 
-    let cycles = project
-        .workspace
-        .time_model()
-        .expect("a project is open")
-        .cycles()
-        .expect("read");
+    let cycles = tests_support::cycles_here(project.db());
     assert_eq!(cycles, Vec::new());
 }
 
@@ -1011,11 +1002,7 @@ fn kinds_match_their_stored_spelling() {
 #[test]
 fn records_serialise_as_camel_case_for_the_interface() {
     let mut project = Project::new();
-    let campus = project
-        .db()
-        .structure()
-        .campuses()
-        .expect("read")
+    let campus = tests_support::campuses_here(project.db())
         .pop()
         .expect("the fixture's campus");
 

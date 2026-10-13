@@ -61,11 +61,11 @@ pub fn setup_cycle_get(state: State<'_, AppState>, id: Uuid) -> SetupResult<Opti
     Ok(ws.time_model()?.cycle(id)?)
 }
 
-/// Every cycle, the default first.
+/// Every cycle of one school, the default first.
 #[tauri::command]
-pub fn setup_cycle_list(state: State<'_, AppState>) -> SetupResult<Vec<Cycle>> {
+pub fn setup_cycle_list(state: State<'_, AppState>, school_id: Uuid) -> SetupResult<Vec<Cycle>> {
     let mut ws = workspace(&state)?;
-    Ok(ws.time_model()?.cycles()?)
+    Ok(ws.time_model()?.cycles(school_id)?)
 }
 
 /// Replaces a cycle's details. Its kind is not among them.
@@ -212,9 +212,10 @@ pub fn setup_period_structure_get(
 #[tauri::command]
 pub fn setup_period_structure_list(
     state: State<'_, AppState>,
+    school_id: Uuid,
 ) -> SetupResult<Vec<PeriodStructure>> {
     let mut ws = workspace(&state)?;
-    Ok(ws.time_model()?.period_structures()?)
+    Ok(ws.time_model()?.period_structures(school_id)?)
 }
 
 /// Replaces a bell schedule's details.
@@ -320,11 +321,12 @@ pub fn setup_calendar_day_get(
 #[tauri::command]
 pub fn setup_calendar_day_list(
     state: State<'_, AppState>,
+    school_id: Uuid,
     from: String,
     to: String,
 ) -> SetupResult<Vec<CalendarDay>> {
     let mut ws = workspace(&state)?;
-    Ok(ws.time_model()?.calendar_days(&from, &to)?)
+    Ok(ws.time_model()?.calendar_days(school_id, &from, &to)?)
 }
 
 /// Replaces a calendar day's details.
@@ -358,10 +360,11 @@ pub fn setup_calendar_day_delete(state: State<'_, AppState>, id: Uuid) -> SetupR
 #[tauri::command]
 pub fn setup_calendar_non_working_days(
     state: State<'_, AppState>,
+    school_id: Uuid,
     working_days: WorkingDays,
 ) -> SetupResult<Vec<NonWorkingInstructionalDay>> {
     let mut ws = workspace(&state)?;
     Ok(ws
         .time_model()?
-        .non_working_instructional_days(working_days)?)
+        .non_working_instructional_days(school_id, working_days)?)
 }

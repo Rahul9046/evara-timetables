@@ -21,7 +21,7 @@
 //! and the change-log rows it produces share its fate. Nothing in this module opens or
 //! commits a transaction of its own.
 
-use rusqlite::{Transaction, types::ToSql};
+use rusqlite::{OptionalExtension, Transaction, types::ToSql};
 use uuid::Uuid;
 
 use crate::error::{DbError, Result};
@@ -147,6 +147,45 @@ pub(crate) fn update(
     )?;
 
     Ok((updated_at, rev))
+}
+
+/// Refuses a write whose target row belongs to a different school.
+///
+/// Called at the top of every `update_*` for a school-owned entity, inside the same
+/// transaction as the update itself. The identifier alone stopped being sufficient
+/// authority at `V12`: a project now holds several schools, and a screen scoped to one of
+/// them must not be able to edit another's rows just because it was handed an identifier
+/// from it.
+///
+/// `school_id` comes from the input the caller already supplies, so no signature changed
+/// to get this guard. The column is read rather than joined because every one of these
+/// tables names its school directly.
+///
+/// # Errors
+///
+/// - [`DbError::NotFound`] if no row has that identifier.
+/// - [`DbError::WrongSchool`] if one does and another school owns it.
+pub(crate) fn require_same_school(
+    tx: &Transaction<'_>,
+    entity: &'static str,
+    table: &str,
+    id: Uuid,
+    school_id: Uuid,
+) -> Result<()> {
+    let table = identifier(table)?;
+    let owner: Option<String> = tx
+        .query_row(
+            &format!("SELECT school_id FROM {table} WHERE id = ?"),
+            [&id.to_string()],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    match owner {
+        None => Err(DbError::NotFound { entity }),
+        Some(raw) if raw == school_id.to_string() => Ok(()),
+        Some(_) => Err(DbError::WrongSchool { entity }),
+    }
 }
 
 /// Deletes one row.

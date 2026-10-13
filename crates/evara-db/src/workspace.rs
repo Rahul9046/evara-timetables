@@ -53,6 +53,12 @@ pub struct ProjectSummary {
     pub created_here: bool,
     /// Cloud provider the file appears to sit under, if any. Advisory only.
     pub synced_folder: Option<SyncedFolder>,
+    /// Safety copy taken when this open upgraded the project past a schema rebuild.
+    ///
+    /// `Some` only on the open that did the upgrading. Carried so the interface can tell
+    /// the user where their copy is, rather than leaving an unexplained file beside the
+    /// project.
+    pub safety_backup: Option<PathBuf>,
 }
 
 /// The application's open project and installation settings.
@@ -160,6 +166,7 @@ impl Workspace {
             created_by_site_id: db.created_by_site_id(),
             created_here: db.created_by_site_id() == Some(self.site_id()),
             synced_folder: cloud_sync::detect(&path),
+            safety_backup: db.safety_backup().map(Path::to_path_buf),
             path,
         }
     }

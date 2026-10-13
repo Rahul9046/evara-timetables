@@ -49,7 +49,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::row::{FromColumn, entity, opt_text, text};
-use super::{Stamp, delete, translate, update};
+use super::{Stamp, delete, require_same_school, translate, update};
 use crate::Database;
 use crate::error::{DbError, Result};
 
@@ -481,12 +481,12 @@ impl TimeModel<'_> {
     /// # Errors
     ///
     /// Propagates any database failure.
-    pub fn cycles(&self) -> Result<Vec<Cycle>> {
+    pub fn cycles(&self, school_id: Uuid) -> Result<Vec<Cycle>> {
         self.db.read(|conn| {
             let mut stmt = conn.prepare(&format!(
-                "SELECT {CYCLE_COLUMNS} FROM cycle ORDER BY name, id"
+                "SELECT {CYCLE_COLUMNS} FROM cycle WHERE school_id = ? ORDER BY name, id"
             ))?;
-            let rows = stmt.query_map([], Cycle::from_row)?;
+            let rows = stmt.query_map([text(school_id)], Cycle::from_row)?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(DbError::from)
         })
@@ -525,6 +525,11 @@ impl TimeModel<'_> {
         let stored = self
             .cycle(id)?
             .ok_or(DbError::NotFound { entity: "cycle" })?;
+        // Checked before the kind comparison below, so a caller editing another school's
+        // cycle is told *that* rather than being told its type cannot change.
+        if stored.school_id != input.school_id {
+            return Err(DbError::WrongSchool { entity: "cycle" });
+        }
         if input.kind != stored.kind {
             return Err(DbError::Invalid {
                 message: format!(
@@ -1116,12 +1121,13 @@ impl TimeModel<'_> {
     /// # Errors
     ///
     /// Propagates any database failure.
-    pub fn period_structures(&self) -> Result<Vec<PeriodStructure>> {
+    pub fn period_structures(&self, school_id: Uuid) -> Result<Vec<PeriodStructure>> {
         self.db.read(|conn| {
             let mut stmt = conn.prepare(&format!(
-                "SELECT {PERIOD_STRUCTURE_COLUMNS} FROM period_structure ORDER BY name, id"
+                "SELECT {PERIOD_STRUCTURE_COLUMNS} FROM period_structure WHERE school_id = ? \
+                 ORDER BY name, id"
             ))?;
-            let rows = stmt.query_map([], PeriodStructure::from_row)?;
+            let rows = stmt.query_map([text(school_id)], PeriodStructure::from_row)?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(DbError::from)
         })
@@ -1141,6 +1147,7 @@ impl TimeModel<'_> {
         input: &PeriodStructureInput,
     ) -> Result<PeriodStructure> {
         self.db.write(|tx| {
+            require_same_school(tx, "bell schedule", "period_structure", id, input.school_id)?;
             if input.is_default {
                 clear_default_period_structure(tx, input.school_id, input.campus_id)?;
             }
@@ -1416,13 +1423,17 @@ impl TimeModel<'_> {
     /// # Errors
     ///
     /// Propagates any database failure.
-    pub fn calendar_days(&self, from: &str, to: &str) -> Result<Vec<CalendarDay>> {
+    pub fn calendar_days(&self, school_id: Uuid, from: &str, to: &str) -> Result<Vec<CalendarDay>> {
         self.db.read(|conn| {
             let mut stmt = conn.prepare(&format!(
                 "SELECT {CALENDAR_DAY_COLUMNS} FROM calendar_day
-                 WHERE date BETWEEN ? AND ? ORDER BY date, COALESCE(campus_id, ''), id"
+                 WHERE school_id = ? AND date BETWEEN ? AND ?
+                 ORDER BY date, COALESCE(campus_id, ''), id"
             ))?;
-            let rows = stmt.query_map([from, to], CalendarDay::from_row)?;
+            let rows = stmt.query_map(
+                [text(school_id), from.to_owned(), to.to_owned()],
+                CalendarDay::from_row,
+            )?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(DbError::from)
         })
@@ -1459,6 +1470,7 @@ impl TimeModel<'_> {
     /// one impossible and a damaged row is not evidence about the working week.
     pub fn non_working_instructional_days(
         &self,
+        school_id: Uuid,
         working_days: WorkingDays,
     ) -> Result<Vec<NonWorkingInstructionalDay>> {
         self.db.read(|conn| {
@@ -1475,10 +1487,10 @@ impl TimeModel<'_> {
                 // once, in `iso_weekday`.
                 "SELECT date, kind, CAST(strftime('%w', date) AS INTEGER)
                  FROM calendar_day
-                 WHERE cycle_day_id IS NOT NULL
+                 WHERE school_id = ? AND cycle_day_id IS NOT NULL
                  ORDER BY date, COALESCE(campus_id, ''), id",
             )?;
-            let rows = stmt.query_map([], |row| {
+            let rows = stmt.query_map([text(school_id)], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -1517,6 +1529,7 @@ impl TimeModel<'_> {
         input: &CalendarDayInput,
     ) -> Result<CalendarDay> {
         self.db.write(|tx| {
+            require_same_school(tx, "calendar day", "calendar_day", id, input.school_id)?;
             update(
                 tx,
                 "calendar day",

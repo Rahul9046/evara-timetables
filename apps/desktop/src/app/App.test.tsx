@@ -63,6 +63,9 @@ vi.mock("./setup/SchoolSetup", () => ({
 }));
 
 vi.mock("../ipc/setup", () => ({
+  // The shell shows a school logo only when the project holds exactly one school,
+  // so the brand mark now asks for the list first.
+  listSchools: vi.fn(() => Promise.resolve([])),
   getSchoolLogo: vi.fn(() => Promise.resolve(null)),
 }));
 

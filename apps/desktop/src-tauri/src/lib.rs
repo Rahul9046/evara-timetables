@@ -88,7 +88,10 @@ pub fn run() {
             commands::people::setup_student_groups_for_student,
             // School Setup, static structure — Phase 1E.
             commands::structure::setup_school_create,
+            commands::structure::setup_school_list,
             commands::structure::setup_school_get,
+            commands::structure::setup_school_dependents,
+            commands::structure::setup_school_delete,
             commands::structure::setup_school_update,
             commands::structure::setup_school_logo_get,
             commands::structure::setup_school_logo_set,

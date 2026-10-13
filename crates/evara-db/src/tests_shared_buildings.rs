@@ -59,6 +59,7 @@ impl Project {
             .structure()
             .create_school(&SchoolInput {
                 name: "Northgate Secondary".to_owned(),
+                code: None,
                 timezone: "Europe/London".to_owned(),
                 locale: "en-GB".to_owned(),
                 working_days: WorkingDays::MONDAY_TO_FRIDAY,

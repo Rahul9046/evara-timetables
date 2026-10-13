@@ -16,7 +16,6 @@ import userEvent from "@testing-library/user-event";
 
 import type { School } from "@evara/domain";
 
-const getSchool = vi.fn<() => Promise<School | null>>();
 const createSchool = vi.fn();
 const updateSchool = vi.fn();
 
@@ -30,13 +29,21 @@ vi.mock("../../ipc/setup", () => ({
   getSchoolLogoLimits: () => getSchoolLogoLimits(),
   setSchoolLogo: (id: string, data: string) => setSchoolLogo(id, data),
   clearSchoolLogo: () => clearSchoolLogo(),
-  getSchool: () => getSchool(),
   createSchool: (input: unknown) => createSchool(input),
   updateSchool: (id: string, input: unknown) => updateSchool(id, input),
   describeSetupError: (error: unknown) => String(error),
 }));
 
 const { SchoolDetails } = await import("./SchoolDetails");
+
+/**
+ * The school the screen is being shown for.
+ *
+ * Stands in for what `getSchool()` used to return. Since V12 the active school is
+ * chosen by the setup shell and passed in as a prop, so "given this stored school"
+ * is expressed by setting this rather than by mocking a read.
+ */
+let active: School | null = null;
 
 function school(overrides: Partial<School> = {}): School {
   return {
@@ -66,7 +73,7 @@ beforeEach(() => {
   });
   setSchoolLogo.mockResolvedValue(null);
   clearSchoolLogo.mockResolvedValue(undefined);
-  getSchool.mockResolvedValue(null);
+  active = null;
   createSchool.mockImplementation((input: Record<string, string>) =>
     Promise.resolve(school(input)),
   );
@@ -77,7 +84,7 @@ beforeEach(() => {
 
 /** Opens the edit form on whatever the backend returned. */
 async function openForm() {
-  render(<SchoolDetails onChanged={vi.fn()} />);
+  render(<SchoolDetails school={active} onChanged={vi.fn()} />);
   const button = await screen.findByRole("button", {
     name: /Describe the school|Edit details/,
   });
@@ -174,7 +181,7 @@ describe("selecting a locale", () => {
 
 describe("reopening an existing project", () => {
   it("shows the saved timezone and locale", async () => {
-    getSchool.mockResolvedValue(school());
+    active = school();
     await openForm();
 
     expect((timezoneBox() as HTMLInputElement).value).toBe(
@@ -186,7 +193,7 @@ describe("reopening an existing project", () => {
   });
 
   it("saves the same values back untouched when nothing was changed", async () => {
-    getSchool.mockResolvedValue(school());
+    active = school();
     await openForm();
 
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
@@ -194,6 +201,9 @@ describe("reopening an existing project", () => {
     await waitFor(() => expect(updateSchool).toHaveBeenCalled());
     expect(updateSchool).toHaveBeenCalledWith("school-1", {
       name: "Northgate Secondary",
+      // Carried through untouched. The form does not collect a code yet, and a save that
+      // cleared one it had never shown would be a silent edit.
+      code: null,
       timezone: "Europe/London",
       locale: "en-GB",
       workingDays: [1, 2, 3, 4, 5],
@@ -201,8 +211,8 @@ describe("reopening an existing project", () => {
   });
 
   it("summarises the saved values with readable labels", async () => {
-    getSchool.mockResolvedValue(school());
-    render(<SchoolDetails onChanged={vi.fn()} />);
+    active = school();
+    render(<SchoolDetails school={active} onChanged={vi.fn()} />);
 
     expect(
       await screen.findByText("United Kingdom Time — Europe/London"),
@@ -214,7 +224,7 @@ describe("reopening an existing project", () => {
 describe("a stored value the list does not offer", () => {
   it("shows a hand-typed timezone as an existing value rather than blanking it", async () => {
     // What a project written while these were free-text boxes can hold.
-    getSchool.mockResolvedValue(school({ timezone: "Mars/Olympus_Mons" }));
+    active = school({ timezone: "Mars/Olympus_Mons" });
     await openForm();
 
     const shown = (timezoneBox() as HTMLInputElement).value;
@@ -223,7 +233,7 @@ describe("a stored value the list does not offer", () => {
   });
 
   it("keeps that value on save unless the user picks another", async () => {
-    getSchool.mockResolvedValue(school({ timezone: "Mars/Olympus_Mons" }));
+    active = school({ timezone: "Mars/Olympus_Mons" });
     await openForm();
 
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
@@ -235,7 +245,7 @@ describe("a stored value the list does not offer", () => {
   });
 
   it("does not change it merely because the user typed a search", async () => {
-    getSchool.mockResolvedValue(school({ timezone: "Mars/Olympus_Mons" }));
+    active = school({ timezone: "Mars/Olympus_Mons" });
     await openForm();
 
     const box = timezoneBox();
@@ -252,7 +262,7 @@ describe("a stored value the list does not offer", () => {
   });
 
   it("replaces it only on a deliberate selection", async () => {
-    getSchool.mockResolvedValue(school({ timezone: "Mars/Olympus_Mons" }));
+    active = school({ timezone: "Mars/Olympus_Mons" });
     await openForm();
 
     const box = timezoneBox();
@@ -269,7 +279,7 @@ describe("a stored value the list does not offer", () => {
   it("keeps a retired IANA spelling, explaining the current name", async () => {
     // Asia/Calcutta still resolves to Indian time. Rewriting it on open would be a
     // silent write that bumps rev and teaches the user nothing.
-    getSchool.mockResolvedValue(school({ timezone: "Asia/Calcutta" }));
+    active = school({ timezone: "Asia/Calcutta" });
     await openForm();
 
     const shown = (timezoneBox() as HTMLInputElement).value;
@@ -284,7 +294,7 @@ describe("a stored value the list does not offer", () => {
   });
 
   it("shows an unrecognised locale the same way", async () => {
-    getSchool.mockResolvedValue(school({ locale: "xx-ZZ" }));
+    active = school({ locale: "xx-ZZ" });
     await openForm();
 
     expect((localeBox() as HTMLInputElement).value).toBe(
@@ -304,13 +314,13 @@ describe("required fields", () => {
   });
 
   it("refuses to save a cleared timezone", async () => {
-    getSchool.mockResolvedValue(school());
+    active = school();
     await openForm();
 
     // There is no way to type a value into the picker, but there is a way to end up
     // with none: an existing project whose timezone is somehow blank.
-    getSchool.mockResolvedValue(school({ timezone: "" }));
-    render(<SchoolDetails onChanged={vi.fn()} />);
+    active = school({ timezone: "" });
+    render(<SchoolDetails school={active} onChanged={vi.fn()} />);
     const buttons = await screen.findAllByRole("button", { name: "Edit details" });
     await userEvent.click(buttons[buttons.length - 1]!);
 
@@ -321,7 +331,7 @@ describe("required fields", () => {
   });
 
   it("marks the offending picker as invalid for a screen reader", async () => {
-    getSchool.mockResolvedValue(school({ locale: "" }));
+    active = school({ locale: "" });
     await openForm();
 
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
@@ -335,7 +345,7 @@ describe("required fields", () => {
   });
 
   it("clears the error once a value is chosen", async () => {
-    getSchool.mockResolvedValue(school({ locale: "" }));
+    active = school({ locale: "" });
     await openForm();
 
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));

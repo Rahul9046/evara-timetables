@@ -34,13 +34,29 @@ describe("command names and payloads", () => {
    * on the Rust side must be sent as `campusId` — the mistake this table catches.
    */
   it.each([
-    ["setup_school_get", () => setup.getSchool(), undefined],
-    ["setup_campus_list", () => setup.listCampuses(), undefined],
-    ["setup_room_type_list", () => setup.listRoomTypes(), undefined],
-    ["setup_resource_list", () => setup.listResources(), undefined],
-    ["setup_academic_year_list", () => setup.listAcademicYears(), undefined],
-    ["setup_cycle_list", () => setup.listCycles(), undefined],
-    ["setup_period_structure_list", () => setup.listPeriodStructures(), undefined],
+    // The only list with no scoping key: the project's schools are the thing a school
+    // identifier would be chosen from.
+    ["setup_school_list", () => setup.listSchools(), undefined],
+    ["setup_school_get", () => setup.getSchool(ID), { id: ID }],
+    ["setup_school_dependents", () => setup.schoolDependents(ID), { id: ID }],
+    ["setup_school_delete", () => setup.deleteSchool(ID), { id: ID }],
+    // Every school-owned list carries the school it is about. A missing key here would be
+    // a list that returned another institution's rows, which is the whole risk of V12.
+    ["setup_campus_list", () => setup.listCampuses(ID), { schoolId: ID }],
+    ["setup_room_type_list", () => setup.listRoomTypes(ID), { schoolId: ID }],
+    ["setup_resource_list", () => setup.listResources(ID), { schoolId: ID }],
+    ["setup_academic_year_list", () => setup.listAcademicYears(ID), { schoolId: ID }],
+    ["setup_cycle_list", () => setup.listCycles(ID), { schoolId: ID }],
+    [
+      "setup_period_structure_list",
+      () => setup.listPeriodStructures(ID),
+      { schoolId: ID },
+    ],
+    ["setup_year_level_list", () => setup.listYearLevels(ID), { schoolId: ID }],
+    ["setup_teacher_list", () => setup.listTeachers(ID), { schoolId: ID }],
+    ["setup_student_list", () => setup.listStudents(ID), { schoolId: ID }],
+    ["setup_student_group_list", () => setup.listStudentGroups(ID), { schoolId: ID }],
+    ["setup_school_logo_get", () => setup.getSchoolLogo(ID), { schoolId: ID }],
     ["setup_building_list", () => setup.listBuildings(ID), { campusId: ID }],
     ["setup_room_list", () => setup.listRooms(ID), { campusId: ID }],
     ["setup_term_list", () => setup.listTerms(ID), { academicYearId: ID }],
@@ -56,8 +72,23 @@ describe("command names and payloads", () => {
     ],
     [
       "setup_calendar_day_list",
-      () => setup.listCalendarDays("2027-09-01", "2028-07-20"),
-      { from: "2027-09-01", to: "2028-07-20" },
+      () => setup.listCalendarDays(ID, "2027-09-01", "2028-07-20"),
+      { schoolId: ID, from: "2027-09-01", to: "2028-07-20" },
+    ],
+    [
+      "setup_calendar_non_working_days",
+      () => setup.nonWorkingInstructionalDays(ID, [1, 2, 3, 4, 5]),
+      { schoolId: ID, workingDays: [1, 2, 3, 4, 5] },
+    ],
+    [
+      "setup_availability_list",
+      () => setup.listAvailability(ID, "TEACHER", OTHER),
+      { schoolId: ID, entityKind: "TEACHER", entityId: OTHER },
+    ],
+    [
+      "setup_availability_count",
+      () => setup.countAvailability(ID, "TEACHER", OTHER),
+      { schoolId: ID, entityKind: "TEACHER", entityId: OTHER },
     ],
   ])("%s sends the right payload", async (command, call, payload) => {
     await call();

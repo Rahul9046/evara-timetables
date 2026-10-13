@@ -56,10 +56,10 @@ export function Teachers(props: { school: School }) {
   // go on offering someone who has just been deleted.
   const [listNonce, setListNonce] = useState(0);
 
-  const loadTeachers = useCallback(() => listTeachers(), []);
+  const loadTeachers = useCallback(() => listTeachers(school.id), [school.id]);
   const teachers = useList<Teacher>(loadTeachers);
 
-  const loadCampuses = useCallback(() => listCampuses(), []);
+  const loadCampuses = useCallback(() => listCampuses(school.id), [school.id]);
   const campuses = useList<Campus>(loadCampuses);
 
   const campusChoices: readonly Choice[] = useMemo(
@@ -177,7 +177,7 @@ export function Teachers(props: { school: School }) {
       notes: textOrNull(draft, "notes"),
       isActive: flag(draft, "isActive"),
     }),
-    list: () => listTeachers(),
+    list: () => listTeachers(school.id),
     create: (input) => createTeacher(input),
     update: (id, input) => updateTeacher(id, input),
     remove: (id) => deleteTeacher(id),
@@ -198,6 +198,7 @@ export function Teachers(props: { school: School }) {
       {campuses.error && <p className="muted">Campuses could not be loaded: {campuses.error}</p>}
       <CrudPanel
         spec={spec}
+        reloadKey={school.id}
         onChanged={() => {
           teachers.reload();
           setListNonce((value) => value + 1);

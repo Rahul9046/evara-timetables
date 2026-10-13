@@ -26,6 +26,7 @@ use crate::repo::time_model::{
     CalendarDayInput, CalendarDayKind, CycleDay, CycleDayInput, CycleInput, CycleKind,
     MaterialisationRequest,
 };
+use crate::tests_support;
 use crate::tests_time_model::Project;
 use crate::{Database, DbError, PROJECT_EXTENSION};
 
@@ -33,13 +34,7 @@ const APP_VERSION: &str = "0.1.0-test";
 
 /// The project's one school.
 fn school_of(project: &mut Project) -> Uuid {
-    project
-        .db()
-        .structure()
-        .school()
-        .expect("read school")
-        .expect("a school exists")
-        .id
+    tests_support::only_school_id(project.db())
 }
 
 /// A cycle's days in cycle order.
@@ -237,11 +232,7 @@ fn a_monday_to_friday_school_sees_five_applicable_days_unconfigured() {
 
 /// The school's own week, read through the repository.
 fn school_working_days(project: &mut Project) -> WorkingDays {
-    project
-        .db()
-        .structure()
-        .school()
-        .expect("read school")
+    tests_support::only_school(project.db())
         .expect("a school exists")
         .working_days
 }
@@ -753,11 +744,7 @@ fn both_kinds_survive_closing_and_reopening_the_project() {
     assert_eq!(snapshot(&mut project, weekly), weekly_before);
     assert_eq!(snapshot(&mut project, custom), custom_before);
 
-    let kinds: Vec<CycleKind> = project
-        .db()
-        .time_model()
-        .cycles()
-        .expect("list")
+    let kinds: Vec<CycleKind> = tests_support::cycles_here(project.db())
         .into_iter()
         .map(|cycle| cycle.kind)
         .collect();

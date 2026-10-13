@@ -22,7 +22,6 @@ import type { School } from "@evara/domain";
 
 import { weekdayName } from "./weekdays";
 
-const getSchool = vi.fn<() => Promise<School | null>>();
 const createSchool = vi.fn();
 const updateSchool = vi.fn();
 
@@ -36,13 +35,21 @@ vi.mock("../../ipc/setup", () => ({
   getSchoolLogoLimits: () => getSchoolLogoLimits(),
   setSchoolLogo: (id: string, data: string) => setSchoolLogo(id, data),
   clearSchoolLogo: () => clearSchoolLogo(),
-  getSchool: () => getSchool(),
   createSchool: (input: unknown) => createSchool(input),
   updateSchool: (id: string, input: unknown) => updateSchool(id, input),
   describeSetupError: (error: unknown) => String(error),
 }));
 
 const { SchoolDetails } = await import("./SchoolDetails");
+
+/**
+ * The school the screen is being shown for.
+ *
+ * Stands in for what `getSchool()` used to return. Since V12 the active school is
+ * chosen by the setup shell and passed in as a prop, so "given this stored school"
+ * is expressed by setting this rather than by mocking a read.
+ */
+let active: School | null = null;
 
 function school(overrides: Partial<School> = {}): School {
   return {
@@ -72,13 +79,13 @@ beforeEach(() => {
   });
   setSchoolLogo.mockResolvedValue(null);
   clearSchoolLogo.mockResolvedValue(undefined);
-  getSchool.mockResolvedValue(null);
+  active = null;
   createSchool.mockResolvedValue(school());
   updateSchool.mockResolvedValue(school());
 });
 
 async function openForm() {
-  render(<SchoolDetails onChanged={vi.fn()} />);
+  render(<SchoolDetails school={active} onChanged={vi.fn()} />);
   await userEvent.click(
     await screen.findByRole("button", { name: /Describe the school|Edit details/ }),
   );
@@ -132,7 +139,7 @@ describe("the default for a new school", () => {
 
 describe("an existing school", () => {
   it("shows the week it was saved with, not the default", async () => {
-    getSchool.mockResolvedValue(school({ workingDays: [7, 1, 2, 3, 4] }));
+    active = school({ workingDays: [7, 1, 2, 3, 4] });
     await openForm();
 
     expect(day("Sunday").checked).toBe(true);
@@ -143,7 +150,7 @@ describe("an existing school", () => {
   });
 
   it("shows a six-day week", async () => {
-    getSchool.mockResolvedValue(school({ workingDays: [1, 2, 3, 4, 5, 6] }));
+    active = school({ workingDays: [1, 2, 3, 4, 5, 6] });
     await openForm();
 
     expect(selected()).toHaveLength(6);
@@ -152,14 +159,14 @@ describe("an existing school", () => {
   });
 
   it("shows a one-day week", async () => {
-    getSchool.mockResolvedValue(school({ workingDays: [3] }));
+    active = school({ workingDays: [3] });
     await openForm();
 
     expect(selected()).toEqual(["Wednesday"]);
   });
 
   it("sends its week back unchanged when only the name is edited", async () => {
-    getSchool.mockResolvedValue(school({ workingDays: [7, 1, 2, 3, 4] }));
+    active = school({ workingDays: [7, 1, 2, 3, 4] });
     await openForm();
 
     await userEvent.clear(screen.getByLabelText(/School name/));
@@ -171,15 +178,15 @@ describe("an existing school", () => {
   });
 
   it("summarises its week in prose once saved", async () => {
-    getSchool.mockResolvedValue(school({ workingDays: [1, 2, 3, 4, 5] }));
-    render(<SchoolDetails onChanged={vi.fn()} />);
+    active = school({ workingDays: [1, 2, 3, 4, 5] });
+    render(<SchoolDetails school={active} onChanged={vi.fn()} />);
 
     expect(await screen.findByText("Monday to Friday")).toBeTruthy();
   });
 
   it("summarises an unusual week without pretending it is a range", async () => {
-    getSchool.mockResolvedValue(school({ workingDays: [7, 1, 2, 3, 4] }));
-    render(<SchoolDetails onChanged={vi.fn()} />);
+    active = school({ workingDays: [7, 1, 2, 3, 4] });
+    render(<SchoolDetails school={active} onChanged={vi.fn()} />);
 
     expect(
       await screen.findByText("Monday, Tuesday, Wednesday, Thursday and Sunday"),
@@ -189,7 +196,7 @@ describe("an existing school", () => {
 
 describe("changing the week", () => {
   it("saves an added day", async () => {
-    getSchool.mockResolvedValue(school());
+    active = school();
     await openForm();
 
     await userEvent.click(day("Saturday"));
@@ -200,7 +207,7 @@ describe("changing the week", () => {
   });
 
   it("saves a removed day", async () => {
-    getSchool.mockResolvedValue(school());
+    active = school();
     await openForm();
 
     await userEvent.click(day("Friday"));
@@ -211,7 +218,7 @@ describe("changing the week", () => {
   });
 
   it("saves a Sunday-to-Thursday week built from scratch", async () => {
-    getSchool.mockResolvedValue(school());
+    active = school();
     await openForm();
 
     await userEvent.click(day("Friday"));
@@ -224,7 +231,7 @@ describe("changing the week", () => {
   });
 
   it("saves a weekend-only week", async () => {
-    getSchool.mockResolvedValue(school());
+    active = school();
     await openForm();
 
     for (const name of ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]) {
@@ -239,7 +246,7 @@ describe("changing the week", () => {
   });
 
   it("saves every day", async () => {
-    getSchool.mockResolvedValue(school());
+    active = school();
     await openForm();
 
     await userEvent.click(day("Saturday"));
@@ -251,7 +258,7 @@ describe("changing the week", () => {
   });
 
   it("toggles back off, so a day can be added by mistake and removed", async () => {
-    getSchool.mockResolvedValue(school());
+    active = school();
     await openForm();
 
     await userEvent.click(day("Saturday"));
@@ -267,7 +274,7 @@ describe("changing the week", () => {
 
 describe("a week with no days", () => {
   it("is refused with a message, and nothing is sent", async () => {
-    getSchool.mockResolvedValue(school());
+    active = school();
     await openForm();
 
     for (const name of ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]) {
@@ -282,7 +289,7 @@ describe("a week with no days", () => {
   });
 
   it("is not quietly turned into every day, or into Monday to Friday", async () => {
-    getSchool.mockResolvedValue(school());
+    active = school();
     await openForm();
 
     for (const name of ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]) {
@@ -297,7 +304,7 @@ describe("a week with no days", () => {
   });
 
   it("clears its message as soon as a day is chosen", async () => {
-    getSchool.mockResolvedValue(school());
+    active = school();
     await openForm();
 
     for (const name of ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]) {
@@ -315,7 +322,7 @@ describe("a week with no days", () => {
   });
 
   it("does not disable the last remaining day", async () => {
-    getSchool.mockResolvedValue(school({ workingDays: [1] }));
+    active = school({ workingDays: [1] });
     await openForm();
 
     // Clearing the row to start again is a reasonable thing to do; a toggle that refuses
@@ -355,7 +362,7 @@ describe("accessibility", () => {
   });
 
   it("is reachable and operable by keyboard alone", async () => {
-    getSchool.mockResolvedValue(school());
+    active = school();
     await openForm();
 
     day("Monday").focus();
@@ -381,7 +388,7 @@ describe("accessibility", () => {
   });
 
   it("marks every toggle invalid when the week is empty", async () => {
-    getSchool.mockResolvedValue(school({ workingDays: [1] }));
+    active = school({ workingDays: [1] });
     await openForm();
 
     await userEvent.click(day("Monday"));

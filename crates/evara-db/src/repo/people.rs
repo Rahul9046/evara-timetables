@@ -37,7 +37,7 @@ use uuid::Uuid;
 
 use super::availability::{AvailabilityEntity, clear_for_entity};
 use super::row::{entity, opt_text, text};
-use super::{Stamp, delete, translate, update};
+use super::{Stamp, delete, require_same_school, translate, update};
 use crate::Database;
 use crate::error::{DbError, Result};
 
@@ -279,17 +279,23 @@ impl People<'_> {
         })
     }
 
-    /// Every year level, in the school's own progression order.
+    /// Every year level of one school, in that school's own progression order.
+    ///
+    /// Scoped to a school since V12, and this is the list where it matters most: year
+    /// levels are never shared, and `UNIQUE (school_id, name)` means two schools may each
+    /// hold their own "Grade 1" at their own ordinal 1. An unscoped list would interleave
+    /// them and make both meaningless.
     ///
     /// # Errors
     ///
     /// Propagates any database failure.
-    pub fn year_levels(&self) -> Result<Vec<YearLevel>> {
+    pub fn year_levels(&self, school_id: Uuid) -> Result<Vec<YearLevel>> {
         self.db.read(|conn| {
             let mut stmt = conn.prepare(&format!(
-                "SELECT {YEAR_LEVEL_COLUMNS} FROM year_level ORDER BY ordinal, id"
+                "SELECT {YEAR_LEVEL_COLUMNS} FROM year_level WHERE school_id = ? \
+                 ORDER BY ordinal, id"
             ))?;
-            let rows = stmt.query_map([], YearLevel::from_row)?;
+            let rows = stmt.query_map([text(school_id)], YearLevel::from_row)?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(DbError::from)
         })
@@ -302,6 +308,7 @@ impl People<'_> {
     /// [`DbError::NotFound`] or [`DbError::DuplicateValue`].
     pub fn update_year_level(&mut self, id: Uuid, input: &YearLevelInput) -> Result<YearLevel> {
         self.db.write(|tx| {
+            require_same_school(tx, "year level", "year_level", id, input.school_id)?;
             update(
                 tx,
                 "year level",
@@ -437,12 +444,13 @@ impl People<'_> {
     /// # Errors
     ///
     /// Propagates any database failure.
-    pub fn teachers(&self) -> Result<Vec<Teacher>> {
+    pub fn teachers(&self, school_id: Uuid) -> Result<Vec<Teacher>> {
         self.db.read(|conn| {
             let mut stmt = conn.prepare(&format!(
-                "SELECT {TEACHER_COLUMNS} FROM teacher ORDER BY family_name, given_name, id"
+                "SELECT {TEACHER_COLUMNS} FROM teacher WHERE school_id = ? \
+                 ORDER BY family_name, given_name, id"
             ))?;
-            let rows = stmt.query_map([], Teacher::from_row)?;
+            let rows = stmt.query_map([text(school_id)], Teacher::from_row)?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(DbError::from)
         })
@@ -458,6 +466,7 @@ impl People<'_> {
     /// [`DbError::NotFound`] or [`DbError::DuplicateValue`].
     pub fn update_teacher(&mut self, id: Uuid, input: &TeacherInput) -> Result<Teacher> {
         self.db.write(|tx| {
+            require_same_school(tx, "teacher", "teacher", id, input.school_id)?;
             update(
                 tx,
                 "teacher",
@@ -569,12 +578,13 @@ impl People<'_> {
     /// # Errors
     ///
     /// Propagates any database failure.
-    pub fn students(&self) -> Result<Vec<Student>> {
+    pub fn students(&self, school_id: Uuid) -> Result<Vec<Student>> {
         self.db.read(|conn| {
             let mut stmt = conn.prepare(&format!(
-                "SELECT {STUDENT_COLUMNS} FROM student ORDER BY family_name, given_name, id"
+                "SELECT {STUDENT_COLUMNS} FROM student WHERE school_id = ? \
+                 ORDER BY family_name, given_name, id"
             ))?;
-            let rows = stmt.query_map([], Student::from_row)?;
+            let rows = stmt.query_map([text(school_id)], Student::from_row)?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(DbError::from)
         })
@@ -587,6 +597,7 @@ impl People<'_> {
     /// [`DbError::NotFound`] or [`DbError::DuplicateValue`].
     pub fn update_student(&mut self, id: Uuid, input: &StudentInput) -> Result<Student> {
         self.db.write(|tx| {
+            require_same_school(tx, "student", "student", id, input.school_id)?;
             update(
                 tx,
                 "student",
@@ -711,12 +722,13 @@ impl People<'_> {
     /// # Errors
     ///
     /// Propagates any database failure.
-    pub fn student_groups(&self) -> Result<Vec<StudentGroup>> {
+    pub fn student_groups(&self, school_id: Uuid) -> Result<Vec<StudentGroup>> {
         self.db.read(|conn| {
             let mut stmt = conn.prepare(&format!(
-                "SELECT {STUDENT_GROUP_COLUMNS} FROM student_group ORDER BY name, id"
+                "SELECT {STUDENT_GROUP_COLUMNS} FROM student_group WHERE school_id = ? \
+                 ORDER BY name, id"
             ))?;
-            let rows = stmt.query_map([], StudentGroup::from_row)?;
+            let rows = stmt.query_map([text(school_id)], StudentGroup::from_row)?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(DbError::from)
         })
@@ -734,6 +746,7 @@ impl People<'_> {
         input: &StudentGroupInput,
     ) -> Result<StudentGroup> {
         self.db.write(|tx| {
+            require_same_school(tx, "student group", "student_group", id, input.school_id)?;
             if let Some(parent) = input.parent_group_id {
                 ensure_group_exists(tx, parent)?;
                 ensure_no_cycle(tx, id, parent)?;

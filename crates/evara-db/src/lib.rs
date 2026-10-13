@@ -39,6 +39,7 @@
 //! # }
 //! ```
 
+mod backup;
 pub mod change_log;
 pub mod cloud_sync;
 mod connection;
@@ -71,7 +72,8 @@ pub use crate::repo::people::{
 pub use crate::repo::structure::{
     AcademicYear, AcademicYearInput, Building, BuildingInput, BuildingWithCampuses, Campus,
     CampusInput, Resource, ResourceInput, Room, RoomInput, RoomType, RoomTypeInput,
-    RoomWithCampuses, School, SchoolInput, SchoolLogo, Structure, Term, TermInput,
+    RoomWithCampuses, School, SchoolDependents, SchoolInput, SchoolLogo, Structure, Term,
+    TermInput,
 };
 pub use crate::repo::time_model::{
     CalendarDay, CalendarDayInput, CalendarDayKind, Cycle, CycleDay, CycleDayInput, CycleInput,
@@ -95,6 +97,11 @@ pub struct Database {
     identity: ProjectIdentity,
     schema_version: u32,
     site_id: Uuid,
+    /// Safety copy taken by this open, if a schema rebuild needed one.
+    ///
+    /// Set only on the open that actually performed the upgrade, which is the only time
+    /// the interface has anything to tell the user about it.
+    safety_backup: Option<PathBuf>,
 }
 
 /// File name of a path, for messages that must not carry the full path.
@@ -154,6 +161,17 @@ impl Database {
     /// Shared body of [`Database::create`] and [`Database::open_existing`].
     fn open_or_create(path: &Path, app_version: &str, site_id: Uuid) -> Result<Self> {
         let mut conn = connection::open_configured(path, site_id)?;
+
+        // Before anything irreversible. `V12` is the first migration that rebuilds an
+        // existing table, so a project below that version gets a verified copy of itself
+        // first, and the upgrade is refused rather than run unprotected if the copy cannot
+        // be made. Checked before `migrations::run` so the refusal arrives before the
+        // project has been touched -- and *after* `open_configured`, which is what rejects
+        // a file that is not a database at all.
+        let applied = migrations::applied_schema_version(&conn)?;
+        migrations::reject_if_newer_than_supported(&conn)?;
+        let safety_backup = backup::before_schema_rebuild(&conn, path, applied)?;
+
         let schema_version = migrations::run(&mut conn)?;
 
         // Triggers are not data: recreating a missing one is always safe, so coverage is
@@ -170,6 +188,7 @@ impl Database {
             identity,
             schema_version,
             site_id,
+            safety_backup,
         })
     }
 
@@ -237,6 +256,17 @@ impl Database {
     #[must_use]
     pub const fn schema_version(&self) -> u32 {
         self.schema_version
+    }
+
+    /// The safety copy this open took before rebuilding a table, if it took one.
+    ///
+    /// `Some` only on the open that performed the upgrade — reopening an
+    /// already-upgraded project returns `None`, because there is nothing new to tell the
+    /// user. The interface shows the path so the copy is findable rather than mysterious;
+    /// nothing in Evara ever deletes it.
+    #[must_use]
+    pub fn safety_backup(&self) -> Option<&Path> {
+        self.safety_backup.as_deref()
     }
 
     /// The cloud provider this project appears to be stored under, if any.
@@ -334,6 +364,10 @@ impl Database {
     }
 }
 
+/// Helpers for the suites written when a project held exactly one school.
+#[cfg(test)]
+mod tests_support;
+
 #[cfg(test)]
 mod tests;
 
@@ -377,3 +411,7 @@ mod tests_people;
 /// Phase 2: availability, and what the polymorphic reference needs to stay honest.
 #[cfg(test)]
 mod tests_availability;
+
+/// Stage 0A: several schools in one project, and what the table rebuild had to preserve.
+#[cfg(test)]
+mod tests_multi_school;

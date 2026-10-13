@@ -398,6 +398,34 @@ button.linkish:hover:not(:disabled) {
   margin-bottom: 10px;
 }
 
+/* Which school the sections below are about. Only rendered when there is a choice. */
+.setupSchoolPicker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 8px 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.setupSchoolPickerLabel {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.setupSchoolPickerSelect {
+  width: 100%;
+  padding: 6px 8px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
 .setupNav ol {
   list-style: none;
   margin: 0;

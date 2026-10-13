@@ -83,13 +83,13 @@ const KIND_SHORT: Record<string, string> = {
 export function CalendarMapping(props: { school: School }) {
   const { school } = props;
 
-  const loadYears = useCallback(() => listAcademicYears(), []);
+  const loadYears = useCallback(() => listAcademicYears(school.id), [school.id]);
   const years = useList<AcademicYear>(loadYears);
 
-  const loadCycles = useCallback(() => listCycles(), []);
+  const loadCycles = useCallback(() => listCycles(school.id), [school.id]);
   const cycles = useList<Cycle>(loadCycles);
 
-  const loadCampuses = useCallback(() => listCampuses(), []);
+  const loadCampuses = useCallback(() => listCampuses(school.id), [school.id]);
   const campuses = useList<Campus>(loadCampuses);
 
   // Every cycle day of every cycle, because a date names a day directly and the screen
@@ -124,8 +124,10 @@ export function CalendarMapping(props: { school: School }) {
 
   const loadCalendar = useCallback(
     () =>
-      activeFrom && activeTo ? listCalendarDays(activeFrom, activeTo) : Promise.resolve([]),
-    [activeFrom, activeTo],
+      activeFrom && activeTo
+        ? listCalendarDays(school.id, activeFrom, activeTo)
+        : Promise.resolve([]),
+    [school.id, activeFrom, activeTo],
   );
 
   const spec = useMemo<CrudSpec<CalendarDay, Parameters<typeof createCalendarDay>[0]>>(() => {
@@ -317,7 +319,7 @@ export function CalendarMapping(props: { school: School }) {
 
       <WorkingDayWarning school={school} />
 
-      <CrudPanel spec={spec} reloadKey={`${activeFrom}:${activeTo}`} />
+      <CrudPanel spec={spec} reloadKey={`${school.id}:${activeFrom}:${activeTo}`} />
     </div>
   );
 }
@@ -334,7 +336,9 @@ const NAMED_LIMIT = 8;
  *
  * Deliberately *not* scoped to the range above: a date entered a day out is worth knowing
  * about whether or not it happens to be on screen, and a warning that disappeared when you
- * narrowed the range would be worse than no warning. The count is over the whole project.
+ * narrowed the range would be worse than no warning. The count is over the whole of this
+ * school's calendar -- the active school's, since V12, because another school's mapping is
+ * read against its own working week and is none of this screen's business.
  */
 function WorkingDayWarning(props: { school: School }) {
   const { school } = props;
@@ -348,9 +352,9 @@ function WorkingDayWarning(props: { school: School }) {
   // and is a fresh object on every load — its identity would re-fetch forever.
   const key = workingDays.join(",");
   const load = useCallback(
-    () => nonWorkingInstructionalDays(workingDays),
+    () => nonWorkingInstructionalDays(school.id, workingDays),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [key],
+    [school.id, key],
   );
   const found = useList<NonWorkingInstructionalDay>(load);
 

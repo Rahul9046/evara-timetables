@@ -30,9 +30,14 @@ const listCampuses = vi.fn<() => Promise<Campus[]>>();
 const listCycles = vi.fn<() => Promise<Cycle[]>>();
 const listCycleDays = vi.fn<(cycleId: string) => Promise<CycleDay[]>>();
 const listTerms = vi.fn<(yearId: string) => Promise<Term[]>>();
-const listCalendarDays = vi.fn<(from: string, to: string) => Promise<CalendarDay[]>>();
+const listCalendarDays =
+  vi.fn<(schoolId: string, from: string, to: string) => Promise<CalendarDay[]>>();
+// Both carry the school they are about since V12: a calendar mapping and the findings
+// over it belong to one school, and another school's week is read against its own.
 const nonWorkingInstructionalDays =
-  vi.fn<(week: readonly number[]) => Promise<NonWorkingInstructionalDay[]>>();
+  vi.fn<
+    (schoolId: string, week: readonly number[]) => Promise<NonWorkingInstructionalDay[]>
+  >();
 
 // The three writes. Every test asserts these were never called: the working week must not
 // mutate a calendar mapping, and a projection that did would be the subtler version of
@@ -47,9 +52,10 @@ vi.mock("../../ipc/setup", () => ({
   listCycles: () => listCycles(),
   listCycleDays: (cycleId: string) => listCycleDays(cycleId),
   listTerms: (yearId: string) => listTerms(yearId),
-  listCalendarDays: (from: string, to: string) => listCalendarDays(from, to),
-  nonWorkingInstructionalDays: (week: readonly number[]) =>
-    nonWorkingInstructionalDays(week),
+  listCalendarDays: (schoolId: string, from: string, to: string) =>
+    listCalendarDays(schoolId, from, to),
+  nonWorkingInstructionalDays: (schoolId: string, week: readonly number[]) =>
+    nonWorkingInstructionalDays(schoolId, week),
   createCalendarDay: (input: unknown) => createCalendarDay(input),
   updateCalendarDay: (id: string, input: unknown) => updateCalendarDay(id, input),
   deleteCalendarDay: (id: string) => deleteCalendarDay(id),
@@ -220,7 +226,7 @@ describe("what the advisory is asked", () => {
     render(<CalendarMapping school={school([7, 1, 2, 3, 4])} />);
 
     await waitFor(() => expect(nonWorkingInstructionalDays).toHaveBeenCalled());
-    expect(nonWorkingInstructionalDays).toHaveBeenCalledWith([7, 1, 2, 3, 4]);
+    expect(nonWorkingInstructionalDays).toHaveBeenCalledWith(expect.any(String), [7, 1, 2, 3, 4]);
   });
 
   it("is asked again when the school's week changes", async () => {
@@ -232,7 +238,10 @@ describe("what the advisory is asked", () => {
 
     // Not cached: a week edited in School Details must change what this says.
     await waitFor(() => expect(nonWorkingInstructionalDays).toHaveBeenCalledTimes(2));
-    expect(nonWorkingInstructionalDays).toHaveBeenLastCalledWith([7, 1, 2, 3, 4]);
+    expect(nonWorkingInstructionalDays).toHaveBeenLastCalledWith(
+      expect.any(String),
+      [7, 1, 2, 3, 4],
+    );
     expect(await screen.findByText(/falls outside the school's working days/)).toBeTruthy();
     assertNothingWritten();
   });

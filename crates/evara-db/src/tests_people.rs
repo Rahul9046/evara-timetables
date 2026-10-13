@@ -21,6 +21,7 @@ use crate::repo::people::{
     YearLevelInput,
 };
 use crate::repo::structure::{CampusInput, SchoolInput};
+use crate::tests_support;
 use crate::workspace::Workspace;
 use crate::{Database, DbError, PROJECT_EXTENSION};
 
@@ -62,6 +63,7 @@ impl Project {
             .structure()
             .create_school(&SchoolInput {
                 name: "Northgate Secondary".to_owned(),
+                code: None,
                 timezone: "Europe/London".to_owned(),
                 locale: "en-GB".to_owned(),
                 working_days: WorkingDays::from_bits(0b001_1111).expect("weekdays"),
@@ -206,7 +208,7 @@ fn an_inactive_teacher_is_still_listed() {
         })
         .expect("create teacher");
 
-    let listed = project.db().people().teachers().expect("list teachers");
+    let listed = tests_support::teachers_here(project.db());
     assert_eq!(listed.len(), 1);
     assert!(!listed[0].is_active);
 }
@@ -629,7 +631,7 @@ fn a_student_who_leaves_keeps_every_group_they_were_in() {
 
     // An inactive student is still listed, for the reason an inactive teacher is: a
     // timetable that names them is still a timetable.
-    let listed = project.db().people().students().expect("students");
+    let listed = tests_support::students_here(project.db());
     assert_eq!(listed.len(), 1);
     assert!(!listed[0].is_active);
 }
@@ -1035,7 +1037,7 @@ fn a_project_written_before_v10_migrates_without_touching_what_it_had() {
 
     let kept = db
         .structure()
-        .school()
+        .school(school)
         .expect("read school")
         .expect("the school survived");
     assert_eq!(kept.id, school, "its identifier is the one it had");
@@ -1044,17 +1046,17 @@ fn a_project_written_before_v10_migrates_without_touching_what_it_had() {
     assert_eq!(kept.created_at, stamp);
     assert_eq!(kept.updated_at, stamp, "and rewrote no timestamp");
 
-    let campuses = db.structure().campuses().expect("read campuses");
+    let campuses = db.structure().campuses(school).expect("read campuses");
     assert_eq!(campuses.len(), 1);
     assert_eq!(campuses[0].id, campus);
     assert_eq!(campuses[0].code, "MAIN");
     assert_eq!(campuses[0].rev, 2);
 
     // The new tables arrive empty rather than missing, and are writable at once.
-    assert_eq!(db.people().teachers().expect("teachers"), Vec::new());
-    assert_eq!(db.people().students().expect("students"), Vec::new());
+    assert_eq!(db.people().teachers(school).expect("teachers"), Vec::new());
+    assert_eq!(db.people().students(school).expect("students"), Vec::new());
     assert_eq!(
-        db.people().student_groups().expect("student groups"),
+        db.people().student_groups(school).expect("student groups"),
         Vec::new()
     );
 
@@ -1095,17 +1097,9 @@ fn a_project_made_before_the_people_group_existed_still_opens() {
 
     project.reopen();
 
-    let school = project
-        .db()
-        .structure()
-        .school()
-        .expect("read school")
-        .expect("school must survive");
+    let school = tests_support::only_school(project.db()).expect("a school exists");
     assert_eq!(school.id, school_id);
-    assert_eq!(
-        project.db().structure().campuses().expect("campuses").len(),
-        1
-    );
+    assert_eq!(tests_support::campuses_here(project.db()).len(), 1);
     assert_eq!(
         project
             .db()
@@ -1119,14 +1113,11 @@ fn a_project_made_before_the_people_group_existed_still_opens() {
 
     // And the new tables are present and empty rather than missing.
     assert_eq!(
-        project.db().people().teachers().expect("teachers"),
+        tests_support::teachers_here(project.db()),
         Vec::new(),
         "the new tables must be present and empty, not missing"
     );
-    assert_eq!(
-        project.db().people().students().expect("students"),
-        Vec::new()
-    );
+    assert_eq!(tests_support::students_here(project.db()), Vec::new());
 }
 
 #[test]

@@ -147,7 +147,7 @@ export function CyclesAndCycleDays(props: { school: School }) {
   const { school } = props;
   const [cycleId, setCycleId] = useState<string | null>(null);
 
-  const loadCycles = useCallback(() => listCycles(), []);
+  const loadCycles = useCallback(() => listCycles(school.id), [school.id]);
   const cycles = useList<Cycle>(loadCycles);
 
   // The working week is part of the question, not something the backend looks up. Keyed on
@@ -247,7 +247,7 @@ export function CyclesAndCycleDays(props: { school: School }) {
           isDefault: flag(draft, "isDefault"),
         };
       },
-      list: listCycles,
+      list: () => listCycles(school.id),
       create: createCycle,
       update: updateCycle,
       remove: deleteCycle,
@@ -382,6 +382,7 @@ export function CyclesAndCycleDays(props: { school: School }) {
 
       <CrudPanel
         spec={cycleSpec}
+        reloadKey={school.id}
         // The shape as well as the list. Editing a cycle changes its `dayCount`, which is
         // what decides whether the cycle is full -- and `loadShape` is keyed on the
         // selected cycle's id, which an edit does not change. Without this, lengthening a
@@ -437,7 +438,7 @@ export function CyclesAndCycleDays(props: { school: School }) {
 
         <CrudPanel
           spec={daySpec}
-          reloadKey={cycleId ?? ""}
+          reloadKey={`${school.id}:${cycleId ?? ""}`}
           onChanged={shape.reload}
         />
       </ParentPicker>

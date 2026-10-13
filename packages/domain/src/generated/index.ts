@@ -50,6 +50,7 @@ export type { RoomType } from "./RoomType";
 export type { RoomTypeInput } from "./RoomTypeInput";
 export type { RoomWithCampuses } from "./RoomWithCampuses";
 export type { School } from "./School";
+export type { SchoolDependents } from "./SchoolDependents";
 export type { SchoolInput } from "./SchoolInput";
 export type { SchoolLogoView } from "./SchoolLogoView";
 export type { SetupError } from "./SetupError";

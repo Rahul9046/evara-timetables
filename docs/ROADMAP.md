@@ -164,6 +164,21 @@ from the documented schema are [adr/0018](adr/0018-people-identity-and-deactivat
 **Availability ✅ complete.** Migration `V11`; see
 [adr/0018](adr/0018-people-identity-and-deactivation.md) for the `weight` departure.
 
+**Multiple schools per project (Stage 0A) ✅ complete.** Migration `V12`: `school` rebuilt
+without its singleton constraint, an optional unique school code, and trigger pairs refusing
+every cross-school reference the schema could previously not have produced. School CRUD with
+a dependent report and a refusal rather than a cascade; an explicit `school_id` on every
+school-owned list and command; a same-school guard on every update; a verified safety copy of
+the project taken before the first table rebuild in Evara's life. One minimal school selector
+in School Setup, shown only when there is a choice to make. See
+[adr/0019](adr/0019-multiple-schools-in-one-project.md) and
+[adr/0020](adr/0020-in-place-table-rebuild.md).
+
+> Deliberately **not** in Stage 0A, and not implied by it: a teacher or student belonging to
+> several schools (Stage 0B), the school-management interface (Stage 0C), project-level
+> availability, shared resources, and cross-school scheduling. A teacher and a student each
+> still belong to exactly one school.
+
 Remaining in this phase:
 
 - Migration for `department`, `subject` and `teacher_qualification`, plus

@@ -69,6 +69,7 @@ export type {
   RoomTypeInput,
   RoomWithCampuses,
   School,
+  SchoolDependents,
   SchoolInput,
   SchoolLogoView,
   SetupError,

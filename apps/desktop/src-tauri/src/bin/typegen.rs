@@ -150,10 +150,10 @@ fn write_all() -> (Vec<Generated>, Vec<String>) {
         MaterialisationCounts, MaterialisationPlan, MaterialisationRequest,
         NonWorkingInstructionalDay, Period, PeriodInput, PeriodKind, PeriodStructure,
         PeriodStructureInput, PlanFingerprint, PlannedSlot, Resource, ResourceInput, Room,
-        RoomInput, RoomType, RoomTypeInput, RoomWithCampuses, School, SchoolInput, Student,
-        StudentGroup, StudentGroupInput, StudentGroupMember, StudentGroupMemberInput, StudentInput,
-        Teacher, TeacherInput, Term, TermInput, Timeslot, TimeslotInput, WeeklyCycleDay, YearLevel,
-        YearLevelInput,
+        RoomInput, RoomType, RoomTypeInput, RoomWithCampuses, School, SchoolDependents,
+        SchoolInput, Student, StudentGroup, StudentGroupInput, StudentGroupMember,
+        StudentGroupMemberInput, StudentInput, Teacher, TeacherInput, Term, TermInput, Timeslot,
+        TimeslotInput, WeeklyCycleDay, YearLevel, YearLevelInput,
     };
     use evara_desktop_lib::commands::AppInfo;
     use evara_desktop_lib::commands::error::SetupError;
@@ -163,6 +163,7 @@ fn write_all() -> (Vec<Generated>, Vec<String>) {
         // Static structure.
         School,
         SchoolInput,
+        SchoolDependents,
         Campus,
         CampusInput,
         Building,

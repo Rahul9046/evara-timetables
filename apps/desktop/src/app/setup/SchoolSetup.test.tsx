@@ -20,10 +20,10 @@ import userEvent from "@testing-library/user-event";
 
 import type { School } from "@evara/domain";
 
-const getSchool = vi.fn<() => Promise<School | null>>();
+const listSchools = vi.fn<() => Promise<School[]>>();
 
 vi.mock("../../ipc/setup", () => ({
-  getSchool: () => getSchool(),
+  listSchools: () => listSchools(),
 }));
 
 /**
@@ -80,13 +80,13 @@ const SCHOOL = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  getSchool.mockResolvedValue(SCHOOL);
+  listSchools.mockResolvedValue([SCHOOL]);
 });
 
 /** Renders the shell and waits for the school read to settle. */
 async function open() {
   render(<SchoolSetup />);
-  await waitFor(() => expect(getSchool).toHaveBeenCalled());
+  await waitFor(() => expect(listSchools).toHaveBeenCalled());
   // The first section renders once the school is known.
   await screen.findByText("stub:school-details");
 }
@@ -241,7 +241,7 @@ describe("navigating between the remaining sections", () => {
 
 describe("before the school record exists", () => {
   beforeEach(() => {
-    getSchool.mockResolvedValue(null);
+    listSchools.mockResolvedValue([]);
   });
 
   it("locks every section but School details", async () => {
@@ -266,14 +266,33 @@ describe("before the school record exists", () => {
   });
 });
 
+describe("choosing which school", () => {
+  it("offers no picker when the project holds one school", async () => {
+    await open();
+    expect(screen.queryByLabelText("School")).toBeNull();
+  });
+
+  it("offers a picker when the project holds several, and switches the sections", async () => {
+    const second = { ...SCHOOL, id: "school-2", name: "Southmoor College" } as School;
+    listSchools.mockResolvedValue([SCHOOL, second]);
+    render(<SchoolSetup />);
+    await screen.findByText("stub:school-details");
+
+    const picker = screen.getByLabelText("School");
+    expect(picker).toBeTruthy();
+    await userEvent.selectOptions(picker, "school-2");
+    expect((picker as HTMLSelectElement).value).toBe("school-2");
+  });
+});
+
 describe("existing project data", () => {
-  it("reads the school once and renders it, rather than re-fetching per section", async () => {
+  it("reads the schools once and renders the active one, rather than re-fetching per section", async () => {
     await open();
     await userEvent.click(within(nav()).getByRole("button", { name: /Campuses/i }));
     await userEvent.click(within(nav()).getByRole("button", { name: /Rooms/i }));
 
     // The shell holds the record; a project opened with resources already in it is
     // untouched by this change, because nothing here writes.
-    expect(getSchool).toHaveBeenCalledTimes(1);
+    expect(listSchools).toHaveBeenCalledTimes(1);
   });
 });

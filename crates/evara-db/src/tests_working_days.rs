@@ -19,6 +19,7 @@ use uuid::Uuid;
 
 use crate::repo::structure::SchoolInput;
 use crate::repo::time_model::{CalendarDayInput, CalendarDayKind, CycleDayInput};
+use crate::tests_support;
 use crate::tests_time_model::Project;
 use crate::{Database, DbError};
 
@@ -37,11 +38,7 @@ fn raw(db: &mut Database, sql: &str) {
 
 /// The school's week, read back through the repository.
 fn week_of(project: &mut Project) -> WorkingDays {
-    project
-        .db()
-        .structure()
-        .school()
-        .expect("read school")
+    tests_support::only_school(project.db())
         .expect("a school exists")
         .working_days
 }
@@ -61,13 +58,7 @@ fn a_sunday_to_thursday_week_survives_a_round_trip() {
     let school = week_of(&mut project);
     assert_ne!(school.days(), vec![1, 2, 3, 4, 7]);
 
-    let id = project
-        .db()
-        .structure()
-        .school()
-        .expect("read")
-        .expect("exists")
-        .id;
+    let id = tests_support::only_school_id(project.db());
     let week = WorkingDays::from_days(&[7, 1, 2, 3, 4]).expect("a real week");
     project
         .db()
@@ -76,6 +67,7 @@ fn a_sunday_to_thursday_week_survives_a_round_trip() {
             id,
             &SchoolInput {
                 name: "Northgate Secondary".to_owned(),
+                code: None,
                 timezone: "Europe/London".to_owned(),
                 locale: "en-GB".to_owned(),
                 working_days: week,
@@ -91,13 +83,7 @@ fn a_sunday_to_thursday_week_survives_a_round_trip() {
 #[test]
 fn every_possible_week_survives_a_round_trip() {
     let mut project = Project::new();
-    let id = project
-        .db()
-        .structure()
-        .school()
-        .expect("read")
-        .expect("exists")
-        .id;
+    let id = tests_support::only_school_id(project.db());
 
     for bits in 1..=127i64 {
         let week = WorkingDays::from_bits(bits).expect("in range");
@@ -108,6 +94,7 @@ fn every_possible_week_survives_a_round_trip() {
                 id,
                 &SchoolInput {
                     name: "Northgate Secondary".to_owned(),
+                    code: None,
                     timezone: "Europe/London".to_owned(),
                     locale: "en-GB".to_owned(),
                     working_days: week,
@@ -125,13 +112,7 @@ fn every_possible_week_survives_a_round_trip() {
 #[test]
 fn a_six_day_week_is_storable() {
     let mut project = Project::new();
-    let id = project
-        .db()
-        .structure()
-        .school()
-        .expect("read")
-        .expect("exists")
-        .id;
+    let id = tests_support::only_school_id(project.db());
     let week = WorkingDays::from_days(&[1, 2, 3, 4, 5, 6]).expect("a real week");
     project
         .db()
@@ -140,6 +121,7 @@ fn a_six_day_week_is_storable() {
             id,
             &SchoolInput {
                 name: "Northgate Secondary".to_owned(),
+                code: None,
                 timezone: "Europe/London".to_owned(),
                 locale: "en-GB".to_owned(),
                 working_days: week,
@@ -152,12 +134,7 @@ fn a_six_day_week_is_storable() {
 #[test]
 fn changing_the_week_consumes_one_revision_and_leaves_the_rest_alone() {
     let mut project = Project::new();
-    let before = project
-        .db()
-        .structure()
-        .school()
-        .expect("read")
-        .expect("exists");
+    let before = tests_support::only_school(project.db()).expect("a school exists");
 
     let after = project
         .db()
@@ -166,6 +143,7 @@ fn changing_the_week_consumes_one_revision_and_leaves_the_rest_alone() {
             before.id,
             &SchoolInput {
                 name: before.name.clone(),
+                code: None,
                 timezone: before.timezone.clone(),
                 locale: before.locale.clone(),
                 working_days: WorkingDays::EVERY_DAY,
@@ -256,12 +234,7 @@ fn a_school_row_written_without_the_column_reads_as_monday_to_friday() {
                  '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', 1)",
     );
 
-    let school = project
-        .db()
-        .structure()
-        .school()
-        .expect("read")
-        .expect("exists");
+    let school = tests_support::only_school(project.db()).expect("a school exists");
 
     assert_eq!(school.working_days, WorkingDays::MONDAY_TO_FRIDAY);
     assert_eq!(school.working_days.days(), vec![1, 2, 3, 4, 5]);
@@ -307,7 +280,7 @@ fn a_stored_week_outside_the_range_is_corruption_not_a_silent_default() {
     // The CHECK makes this unreachable through SQL, so the decoder is exercised directly.
     // What matters is that it does not invent Monday-to-Friday: a damaged file must look
     // damaged. See `FromColumn for WorkingDays`.
-    let school = project.db().structure().school().expect("read");
+    let school = tests_support::only_school(project.db());
     assert!(school.is_some(), "the fixture school still reads normally");
 }
 
@@ -346,13 +319,7 @@ impl Mapped {
             cycle_days.push(day);
         }
 
-        let school = project
-            .db()
-            .structure()
-            .school()
-            .expect("read")
-            .expect("exists")
-            .id;
+        let school = tests_support::only_school_id(project.db());
 
         for (index, date) in dates.iter().enumerate() {
             let cycle_day = cycle_days[index % cycle_days.len()];
@@ -378,11 +345,7 @@ impl Mapped {
     }
 
     fn findings(&mut self, week: WorkingDays) -> Vec<String> {
-        self.project
-            .db()
-            .time_model()
-            .non_working_instructional_days(week)
-            .expect("advisory")
+        tests_support::non_working_here(self.project.db(), week)
             .into_iter()
             .map(|day| day.date)
             .collect()
@@ -402,12 +365,7 @@ fn a_teaching_date_on_a_non_working_weekday_is_reported() {
 #[test]
 fn the_weekday_reported_is_the_one_the_date_actually_falls_on() {
     let mut mapped = Mapped::new(5, &["2027-09-04", "2027-09-05"]);
-    let found = mapped
-        .project
-        .db()
-        .time_model()
-        .non_working_instructional_days(WorkingDays::MONDAY_TO_FRIDAY)
-        .expect("advisory");
+    let found = tests_support::non_working_here(mapped.project.db(), WorkingDays::MONDAY_TO_FRIDAY);
 
     // Saturday is 6 and Sunday is 7 in ISO numbering. SQLite counts Sunday as 0, so this
     // is what keeps `iso_weekday` honest.
@@ -432,13 +390,7 @@ fn a_sunday_to_thursday_school_is_warned_about_fridays_not_sundays() {
 #[test]
 fn a_date_with_no_lessons_is_never_a_finding() {
     let mut project = Project::new();
-    let school = project
-        .db()
-        .structure()
-        .school()
-        .expect("read")
-        .expect("exists")
-        .id;
+    let school = tests_support::only_school_id(project.db());
 
     // A Saturday, explicitly marked as having no lessons. That is what a non-working day
     // is supposed to look like, so warning about it would be noise.
@@ -456,11 +408,7 @@ fn a_date_with_no_lessons_is_never_a_finding() {
         })
         .expect("calendar day");
 
-    let found = project
-        .db()
-        .time_model()
-        .non_working_instructional_days(WorkingDays::MONDAY_TO_FRIDAY)
-        .expect("advisory");
+    let found = tests_support::non_working_here(project.db(), WorkingDays::MONDAY_TO_FRIDAY);
     assert!(found.is_empty(), "found {found:?}");
 }
 
@@ -507,11 +455,7 @@ fn a_five_day_week_does_not_mean_monday_to_friday() {
 /// Includes `rev` and `updated_at` on purpose: "the mapping is preserved" has to mean
 /// the row was not rewritten, not merely that it still says the same thing.
 fn calendar_snapshot(project: &mut Project) -> Vec<String> {
-    project
-        .db()
-        .time_model()
-        .calendar_days("0000-01-01", "9999-12-31")
-        .expect("read calendar")
+    tests_support::calendar_days_here(project.db(), "0000-01-01", "9999-12-31")
         .into_iter()
         .map(|day| {
             format!(
@@ -545,14 +489,7 @@ fn changing_the_working_week_does_not_touch_a_single_calendar_mapping() {
     let before = calendar_snapshot(&mut mapped.project);
     assert_eq!(before.len(), 5);
 
-    let id = mapped
-        .project
-        .db()
-        .structure()
-        .school()
-        .expect("read")
-        .expect("exists")
-        .id;
+    let id = tests_support::only_school_id(mapped.project.db());
     for week in [
         WorkingDays::from_days(&[1]).expect("a real week"),
         WorkingDays::from_days(&[6, 7]).expect("a real week"),
@@ -567,6 +504,7 @@ fn changing_the_working_week_does_not_touch_a_single_calendar_mapping() {
                 id,
                 &SchoolInput {
                     name: "Northgate Secondary".to_owned(),
+                    code: None,
                     timezone: "Europe/London".to_owned(),
                     locale: "en-GB".to_owned(),
                     working_days: week,
@@ -604,14 +542,7 @@ fn cycle_day_identities_are_untouched_by_a_change_of_week() {
     let mut mapped = Mapped::new(6, &["2027-09-01", "2027-09-02"]);
     let before = mapped.cycle_days.clone();
 
-    let id = mapped
-        .project
-        .db()
-        .structure()
-        .school()
-        .expect("read")
-        .expect("exists")
-        .id;
+    let id = tests_support::only_school_id(mapped.project.db());
     mapped
         .project
         .db()
@@ -620,6 +551,7 @@ fn cycle_day_identities_are_untouched_by_a_change_of_week() {
             id,
             &SchoolInput {
                 name: "Northgate Secondary".to_owned(),
+                code: None,
                 timezone: "Europe/London".to_owned(),
                 locale: "en-GB".to_owned(),
                 working_days: WorkingDays::from_days(&[7, 1, 2, 3, 4]).expect("a real week"),
@@ -627,12 +559,7 @@ fn cycle_day_identities_are_untouched_by_a_change_of_week() {
         )
         .expect("update");
 
-    let cycle = mapped
-        .project
-        .db()
-        .time_model()
-        .cycles()
-        .expect("cycles")
+    let cycle = tests_support::cycles_here(mapped.project.db())
         .first()
         .expect("one cycle")
         .id;
@@ -661,11 +588,7 @@ fn the_advisory_answers_for_a_project_with_no_calendar_at_all() {
         WorkingDays::EVERY_DAY,
         WorkingDays::from_days(&[6]).expect("a real week"),
     ] {
-        let found = project
-            .db()
-            .time_model()
-            .non_working_instructional_days(week)
-            .expect("advisory");
+        let found = tests_support::non_working_here(project.db(), week);
         assert!(found.is_empty(), "found {found:?}");
     }
 }
@@ -677,6 +600,7 @@ fn a_missing_school_update_is_still_not_found() {
         Uuid::nil(),
         &SchoolInput {
             name: "Nobody".to_owned(),
+            code: None,
             timezone: "Europe/London".to_owned(),
             locale: "en-GB".to_owned(),
             working_days: WorkingDays::MONDAY_TO_FRIDAY,

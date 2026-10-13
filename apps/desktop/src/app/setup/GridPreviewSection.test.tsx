@@ -34,6 +34,7 @@ const { GridPreviewSection } = await import("./GridPreviewSection");
 const SCHOOL = {
   id: "school-1",
   name: "Northgate Secondary",
+  code: null,
   timezone: "Europe/London",
   locale: "en-GB",
   // An ordinary working week. Note that the cycle below is a six-day rotation: the two

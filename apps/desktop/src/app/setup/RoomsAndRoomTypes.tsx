@@ -109,10 +109,10 @@ export function RoomsAndRoomTypes(props: { school: School }) {
   const { school } = props;
   const [campusId, setCampusId] = useState<string | null>(null);
 
-  const loadCampuses = useCallback(() => listCampuses(), []);
+  const loadCampuses = useCallback(() => listCampuses(school.id), [school.id]);
   const campuses = useList<Campus>(loadCampuses);
 
-  const loadRoomTypes = useCallback(() => listRoomTypes(), []);
+  const loadRoomTypes = useCallback(() => listRoomTypes(school.id), [school.id]);
   const roomTypes = useList<RoomType>(loadRoomTypes);
 
   const loadBuildings = useCallback(
@@ -148,7 +148,7 @@ export function RoomsAndRoomTypes(props: { school: School }) {
         name: text(draft, "name"),
         code: text(draft, "code"),
       }),
-      list: listRoomTypes,
+      list: () => listRoomTypes(school.id),
       create: createRoomType,
       update: updateRoomType,
       remove: deleteRoomType,
@@ -390,7 +390,7 @@ export function RoomsAndRoomTypes(props: { school: School }) {
         </p>
       </header>
 
-      <CrudPanel spec={roomTypeSpec} onChanged={roomTypes.reload} />
+      <CrudPanel spec={roomTypeSpec} reloadKey={school.id} onChanged={roomTypes.reload} />
 
       <hr />
 
@@ -413,7 +413,7 @@ export function RoomsAndRoomTypes(props: { school: School }) {
       >
         <CrudPanel
           spec={roomSpec}
-          reloadKey={campusId ?? ""}
+          reloadKey={`${school.id}:${campusId ?? ""}`}
           onChanged={() => {
             buildings.reload();
             rooms.reload();

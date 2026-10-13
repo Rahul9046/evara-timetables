@@ -342,17 +342,18 @@ impl Availability<'_> {
     /// Propagates any database failure.
     pub fn rules_for(
         &self,
+        school_id: Uuid,
         entity_kind: AvailabilityEntity,
         entity_id: Uuid,
     ) -> Result<Vec<AvailabilityRule>> {
         self.db.read(|conn| {
             let mut stmt = conn.prepare(&format!(
                 "SELECT {AVAILABILITY_COLUMNS} FROM availability
-                 WHERE entity_kind = ? AND entity_id = ?
+                 WHERE school_id = ? AND entity_kind = ? AND entity_id = ?
                  ORDER BY cycle_day_id, period_id, id"
             ))?;
             let rows = stmt.query_map(
-                [entity_kind.as_str(), &text(entity_id)],
+                [&text(school_id), entity_kind.as_str(), &text(entity_id)],
                 AvailabilityRule::from_row,
             )?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -365,11 +366,17 @@ impl Availability<'_> {
     /// # Errors
     ///
     /// Propagates any database failure.
-    pub fn count_for(&self, entity_kind: AvailabilityEntity, entity_id: Uuid) -> Result<i64> {
+    pub fn count_for(
+        &self,
+        school_id: Uuid,
+        entity_kind: AvailabilityEntity,
+        entity_id: Uuid,
+    ) -> Result<i64> {
         self.db.read(|conn| {
             conn.query_row(
-                "SELECT COUNT(*) FROM availability WHERE entity_kind = ? AND entity_id = ?",
-                [entity_kind.as_str(), &text(entity_id)],
+                "SELECT COUNT(*) FROM availability
+                 WHERE school_id = ? AND entity_kind = ? AND entity_id = ?",
+                [&text(school_id), entity_kind.as_str(), &text(entity_id)],
                 |row| row.get(0),
             )
             .map_err(DbError::from)

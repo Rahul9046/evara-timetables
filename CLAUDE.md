@@ -93,6 +93,14 @@ disagree about whether a placement is legal, the product is broken.
 - **No driver type crosses `evara-db`'s public API.** `rusqlite` and `refinery` errors are
   wrapped in `InternalError`; no other crate may depend on the SQLite driver, even for
   tests.
+- **A project holds several schools, and every school-owned read says which.** Since V12
+  there is no "the school": a repository list of a school-owned entity takes an explicit
+  `school_id`, and `update_*` refuses an identifier that belongs to another school
+  (`DbError::WrongSchool`). A `LIMIT 1` read of `school` would hand the caller an arbitrary
+  institution and silently scope everything after it. Facilities are the exception by
+  design — `building_campus` and `room_campus` reach across schools, and `room-clash` stays
+  a per-`room_id` rule for the whole project. See
+  [docs/adr/0019](docs/adr/0019-multiple-schools-in-one-project.md).
 - **Identity is split three ways and must stay that way:** `project_id` and
   `created_by_site_id` live in the project; the installation's `site_id` lives in the
   settings database and reaches the change log through the per-connection

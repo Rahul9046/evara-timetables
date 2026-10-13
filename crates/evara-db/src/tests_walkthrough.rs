@@ -43,8 +43,12 @@ fn a_school_can_be_set_up_from_an_empty_project_and_survives_a_reopen() {
     // ---------------------------------------------------- 1. school details
     // Nothing exists yet, which is what drives the first-run empty state.
     assert_eq!(
-        workspace.structure().expect("open").school().expect("read"),
-        None,
+        workspace
+            .structure()
+            .expect("open")
+            .schools()
+            .expect("read"),
+        Vec::new(),
         "a new project has no school, and the interface opens on that"
     );
 
@@ -53,6 +57,7 @@ fn a_school_can_be_set_up_from_an_empty_project_and_survives_a_reopen() {
         .expect("open")
         .create_school(&SchoolInput {
             name: "Northgate Secondary".to_owned(),
+            code: None,
             timezone: "Europe/London".to_owned(),
             locale: "en-GB".to_owned(),
             working_days: WorkingDays::MONDAY_TO_FRIDAY,
@@ -370,12 +375,16 @@ fn a_school_can_be_set_up_from_an_empty_project_and_survives_a_reopen() {
 
     let structure = workspace.structure().expect("open");
     assert_eq!(
-        structure.school().expect("read").map(|s| s.name).as_deref(),
+        structure
+            .school(school)
+            .expect("read")
+            .map(|s| s.name)
+            .as_deref(),
         Some("Northgate Secondary")
     );
-    assert_eq!(structure.campuses().expect("read").len(), 1);
+    assert_eq!(structure.campuses(school).expect("read").len(), 1);
     assert_eq!(structure.rooms(campus).expect("read").len(), 2);
-    assert_eq!(structure.resources().expect("read").len(), 1);
+    assert_eq!(structure.resources(school).expect("read").len(), 1);
     assert_eq!(structure.terms(year).expect("read").len(), 1);
 
     let time_model = workspace.time_model().expect("open");
@@ -383,7 +392,7 @@ fn a_school_can_be_set_up_from_an_empty_project_and_survives_a_reopen() {
     assert_eq!(time_model.periods(bells).expect("read").len(), 4);
     assert_eq!(
         time_model
-            .calendar_days("2027-09-01", "2028-07-20")
+            .calendar_days(school, "2027-09-01", "2028-07-20")
             .expect("read")
             .len(),
         2
@@ -424,6 +433,7 @@ fn removing_a_cycle_day_takes_the_whole_guarded_route() {
         .expect("open")
         .create_school(&SchoolInput {
             name: "Northgate Secondary".to_owned(),
+            code: None,
             timezone: "Europe/London".to_owned(),
             locale: "en-GB".to_owned(),
             working_days: WorkingDays::MONDAY_TO_FRIDAY,

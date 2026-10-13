@@ -19,10 +19,10 @@
  * the only thing to do is create it. Rather than letting seven sections each discover
  * that, the shell holds the school record and shows the first-run state once.
  */
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 
 import type { School } from "@evara/domain";
-import { getSchool } from "../../ipc/setup";
+import { listSchools } from "../../ipc/setup";
 import { Banner, Loading } from "../ui/Shell";
 import { AcademicYearsAndTerms } from "./AcademicYearsAndTerms";
 import { CalendarMapping } from "./CalendarMapping";
@@ -144,18 +144,77 @@ export const SECTIONS: readonly Section[] = [
   },
 ];
 
-export function SchoolSetup() {
-  const load = useCallback(() => getSchool(), []);
-  const { value: school, error, reload } = useValue<School | null>(load);
-  const [activeId, setActiveId] = useState<string>("school");
+/**
+ * Chooses which school the sections below are about.
+ *
+ * Shown only when the project holds more than one, so a project with a single school looks
+ * and behaves exactly as it did before `V12`. This is the minimum Stage 0A needs to be
+ * correct rather than the school-management interface Stage 0C will build: creating,
+ * renaming and deleting a school all live in School details for now.
+ */
+function SchoolPicker(props: {
+  schools: readonly School[];
+  activeId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const { schools, activeId, onSelect } = props;
+  return (
+    <div className="setupSchoolPicker">
+      <label className="setupSchoolPickerLabel" htmlFor="setup-active-school">
+        School
+      </label>
+      <select
+        id="setup-active-school"
+        className="setupSchoolPickerSelect"
+        value={activeId ?? ""}
+        onChange={(event) => onSelect(event.target.value)}
+      >
+        {schools.map((school) => (
+          <option key={school.id} value={school.id}>
+            {school.code ? `${school.name} (${school.code})` : school.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
 
+export function SchoolSetup() {
+  const load = useCallback(() => listSchools(), []);
+  const { value: schools, error, reload } = useValue<School[]>(load);
+  const [activeId, setActiveId] = useState<string>("school");
+  // Which school every section below is about. Held here rather than in each section so
+  // there is exactly one answer at any moment: a selector that scoped some screens and
+  // not others would be worse than no selector at all.
+  const [activeSchoolId, setActiveSchoolId] = useState<string | null>(null);
+
+  // The active school follows the project: it settles on the only school when there is
+  // one, and survives a reload as long as that school still exists.
+  useEffect(() => {
+    if (schools === undefined) return;
+    if (schools.length === 0) {
+      setActiveSchoolId(null);
+      return;
+    }
+    const stillThere = schools.some((candidate) => candidate.id === activeSchoolId);
+    if (!stillThere) setActiveSchoolId(schools[0]?.id ?? null);
+  }, [schools, activeSchoolId]);
+
+  const school = schools?.find((candidate) => candidate.id === activeSchoolId) ?? null;
   const active = SECTIONS.find((section) => section.id === activeId) ?? SECTIONS[0];
-  const ready = school !== undefined && school !== null;
+  const ready = school !== null;
 
   return (
     <div className="setup">
       <nav className="setupNav" aria-label="School setup sections">
         <h2 className="setupNavHead">School setup</h2>
+        {schools !== undefined && schools.length > 1 && (
+          <SchoolPicker
+            schools={schools}
+            activeId={activeSchoolId}
+            onSelect={setActiveSchoolId}
+          />
+        )}
         <ol>
           {SECTIONS.map((section, index) => {
             const locked = section.needsSchool && !ready;
@@ -185,10 +244,10 @@ export function SchoolSetup() {
 
       <div className="setupBody">
         {error && <Banner tone="error">{error}</Banner>}
-        {school === undefined ? (
+        {schools === undefined ? (
           <Loading what="this campus file" />
         ) : active?.id === "school" ? (
-          <SchoolDetails onChanged={reload} />
+          <SchoolDetails school={school} onChanged={reload} />
         ) : school === null ? (
           <Banner tone="warning">
             This section needs the school record. Open <strong>School details</strong> and

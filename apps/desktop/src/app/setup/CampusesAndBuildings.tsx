@@ -64,7 +64,7 @@ export function CampusesAndBuildings(props: { school: School }) {
   const { school } = props;
   const [campusId, setCampusId] = useState<string | null>(null);
 
-  const loadCampuses = useCallback(() => listCampuses(), []);
+  const loadCampuses = useCallback(() => listCampuses(school.id), [school.id]);
   const campuses = useList<Campus>(loadCampuses);
 
   const campusSpec = useMemo<CrudSpec<Campus, Parameters<typeof createCampus>[0]>>(
@@ -101,7 +101,7 @@ export function CampusesAndBuildings(props: { school: School }) {
         code: text(draft, "code"),
         address: textOrNull(draft, "address"),
       }),
-      list: listCampuses,
+      list: () => listCampuses(school.id),
       create: createCampus,
       update: updateCampus,
       remove: deleteCampus,
@@ -280,7 +280,7 @@ export function CampusesAndBuildings(props: { school: School }) {
         </p>
       </header>
 
-      <CrudPanel spec={campusSpec} onChanged={campuses.reload} />
+      <CrudPanel spec={campusSpec} reloadKey={school.id} onChanged={campuses.reload} />
 
       <hr />
 
@@ -301,7 +301,7 @@ export function CampusesAndBuildings(props: { school: School }) {
           hint: "Add a campus above, then its buildings can be recorded here.",
         }}
       >
-        <CrudPanel spec={buildingSpec} reloadKey={campusId ?? ""} />
+        <CrudPanel spec={buildingSpec} reloadKey={`${school.id}:${campusId ?? ""}`} />
       </ParentPicker>
     </div>
   );

@@ -23,6 +23,7 @@ use crate::repo::availability::{AvailabilityEntity, AvailabilityRuleInput, Avail
 use crate::repo::people::{GroupKind, StudentGroupInput, TeacherInput};
 use crate::repo::structure::{CampusInput, RoomInput, SchoolInput};
 use crate::repo::time_model::{CycleInput, PeriodInput, PeriodStructureInput};
+use crate::tests_support;
 use crate::workspace::Workspace;
 use crate::{CycleKind, Database, DbError, PROJECT_EXTENSION, PeriodKind};
 
@@ -83,6 +84,7 @@ impl Project {
             .structure()
             .create_school(&SchoolInput {
                 name: "Northgate Secondary".to_owned(),
+                code: None,
                 timezone: "Europe/London".to_owned(),
                 locale: "en-GB".to_owned(),
                 working_days: WorkingDays::from_bits(0b001_1111).expect("weekdays"),
@@ -214,19 +216,19 @@ fn an_entity_with_no_rules_is_available_everywhere() {
     let fixture = project.with_timetable_shape(CycleKind::Weekly, 7);
 
     assert_eq!(
-        project
-            .db()
-            .availability()
-            .rules_for(AvailabilityEntity::Teacher, fixture.teacher_id)
-            .expect("rules"),
+        tests_support::rules_here(
+            project.db(),
+            AvailabilityEntity::Teacher,
+            fixture.teacher_id
+        ),
         Vec::new()
     );
     assert_eq!(
-        project
-            .db()
-            .availability()
-            .count_for(AvailabilityEntity::Teacher, fixture.teacher_id)
-            .expect("count"),
+        tests_support::count_here(
+            project.db(),
+            AvailabilityEntity::Teacher,
+            fixture.teacher_id
+        ),
         0
     );
 }
@@ -256,11 +258,11 @@ fn a_cell_can_be_made_unavailable_and_cleared_again() {
     assert!(removed);
 
     assert_eq!(
-        project
-            .db()
-            .availability()
-            .count_for(AvailabilityEntity::Teacher, fixture.teacher_id)
-            .expect("count"),
+        tests_support::count_here(
+            project.db(),
+            AvailabilityEntity::Teacher,
+            fixture.teacher_id
+        ),
         0
     );
 }
@@ -306,11 +308,11 @@ fn editing_a_cell_keeps_the_rule_rather_than_replacing_it() {
     assert_eq!(second.status, AvailabilityStatus::Discouraged);
 
     assert_eq!(
-        project
-            .db()
-            .availability()
-            .count_for(AvailabilityEntity::Teacher, fixture.teacher_id)
-            .expect("count"),
+        tests_support::count_here(
+            project.db(),
+            AvailabilityEntity::Teacher,
+            fixture.teacher_id
+        ),
         1,
         "editing must not leave a second rule behind"
     );
@@ -349,11 +351,11 @@ fn the_three_granularities_are_separate_rules() {
         .expect("cell rule");
 
     assert_eq!(
-        project
-            .db()
-            .availability()
-            .count_for(AvailabilityEntity::Teacher, fixture.teacher_id)
-            .expect("count"),
+        tests_support::count_here(
+            project.db(),
+            AvailabilityEntity::Teacher,
+            fixture.teacher_id
+        ),
         3
     );
 
@@ -368,11 +370,11 @@ fn the_three_granularities_are_separate_rules() {
             .expect("clear the cell")
     );
 
-    let left = project
-        .db()
-        .availability()
-        .rules_for(AvailabilityEntity::Teacher, fixture.teacher_id)
-        .expect("rules");
+    let left = tests_support::rules_here(
+        project.db(),
+        AvailabilityEntity::Teacher,
+        fixture.teacher_id,
+    );
     assert_eq!(left.len(), 2, "only the cell was cleared");
     assert!(
         left.iter()
@@ -411,11 +413,11 @@ fn two_rules_meaning_the_same_thing_are_one_rule() {
 
     assert_eq!(again.id, first.id);
     assert_eq!(
-        project
-            .db()
-            .availability()
-            .count_for(AvailabilityEntity::Teacher, fixture.teacher_id)
-            .expect("count"),
+        tests_support::count_here(
+            project.db(),
+            AvailabilityEntity::Teacher,
+            fixture.teacher_id
+        ),
         1
     );
 }
@@ -515,11 +517,11 @@ fn deleting_a_cycle_day_that_availability_depends_on_is_refused() {
     );
 
     assert_eq!(
-        project
-            .db()
-            .availability()
-            .count_for(AvailabilityEntity::Teacher, fixture.teacher_id)
-            .expect("count"),
+        tests_support::count_here(
+            project.db(),
+            AvailabilityEntity::Teacher,
+            fixture.teacher_id
+        ),
         1,
         "and the rule must still be there"
     );
@@ -568,11 +570,11 @@ fn deactivating_a_teacher_keeps_their_availability() {
         .expect("deactivate");
 
     assert_eq!(
-        project
-            .db()
-            .availability()
-            .count_for(AvailabilityEntity::Teacher, fixture.teacher_id)
-            .expect("count"),
+        tests_support::count_here(
+            project.db(),
+            AvailabilityEntity::Teacher,
+            fixture.teacher_id
+        ),
         1,
         "deactivation must not touch availability"
     );
@@ -603,11 +605,11 @@ fn deleting_a_teacher_takes_their_availability_and_leaves_no_orphan() {
         .expect("delete teacher");
 
     assert_eq!(
-        project
-            .db()
-            .availability()
-            .count_for(AvailabilityEntity::Teacher, fixture.teacher_id)
-            .expect("count"),
+        tests_support::count_here(
+            project.db(),
+            AvailabilityEntity::Teacher,
+            fixture.teacher_id
+        ),
         0
     );
     assert_eq!(
@@ -636,11 +638,11 @@ fn availability_survives_closing_and_reopening_the_project() {
 
     project.reopen();
 
-    let after = project
-        .db()
-        .availability()
-        .rules_for(AvailabilityEntity::Teacher, fixture.teacher_id)
-        .expect("rules");
+    let after = tests_support::rules_here(
+        project.db(),
+        AvailabilityEntity::Teacher,
+        fixture.teacher_id,
+    );
 
     assert_eq!(after.len(), 1);
     assert_eq!(after[0], stored, "every column must round-trip");
@@ -671,11 +673,11 @@ fn availability_works_the_same_on_a_weekly_and_a_custom_cycle() {
         }
 
         assert_eq!(
-            project
-                .db()
-                .availability()
-                .count_for(AvailabilityEntity::Teacher, fixture.teacher_id)
-                .expect("count"),
+            tests_support::count_here(
+                project.db(),
+                AvailabilityEntity::Teacher,
+                fixture.teacher_id
+            ),
             i64::try_from(expected_days).expect("small"),
             "one rule per position, whichever kind of cycle it is"
         );
@@ -701,11 +703,11 @@ fn a_project_made_before_availability_existed_still_opens() {
         "everything from before must survive"
     );
     assert_eq!(
-        project
-            .db()
-            .availability()
-            .rules_for(AvailabilityEntity::Teacher, fixture.teacher_id)
-            .expect("rules"),
+        tests_support::rules_here(
+            project.db(),
+            AvailabilityEntity::Teacher,
+            fixture.teacher_id
+        ),
         Vec::new(),
         "and the new table is present and empty rather than missing"
     );
@@ -884,9 +886,5 @@ fn a_room_and_a_group_carry_their_own_rules_and_take_them_when_deleted() {
 
 /// How many rules one entity has.
 fn count(project: &mut Project, kind: AvailabilityEntity, id: Uuid) -> i64 {
-    project
-        .db()
-        .availability()
-        .count_for(kind, id)
-        .expect("count")
+    tests_support::count_here(project.db(), kind, id)
 }

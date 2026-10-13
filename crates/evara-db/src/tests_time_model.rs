@@ -20,6 +20,7 @@ use crate::repo::time_model::{
     CalendarDayInput, CalendarDayKind, CycleDayInput, CycleInput, CycleKind,
     MaterialisationRequest, PeriodInput, PeriodKind, PeriodStructureInput, Timeslot,
 };
+use crate::tests_support;
 use crate::workspace::Workspace;
 use crate::{Database, DbError, PROJECT_EXTENSION};
 
@@ -53,6 +54,7 @@ impl Project {
             .structure()
             .create_school(&SchoolInput {
                 name: "Northgate Secondary".to_owned(),
+                code: None,
                 timezone: "Europe/London".to_owned(),
                 locale: "en-GB".to_owned(),
                 working_days: WorkingDays::MONDAY_TO_FRIDAY,
@@ -658,7 +660,7 @@ fn the_first_cycle_is_not_made_the_default_by_the_repository() {
     assert!(!only.is_default);
     assert_eq!(only.rev, 1, "and no second write to promote it");
 
-    let cycles = project.db().time_model().cycles().expect("list");
+    let cycles = tests_support::cycles_here(project.db());
     assert_eq!(cycles.len(), 1);
     assert!(
         cycles.iter().all(|cycle| !cycle.is_default),
@@ -1467,11 +1469,7 @@ fn explicit_dates_map_onto_arbitrarily_named_cycle_days() {
             .expect("calendar day");
     }
 
-    let mapped = project
-        .db()
-        .time_model()
-        .calendar_days("2027-09-01", "2027-09-30")
-        .expect("read calendar");
+    let mapped = tests_support::calendar_days_here(project.db(), "2027-09-01", "2027-09-30");
 
     assert_eq!(
         mapped
@@ -1580,11 +1578,7 @@ fn a_mapped_date_blocks_deleting_the_cycle_day_it_names() {
         "{error:?}"
     );
 
-    let still_mapped = project
-        .db()
-        .time_model()
-        .calendar_days("2027-09-01", "2027-09-01")
-        .expect("read");
+    let still_mapped = tests_support::calendar_days_here(project.db(), "2027-09-01", "2027-09-01");
     assert_eq!(
         still_mapped[0].cycle_day_id,
         Some(day),

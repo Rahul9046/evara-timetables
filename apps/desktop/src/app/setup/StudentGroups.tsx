@@ -95,13 +95,13 @@ export function StudentGroups(props: { school: School }) {
   const { school } = props;
   const [selected, setSelected] = useState<StudentGroup | null>(null);
 
-  const loadCampuses = useCallback(() => listCampuses(), []);
+  const loadCampuses = useCallback(() => listCampuses(school.id), [school.id]);
   const campuses = useList<Campus>(loadCampuses);
 
-  const loadYearLevels = useCallback(() => listYearLevels(), []);
+  const loadYearLevels = useCallback(() => listYearLevels(school.id), [school.id]);
   const yearLevels = useList<YearLevel>(loadYearLevels);
 
-  const loadGroups = useCallback(() => listStudentGroups(), []);
+  const loadGroups = useCallback(() => listStudentGroups(school.id), [school.id]);
   const groups = useList<StudentGroup>(loadGroups);
 
   /**
@@ -240,7 +240,7 @@ export function StudentGroups(props: { school: School }) {
       size: text(draft, "size").length === 0 ? null : number(draft, "size"),
       campusId: textOrNull(draft, "campusId"),
     }),
-    list: () => listStudentGroups(),
+    list: () => listStudentGroups(school.id),
     create: (input) => createStudentGroup(input),
     update: (id, input) => updateStudentGroup(id, input),
     remove: (id) => deleteStudentGroup(id),
@@ -273,7 +273,7 @@ export function StudentGroups(props: { school: School }) {
         choice between them.
       </p>
       {campuses.error && <p className="muted">Campuses could not be loaded: {campuses.error}</p>}
-      <CrudPanel spec={spec} onChanged={groups.reload} />
+      <CrudPanel spec={spec} reloadKey={school.id} onChanged={groups.reload} />
       <AvailabilityPanel
         school={school}
         entityKind="STUDENT_GROUP"
@@ -284,6 +284,7 @@ export function StudentGroups(props: { school: School }) {
         }))}
       />
       <GroupMembers
+        school={school}
         groups={groups.items ?? []}
         selected={selected}
         onSelect={setSelected}
@@ -301,13 +302,14 @@ export function StudentGroups(props: { school: School }) {
  * form would be unusable at exactly the schools that need it most.
  */
 function GroupMembers(props: {
+  school: School;
   groups: readonly StudentGroup[];
   selected: StudentGroup | null;
   onSelect: (group: StudentGroup | null) => void;
 }) {
-  const { groups, selected, onSelect } = props;
+  const { school, groups, selected, onSelect } = props;
 
-  const loadStudents = useCallback(() => listStudents(), []);
+  const loadStudents = useCallback(() => listStudents(school.id), [school.id]);
   const students = useList<Student>(loadStudents);
 
   const [members, setMembers] = useState<readonly Student[] | null>(null);

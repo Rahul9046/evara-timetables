@@ -60,7 +60,11 @@ function shortId(id: string): string {
   return id.slice(0, 8);
 }
 
-export function GridPreviewSection(_props: { school: School }) {
+export function GridPreviewSection(props: { school: School }) {
+  // The prop was unused until V12: every list it drives was project-wide. The grid is one
+  // school's, so the active school now scopes the cycles, bell schedules and terms it can
+  // be built from.
+  const { school } = props;
   const [cycleId, setCycleId] = useState<string | null>(null);
   const [structureId, setStructureId] = useState<string | null>(null);
   const [termId, setTermId] = useState<string | null>(null);
@@ -73,17 +77,17 @@ export function GridPreviewSection(_props: { school: School }) {
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState<"rebuild" | "release" | null>(null);
 
-  const loadCycles = useCallback(() => listCycles(), []);
+  const loadCycles = useCallback(() => listCycles(school.id), [school.id]);
   const cycles = useList<Cycle>(loadCycles);
 
-  const loadStructures = useCallback(() => listPeriodStructures(), []);
+  const loadStructures = useCallback(() => listPeriodStructures(school.id), [school.id]);
   const structures = useList<PeriodStructure>(loadStructures);
 
   const loadTerms = useCallback(async () => {
-    const years = await listAcademicYears();
+    const years = await listAcademicYears(school.id);
     const lists = await Promise.all(years.map((year) => listTerms(year.id)));
     return lists.flat();
-  }, []);
+  }, [school.id]);
   const terms = useList<Term>(loadTerms);
 
   // The cycle must be chosen. It used to default to the school's default cycle, falling

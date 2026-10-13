@@ -29,7 +29,7 @@ use uuid::Uuid;
 
 use super::availability::{AvailabilityEntity, clear_for_entity};
 use super::row::{entity, opt_text, parse_id_text, text};
-use super::{Stamp, delete, translate, update};
+use super::{Stamp, delete, require_same_school, translate, update};
 use crate::Database;
 use crate::error::{DbError, Result};
 
@@ -49,13 +49,20 @@ impl<'a> Structure<'a> {
 }
 
 entity! {
-    /// The school this project describes. Exactly one per project.
+    /// One of the schools this project describes.
+    ///
+    /// A project held exactly one of these until V12. It can now hold several, each owning
+    /// its own campuses, academic years, year levels, cycles and bell schedules, while
+    /// facilities are shared between them through the campus associations of ADR 0013 and
+    /// ADR 0014. See [ADR 0019](../../../docs/adr/0019-multiple-schools-in-one-project.md).
     School,
-    /// Values for creating or replacing the school record.
+    /// Values for creating or replacing a school record.
     SchoolInput,
     {
-        /// Display name.
+        /// Display name, unique within the project.
         name: String,
+        /// Optional short code. Unique within the project when given.
+        code: Option<String>,
         /// IANA timezone, e.g. `Europe/London`.
         timezone: String,
         /// BCP-47 locale, e.g. `en-GB`.
@@ -199,25 +206,29 @@ entity! {
 // ---------------------------------------------------------------------------- school
 
 const SCHOOL_COLUMNS: &str =
-    "id, name, timezone, locale, working_days, created_at, updated_at, rev";
+    "id, name, code, timezone, locale, working_days, created_at, updated_at, rev";
 
 impl Structure<'_> {
-    /// Creates the school record.
+    /// Creates a school.
+    ///
+    /// A project may hold several since V12. Each is created empty and configured
+    /// independently; nothing is copied from a school that already exists.
     ///
     /// # Errors
     ///
-    /// [`DbError::DuplicateValue`] if a school already exists — a project describes exactly
-    /// one school ([ADR 0003](../../../docs/adr/0003-sqlite-document-model.md)).
+    /// [`DbError::DuplicateValue`] if the name, or a given code, is already used by another
+    /// school in this project.
     pub fn create_school(&mut self, input: &SchoolInput) -> Result<School> {
         let stamp = Stamp::new();
         self.db.write(|tx| {
             tx.execute(
                 "INSERT INTO school
-                     (id, name, timezone, locale, working_days, created_at, updated_at, rev)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                     (id, name, code, timezone, locale, working_days, created_at, updated_at, rev)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     text(stamp.id),
                     &input.name,
+                    &input.code,
                     &input.timezone,
                     &input.locale,
                     // Bits on the way in, the newtype everywhere else. The column's
@@ -236,6 +247,7 @@ impl Structure<'_> {
         Ok(School {
             id: stamp.id,
             name: input.name.clone(),
+            code: input.code.clone(),
             timezone: input.timezone.clone(),
             locale: input.locale.clone(),
             working_days: input.working_days,
@@ -245,24 +257,47 @@ impl Structure<'_> {
         })
     }
 
-    /// The school, or `None` for a project where it has not been set up yet.
+    /// Every school in the project, ordered by name then identifier.
+    ///
+    /// Empty for a project where nothing has been set up yet. There is no "the school"
+    /// accessor: a `LIMIT 1` read would quietly pick one of several and every row it then
+    /// produced would belong to an arbitrary institution, which is the single most
+    /// damaging thing this change could leave behind.
     ///
     /// # Errors
     ///
     /// Propagates any database failure.
-    pub fn school(&self) -> Result<Option<School>> {
+    pub fn schools(&self) -> Result<Vec<School>> {
         self.db.read(|conn| {
-            let mut stmt = conn.prepare(&format!("SELECT {SCHOOL_COLUMNS} FROM school LIMIT 1"))?;
-            let mut rows = stmt.query_map([], School::from_row)?;
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {SCHOOL_COLUMNS} FROM school ORDER BY name, id"
+            ))?;
+            let rows = stmt.query_map([], School::from_row)?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(DbError::from)
+        })
+    }
+
+    /// One school by identifier.
+    ///
+    /// # Errors
+    ///
+    /// Propagates any database failure.
+    pub fn school(&self, id: Uuid) -> Result<Option<School>> {
+        self.db.read(|conn| {
+            let mut stmt =
+                conn.prepare(&format!("SELECT {SCHOOL_COLUMNS} FROM school WHERE id = ?"))?;
+            let mut rows = stmt.query_map([text(id)], School::from_row)?;
             rows.next().transpose().map_err(DbError::from)
         })
     }
 
-    /// Replaces the school's details.
+    /// Replaces a school's details.
     ///
     /// # Errors
     ///
-    /// [`DbError::NotFound`] if no school exists yet.
+    /// [`DbError::NotFound`] if no school has that identifier;
+    /// [`DbError::DuplicateValue`] if the name or code is taken by another school.
     pub fn update_school(&mut self, id: Uuid, input: &SchoolInput) -> Result<School> {
         self.db.write(|tx| {
             update(
@@ -270,9 +305,10 @@ impl Structure<'_> {
                 "school",
                 "school",
                 id,
-                "name = ?, timezone = ?, locale = ?, working_days = ?",
+                "name = ?, code = ?, timezone = ?, locale = ?, working_days = ?",
                 &[
                     &input.name,
+                    &input.code,
                     &input.timezone,
                     &input.locale,
                     &input.working_days.bits(),
@@ -280,6 +316,117 @@ impl Structure<'_> {
             )
         })?;
         self.require_school(id)
+    }
+
+    /// What a school still owns, so the interface can say why it cannot be deleted.
+    ///
+    /// Read *before* offering the action, for the reason `student_group_member_count`
+    /// exists: a refusal that arrives after the user has pressed Delete explains nothing,
+    /// and the user has already decided by then.
+    ///
+    /// # Errors
+    ///
+    /// Propagates any database failure.
+    pub fn school_dependents(&self, school_id: Uuid) -> Result<SchoolDependents> {
+        self.db.read(|conn| {
+            let id = text(school_id);
+            let count = |sql: &str| -> Result<i64> {
+                conn.query_row(sql, [&id], |row| row.get(0))
+                    .map_err(DbError::from)
+            };
+            let campuses = count("SELECT COUNT(*) FROM campus WHERE school_id = ?")?;
+            let room_types = count("SELECT COUNT(*) FROM room_type WHERE school_id = ?")?;
+            let resources = count("SELECT COUNT(*) FROM resource WHERE school_id = ?")?;
+            let academic_years = count("SELECT COUNT(*) FROM academic_year WHERE school_id = ?")?;
+            let cycles = count("SELECT COUNT(*) FROM cycle WHERE school_id = ?")?;
+            let period_structures =
+                count("SELECT COUNT(*) FROM period_structure WHERE school_id = ?")?;
+            let timeslots = count("SELECT COUNT(*) FROM timeslot WHERE school_id = ?")?;
+            let calendar_days = count("SELECT COUNT(*) FROM calendar_day WHERE school_id = ?")?;
+            let year_levels = count("SELECT COUNT(*) FROM year_level WHERE school_id = ?")?;
+            let teachers = count("SELECT COUNT(*) FROM teacher WHERE school_id = ?")?;
+            let students = count("SELECT COUNT(*) FROM student WHERE school_id = ?")?;
+            let student_groups = count("SELECT COUNT(*) FROM student_group WHERE school_id = ?")?;
+            let availability_rules =
+                count("SELECT COUNT(*) FROM availability WHERE school_id = ?")?;
+
+            Ok(SchoolDependents {
+                total: campuses
+                    + room_types
+                    + resources
+                    + academic_years
+                    + cycles
+                    + period_structures
+                    + timeslots
+                    + calendar_days
+                    + year_levels
+                    + teachers
+                    + students
+                    + student_groups
+                    + availability_rules,
+                campuses,
+                room_types,
+                resources,
+                academic_years,
+                cycles,
+                period_structures,
+                timeslots,
+                calendar_days,
+                year_levels,
+                teachers,
+                students,
+                student_groups,
+                availability_rules,
+            })
+        })
+    }
+
+    /// Deletes a school that owns nothing.
+    ///
+    /// # What this deliberately does not do
+    ///
+    /// There is **no** "delete this school and everything in it". Every school-owned table
+    /// references `school (id)` with `ON DELETE RESTRICT`, and that is left exactly as
+    /// ADR 0010 set it: a school is years of configuration, and one mis-click must not be
+    /// able to take a campus, a timetable grid and a staff list with it. Emptying a school
+    /// is the user's work, step by step, with a confirmation at each one.
+    ///
+    /// The single exception is the school's own **logo**, which is removed in the same
+    /// transaction. A logo is part of the school record rather than something the school
+    /// owns -- it is a picture of it -- and leaving it to block the delete would mean a
+    /// school that had ever been given one could not be removed at all without the user
+    /// first guessing that a decoration was in the way.
+    ///
+    /// # Errors
+    ///
+    /// - [`DbError::NotFound`] if no school has that identifier.
+    /// - [`DbError::StillReferenced`] if it still owns anything. Call
+    ///   [`Structure::school_dependents`] first to say what.
+    pub fn delete_school(&mut self, id: Uuid) -> Result<()> {
+        if self.school(id)?.is_none() {
+            return Err(DbError::NotFound { entity: "school" });
+        }
+        let dependents = self.school_dependents(id)?;
+        if dependents.total > 0 {
+            // Reported before the attempt, so the message is about the school rather than
+            // about whichever foreign key SQLite happened to check first.
+            return Err(DbError::StillReferenced { entity: "school" });
+        }
+
+        self.db.write(|tx| {
+            let logo: Option<String> = tx
+                .query_row(
+                    "SELECT id FROM school_logo WHERE school_id = ?",
+                    [text(id)],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if let Some(logo_id) = logo {
+                let logo_id = parse_id_text("school_logo.id", &logo_id)?;
+                delete(tx, "school logo", "school_logo", logo_id)?;
+            }
+            delete(tx, "school", "school", id)
+        })
     }
 
     fn require_school(&self, id: Uuid) -> Result<School> {
@@ -292,6 +439,45 @@ impl Structure<'_> {
             .map_err(|_| DbError::NotFound { entity: "school" })
         })
     }
+}
+
+/// How much a school still owns, counted per kind.
+///
+/// Every field counts rows that reference the school and would block its deletion. `total`
+/// is their sum, so a caller can ask "can this be deleted?" without adding up thirteen
+/// numbers, and still show the user which ones are in the way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct SchoolDependents {
+    /// Sum of every other field. Zero means the school can be deleted.
+    pub total: i64,
+    /// Campuses owned by the school.
+    pub campuses: i64,
+    /// Room types owned by the school.
+    pub room_types: i64,
+    /// Resources owned by the school.
+    pub resources: i64,
+    /// Academic years owned by the school.
+    pub academic_years: i64,
+    /// Cycles owned by the school.
+    pub cycles: i64,
+    /// Bell schedules owned by the school.
+    pub period_structures: i64,
+    /// Materialised timeslots owned by the school.
+    pub timeslots: i64,
+    /// Calendar mappings owned by the school.
+    pub calendar_days: i64,
+    /// Year levels owned by the school.
+    pub year_levels: i64,
+    /// Teachers owned by the school.
+    pub teachers: i64,
+    /// Students owned by the school.
+    pub students: i64,
+    /// Student groups owned by the school.
+    pub student_groups: i64,
+    /// Availability rules recorded against the school.
+    pub availability_rules: i64,
 }
 
 // ------------------------------------------------------------------------ school logo
@@ -336,12 +522,12 @@ impl Structure<'_> {
     /// # Errors
     ///
     /// Propagates a read failure.
-    pub fn school_logo(&self) -> Result<Option<SchoolLogo>> {
+    pub fn school_logo(&self, school_id: Uuid) -> Result<Option<SchoolLogo>> {
         self.db.read(|conn| {
             let mut stmt = conn.prepare(&format!(
-                "SELECT {SCHOOL_LOGO_COLUMNS} FROM school_logo LIMIT 1"
+                "SELECT {SCHOOL_LOGO_COLUMNS} FROM school_logo WHERE school_id = ?"
             ))?;
-            let mut rows = stmt.query_map([], SchoolLogo::from_row)?;
+            let mut rows = stmt.query_map([text(school_id)], SchoolLogo::from_row)?;
             rows.next().transpose().map_err(DbError::from)
         })
     }
@@ -419,7 +605,7 @@ impl Structure<'_> {
             })?;
         }
 
-        self.school_logo()?.ok_or(DbError::NotFound {
+        self.school_logo(school_id)?.ok_or(DbError::NotFound {
             entity: "school logo",
         })
     }
@@ -433,11 +619,13 @@ impl Structure<'_> {
     /// # Errors
     ///
     /// Propagates a write failure.
-    pub fn clear_school_logo(&mut self) -> Result<()> {
+    pub fn clear_school_logo(&mut self, school_id: Uuid) -> Result<()> {
         let existing = self.db.read(|conn| {
-            conn.query_row("SELECT id FROM school_logo LIMIT 1", [], |row| {
-                row.get::<_, String>(0)
-            })
+            conn.query_row(
+                "SELECT id FROM school_logo WHERE school_id = ?",
+                [text(school_id)],
+                |row| row.get::<_, String>(0),
+            )
             .optional()
             .map_err(DbError::from)
         })?;
@@ -510,17 +698,21 @@ impl Structure<'_> {
         })
     }
 
-    /// Every campus, ordered by name then identifier so the order never varies.
+    /// Every campus of one school, ordered by name then identifier so the order never
+    /// varies.
+    ///
+    /// Scoped to a school since V12. Two schools may each have a "Main Campus", and a list
+    /// that returned both would put another institution's site in this one's pickers.
     ///
     /// # Errors
     ///
     /// Propagates any database failure.
-    pub fn campuses(&self) -> Result<Vec<Campus>> {
+    pub fn campuses(&self, school_id: Uuid) -> Result<Vec<Campus>> {
         self.db.read(|conn| {
             let mut stmt = conn.prepare(&format!(
-                "SELECT {CAMPUS_COLUMNS} FROM campus ORDER BY name, id"
+                "SELECT {CAMPUS_COLUMNS} FROM campus WHERE school_id = ? ORDER BY name, id"
             ))?;
-            let rows = stmt.query_map([], Campus::from_row)?;
+            let rows = stmt.query_map([text(school_id)], Campus::from_row)?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(DbError::from)
         })
@@ -533,6 +725,7 @@ impl Structure<'_> {
     /// [`DbError::NotFound`] or [`DbError::DuplicateValue`].
     pub fn update_campus(&mut self, id: Uuid, input: &CampusInput) -> Result<Campus> {
         self.db.write(|tx| {
+            require_same_school(tx, "campus", "campus", id, input.school_id)?;
             update(
                 tx,
                 "campus",
@@ -1097,12 +1290,12 @@ impl Structure<'_> {
     /// # Errors
     ///
     /// Propagates any database failure.
-    pub fn room_types(&self) -> Result<Vec<RoomType>> {
+    pub fn room_types(&self, school_id: Uuid) -> Result<Vec<RoomType>> {
         self.db.read(|conn| {
             let mut stmt = conn.prepare(&format!(
-                "SELECT {ROOM_TYPE_COLUMNS} FROM room_type ORDER BY name, id"
+                "SELECT {ROOM_TYPE_COLUMNS} FROM room_type WHERE school_id = ? ORDER BY name, id"
             ))?;
-            let rows = stmt.query_map([], RoomType::from_row)?;
+            let rows = stmt.query_map([text(school_id)], RoomType::from_row)?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(DbError::from)
         })
@@ -1115,6 +1308,7 @@ impl Structure<'_> {
     /// [`DbError::NotFound`] or [`DbError::DuplicateValue`].
     pub fn update_room_type(&mut self, id: Uuid, input: &RoomTypeInput) -> Result<RoomType> {
         self.db.write(|tx| {
+            require_same_school(tx, "room type", "room_type", id, input.school_id)?;
             update(
                 tx,
                 "room type",
@@ -1721,12 +1915,12 @@ impl Structure<'_> {
     /// # Errors
     ///
     /// Propagates any database failure.
-    pub fn resources(&self) -> Result<Vec<Resource>> {
+    pub fn resources(&self, school_id: Uuid) -> Result<Vec<Resource>> {
         self.db.read(|conn| {
             let mut stmt = conn.prepare(&format!(
-                "SELECT {RESOURCE_COLUMNS} FROM resource ORDER BY name, id"
+                "SELECT {RESOURCE_COLUMNS} FROM resource WHERE school_id = ? ORDER BY name, id"
             ))?;
-            let rows = stmt.query_map([], Resource::from_row)?;
+            let rows = stmt.query_map([text(school_id)], Resource::from_row)?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(DbError::from)
         })
@@ -1739,6 +1933,7 @@ impl Structure<'_> {
     /// [`DbError::NotFound`] or [`DbError::DuplicateValue`].
     pub fn update_resource(&mut self, id: Uuid, input: &ResourceInput) -> Result<Resource> {
         self.db.write(|tx| {
+            require_same_school(tx, "resource", "resource", id, input.school_id)?;
             let campus = opt_text(input.campus_id);
             update(
                 tx,
@@ -1829,12 +2024,13 @@ impl Structure<'_> {
     /// # Errors
     ///
     /// Propagates any database failure.
-    pub fn academic_years(&self) -> Result<Vec<AcademicYear>> {
+    pub fn academic_years(&self, school_id: Uuid) -> Result<Vec<AcademicYear>> {
         self.db.read(|conn| {
             let mut stmt = conn.prepare(&format!(
-                "SELECT {ACADEMIC_YEAR_COLUMNS} FROM academic_year ORDER BY starts_on, name, id"
+                "SELECT {ACADEMIC_YEAR_COLUMNS} FROM academic_year WHERE school_id = ? \
+                 ORDER BY starts_on, name, id"
             ))?;
-            let rows = stmt.query_map([], AcademicYear::from_row)?;
+            let rows = stmt.query_map([text(school_id)], AcademicYear::from_row)?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(DbError::from)
         })
@@ -1851,6 +2047,7 @@ impl Structure<'_> {
         input: &AcademicYearInput,
     ) -> Result<AcademicYear> {
         self.db.write(|tx| {
+            require_same_school(tx, "academic year", "academic_year", id, input.school_id)?;
             update(
                 tx,
                 "academic year",

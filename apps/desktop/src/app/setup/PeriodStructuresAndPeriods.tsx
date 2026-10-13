@@ -58,10 +58,10 @@ export function PeriodStructuresAndPeriods(props: { school: School }) {
   const { school } = props;
   const [structureId, setStructureId] = useState<string | null>(null);
 
-  const loadCampuses = useCallback(() => listCampuses(), []);
+  const loadCampuses = useCallback(() => listCampuses(school.id), [school.id]);
   const campuses = useList<Campus>(loadCampuses);
 
-  const loadStructures = useCallback(() => listPeriodStructures(), []);
+  const loadStructures = useCallback(() => listPeriodStructures(school.id), [school.id]);
   const structures = useList<PeriodStructure>(loadStructures);
 
   const loadPeriods = useCallback(
@@ -134,7 +134,7 @@ export function PeriodStructuresAndPeriods(props: { school: School }) {
         name: text(draft, "name"),
         isDefault: flag(draft, "isDefault"),
       }),
-      list: listPeriodStructures,
+      list: () => listPeriodStructures(school.id),
       create: createPeriodStructure,
       update: updatePeriodStructure,
       remove: deletePeriodStructure,
@@ -249,7 +249,11 @@ export function PeriodStructuresAndPeriods(props: { school: School }) {
         </p>
       </header>
 
-      <CrudPanel spec={structureSpec} onChanged={structures.reload} />
+      <CrudPanel
+        spec={structureSpec}
+        reloadKey={school.id}
+        onChanged={structures.reload}
+      />
 
       <hr />
 
@@ -273,7 +277,7 @@ export function PeriodStructuresAndPeriods(props: { school: School }) {
         <OrderNote periods={periods.items} />
         <CrudPanel
           spec={periodSpec}
-          reloadKey={structureId ?? ""}
+          reloadKey={`${school.id}:${structureId ?? ""}`}
           onChanged={periods.reload}
         />
       </ParentPicker>

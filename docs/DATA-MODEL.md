@@ -27,6 +27,16 @@ list — never school data.
 A project file still contains a `school` row (and multiple `campus` rows), so multi-campus
 works inside one project. Multiple *schools* means multiple project files.
 
+**Amended in V12.** A project may now hold **several `school` rows**, each owning its own
+campuses, academic years, year levels, cycles and bell schedules, while buildings and rooms
+are shared between them through the campus associations of ADR 0013/0014.
+[adr/0019](adr/0019-multiple-schools-in-one-project.md) supersedes ADR 0003's "multiple
+schools means multiple files" and records what is school-owned, what is shared, and what
+deliberately stayed single-school: a `teacher`, a `student`, a `resource` and an
+`availability` rule each still belong to exactly one school. One file is still one project;
+it is no longer one school. The rebuild that made room for it is
+[adr/0020](adr/0020-in-place-table-rebuild.md).
+
 ### Connection pragmas
 
 ```sql
@@ -446,6 +456,12 @@ later phase.
 ---
 
 ## 4. People
+
+**As implemented from V12**, every list of a school-owned entity below takes an explicit
+`school_id`, and `update_*` refuses an identifier belonging to another school. A year level
+is never shared: `UNIQUE (school_id, name)` and `UNIQUE (school_id, ordinal)` were already
+written that way and need no change, so two schools may each hold their own "Grade 1" at
+their own ordinal 1 as two records with two identifiers.
 
 ```sql
 department (id, school_id, name, code)

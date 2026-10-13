@@ -47,7 +47,7 @@ export function AcademicYearsAndTerms(props: { school: School }) {
   const { school } = props;
   const [yearId, setYearId] = useState<string | null>(null);
 
-  const loadYears = useCallback(() => listAcademicYears(), []);
+  const loadYears = useCallback(() => listAcademicYears(school.id), [school.id]);
   const years = useList<AcademicYear>(loadYears);
 
   const yearSpec = useMemo<CrudSpec<AcademicYear, Parameters<typeof createAcademicYear>[0]>>(
@@ -84,7 +84,7 @@ export function AcademicYearsAndTerms(props: { school: School }) {
         startsOn: text(draft, "startsOn"),
         endsOn: text(draft, "endsOn"),
       }),
-      list: listAcademicYears,
+      list: () => listAcademicYears(school.id),
       create: createAcademicYear,
       update: updateAcademicYear,
       remove: deleteAcademicYear,
@@ -168,7 +168,7 @@ export function AcademicYearsAndTerms(props: { school: School }) {
         </p>
       </header>
 
-      <CrudPanel spec={yearSpec} onChanged={years.reload} />
+      <CrudPanel spec={yearSpec} reloadKey={school.id} onChanged={years.reload} />
 
       <hr />
 
@@ -189,7 +189,7 @@ export function AcademicYearsAndTerms(props: { school: School }) {
           hint: "Add a year above, then its terms can be recorded here.",
         }}
       >
-        <CrudPanel spec={termSpec} reloadKey={yearId ?? ""} />
+        <CrudPanel spec={termSpec} reloadKey={`${school.id}:${yearId ?? ""}`} />
       </ParentPicker>
     </div>
   );

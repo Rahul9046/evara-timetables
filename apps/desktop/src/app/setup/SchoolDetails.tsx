@@ -8,8 +8,8 @@
  */
 import { useCallback, useMemo, useState } from "react";
 
-import type { School } from "@evara/domain";
-import { createSchool, describeSetupError, getSchool, updateSchool } from "../../ipc/setup";
+import type { School, SchoolInput } from "@evara/domain";
+import { createSchool, describeSetupError, updateSchool } from "../../ipc/setup";
 import { withExistingValue } from "../ui/Combobox";
 import { EntityForm, type FieldSpec } from "../ui/Field";
 import { Banner, EmptyState, Facts, Loading } from "../ui/Shell";
@@ -31,7 +31,6 @@ import {
   timezoneOptions,
 } from "./timezones";
 import { SchoolLogoPanel } from "./SchoolLogoPanel";
-import { useValue } from "./useList";
 import {
   MONDAY_TO_FRIDAY,
   describeWeek,
@@ -124,9 +123,14 @@ function draftOf(school: School | null): Draft {
   };
 }
 
-export function SchoolDetails(props: { onChanged: () => void }) {
-  const load = useCallback(() => getSchool(), []);
-  const { value: school, error: loadError, reload } = useValue<School | null>(load);
+export function SchoolDetails(props: { school: School | null; onChanged: () => void }) {
+  // The active school is chosen in the setup shell, which owns the project's list of them
+  // and the selector over it. This screen used to find "the" school itself with a
+  // `LIMIT 1` read; with several in a project that would have quietly edited an arbitrary
+  // one. `null` means the project has no schools yet, which is the first-run state.
+  const { school } = props;
+  const loadError: string | null = null;
+  const reload = props.onChanged;
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Draft>({});
@@ -150,8 +154,12 @@ export function SchoolDetails(props: { onChanged: () => void }) {
     setProblems(found);
     if (!isValid(found)) return;
 
-    const input = {
+    const input: SchoolInput = {
       name: text(draft, "name"),
+      // Optional, and not collected by this form yet: a code earns its place when a
+      // project holds enough schools for names to be inconvenient, which is Stage 0C's
+      // problem. Carried through unchanged so editing a school never clears one.
+      code: school?.code ?? null,
       timezone: text(draft, "timezone"),
       locale: text(draft, "locale"),
       workingDays: toWeekdayNumbers(list(draft, "workingDays")),
