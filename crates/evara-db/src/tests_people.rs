@@ -975,6 +975,117 @@ fn people_and_memberships_survive_closing_and_reopening_the_project() {
     assert_eq!(group_after.kind, GroupKind::TeachingSet);
 }
 
+/// Writes a project exactly as a V9 build would have left it: a school and a campus, and
+/// no People tables at all.
+///
+/// Raw SQL past the repositories, because that is the only way to produce rows a build
+/// without V10 could have written. Same technique and justification as
+/// `tests_cycle_kinds::write_a_pre_v9_project`.
+fn write_a_pre_v10_project(
+    path: &std::path::Path,
+    site: Uuid,
+    school: Uuid,
+    campus: Uuid,
+    stamp: &str,
+) {
+    let mut conn = crate::connection::open_configured(path, site).expect("open");
+
+    let version = crate::migrations::run_up_to(&mut conn, 9).expect("migrate to V9");
+    assert_eq!(version, 9, "the fixture must stop at the previous version");
+
+    conn.execute(
+        "INSERT INTO school (id, name, timezone, locale, working_days,
+                             created_at, updated_at, rev)
+         VALUES (?, 'Northgate Secondary', 'Europe/London', 'en-GB', 31, ?, ?, 3)",
+        (school.to_string(), stamp, stamp),
+    )
+    .expect("write a school the old build could have written");
+    conn.execute(
+        "INSERT INTO campus (id, school_id, name, code, address, created_at, updated_at, rev)
+         VALUES (?, ?, 'Main', 'MAIN', NULL, ?, ?, 2)",
+        (campus.to_string(), school.to_string(), stamp, stamp),
+    )
+    .expect("write a campus the old build could have written");
+}
+
+/// A project written before V10 gains the People tables and loses nothing it had.
+///
+/// The one migration path every existing project will actually take, and the one that
+/// cannot be corrected afterwards: a released migration is immutable, so a V10 that
+/// rewrote a timestamp, consumed a revision or failed outright would be unfixable in
+/// place. Every earlier phase has this test; the People group arrived without one, and
+/// `a_project_made_before_the_people_group_existed_still_opens` below does not stand in
+/// for it — that one creates the file at the *current* version and reopens it, which
+/// proves idempotence rather than migration.
+#[test]
+fn a_project_written_before_v10_migrates_without_touching_what_it_had() {
+    let dir = TempDir::new().expect("temp dir");
+    let path = dir.path().join(format!("school.{PROJECT_EXTENSION}"));
+    let site = Uuid::parse_str("018f3a2c-7c4e-7a19-9f2b-000000000010").expect("valid uuid");
+
+    let school = Uuid::now_v7();
+    let campus = Uuid::now_v7();
+    let stamp = "2026-10-01T09:00:00.000Z";
+
+    write_a_pre_v10_project(&path, site, school, campus, stamp);
+
+    // Opening it with this build migrates it, in one transaction, all the way.
+    let mut db = Database::open_existing(&path, APP_VERSION, site).expect("open project");
+    assert_eq!(db.schema_version(), crate::supported_schema_version());
+
+    let kept = db
+        .structure()
+        .school()
+        .expect("read school")
+        .expect("the school survived");
+    assert_eq!(kept.id, school, "its identifier is the one it had");
+    assert_eq!(kept.name, "Northgate Secondary");
+    assert_eq!(kept.rev, 3, "the migration consumed no revision");
+    assert_eq!(kept.created_at, stamp);
+    assert_eq!(kept.updated_at, stamp, "and rewrote no timestamp");
+
+    let campuses = db.structure().campuses().expect("read campuses");
+    assert_eq!(campuses.len(), 1);
+    assert_eq!(campuses[0].id, campus);
+    assert_eq!(campuses[0].code, "MAIN");
+    assert_eq!(campuses[0].rev, 2);
+
+    // The new tables arrive empty rather than missing, and are writable at once.
+    assert_eq!(db.people().teachers().expect("teachers"), Vec::new());
+    assert_eq!(db.people().students().expect("students"), Vec::new());
+    assert_eq!(
+        db.people().student_groups().expect("student groups"),
+        Vec::new()
+    );
+
+    let hired = db
+        .people()
+        .create_teacher(&teacher(school, "Amara", "Okafor"))
+        .expect("the migrated project must accept a teacher");
+
+    // And the change-log triggers were installed by the migration, not only by a create:
+    // a table added to an existing file is the case where `change_log::install` is easiest
+    // to forget, and the hole it leaves is silent.
+    let tables: Vec<String> = db
+        .changes_since(0, CHANGE_FEED_LIMIT)
+        .expect("changes")
+        .into_iter()
+        .map(|change| change.entity_table)
+        .collect();
+    assert!(
+        tables.iter().any(|name| name == "teacher"),
+        "the teacher write must reach the change feed, got {tables:?}"
+    );
+    assert_eq!(
+        db.people()
+            .teacher(hired.id)
+            .expect("read back")
+            .expect("the teacher is there")
+            .rev,
+        1
+    );
+}
+
 #[test]
 fn a_project_made_before_the_people_group_existed_still_opens() {
     // Existing-project compatibility. V10 only adds tables, so a file created by an
