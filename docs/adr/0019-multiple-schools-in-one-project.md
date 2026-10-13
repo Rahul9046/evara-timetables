@@ -80,11 +80,22 @@ Every repository list of a school-owned entity takes an explicit `school_id`. Th
 and silently scope everything downstream to it, which is the most damaging thing this
 change could have left behind.
 
-`update_*` additionally **refuses an identifier belonging to another school**
-(`DbError::WrongSchool`), using the `school_id` the caller's input already carries. An
-identifier stopped being sufficient authority the moment a project held more than one
-school: a screen scoped to one of them must not be able to edit another's rows because it
-was handed an identifier from it.
+**Every write that names a record checks it belongs to the acting school**, inside the same
+transaction as the write. An identifier stopped being sufficient authority the moment a
+project held more than one school: a screen scoped to one of them must not be able to touch
+another's rows because it was handed an identifier from it.
+
+- `update_*` uses the `school_id` the caller's input already carries, so no signature
+  changed to get the guard.
+- `delete_*` takes the expected school as a parameter, because a delete has no input to
+  carry one. The refusal is `DbError::WrongSchool`, and it is raised **before** anything is
+  cleared: a check that ran after removing a teacher's availability rules would still read
+  as a refusal while having already done the damage.
+- A child whose school is reachable only through a parent is resolved through that chain —
+  a term through its academic year, a period through its bell schedule, a cycle day through
+  its cycle, a group membership through its group. Deliberately **not** solved by adding
+  `school_id` columns to the children: a second place to record the same ownership is a
+  second place for it to go wrong, and the chain is already enforced by foreign keys.
 
 ### Cross-school references are refused by the schema
 
@@ -99,6 +110,21 @@ The repositories validate too, because a trigger cannot say *which field* is wro
 `building_campus` and `room_campus` are **deliberately left unconstrained by school**. A
 facility shared between campuses of different schools is the entire point of ADR 0013 and
 ADR 0014, and `room-clash` remains a per-`room_id` rule across the whole project.
+
+That makes a shared facility the one place where ownership is not sufficient authority to
+*destroy* something, so three operations are kept distinct:
+
+| Operation | Who may | Effect |
+| --- | --- | --- |
+| Withdraw one school's access | that school, or the home school | one association row |
+| Remove the home campus | nobody | refused; a facility must never reach zero campuses |
+| Destroy the facility | the home school, **and only while nobody else shares it** | the row and all its associations |
+
+A hall created on Northgate's campus and shared with Southmoor's is a hall Southmoor is
+timetabling into; Northgate deleting it would take Southmoor's room away without Southmoor
+being asked. The refusal is `DbError::StillReferenced`, the error a blocked delete already
+produces, so the way forward is to withdraw the other school's access first — an operation
+that exists and that the other school can see.
 
 ### Deleting a school
 

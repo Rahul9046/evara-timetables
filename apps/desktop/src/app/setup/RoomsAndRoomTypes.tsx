@@ -151,7 +151,7 @@ export function RoomsAndRoomTypes(props: { school: School }) {
       list: () => listRoomTypes(school.id),
       create: createRoomType,
       update: updateRoomType,
-      remove: deleteRoomType,
+      remove: (id) => deleteRoomType(school.id, id),
       emptyHint:
         "Room types are optional. They become useful when a lesson needs a particular kind of space — a lab, a gym, a music room — rather than a specific room.",
       deleteNote: () => (
@@ -328,7 +328,7 @@ export function RoomsAndRoomTypes(props: { school: School }) {
         const after = new Set(input.sharedCampusIds);
 
         for (const campus of before) {
-          if (!after.has(campus)) await unshareRoom(id, campus);
+          if (!after.has(campus)) await unshareRoom(school.id, id, campus);
         }
 
         const room = await updateRoom(id, withoutShares(input));
@@ -339,7 +339,7 @@ export function RoomsAndRoomTypes(props: { school: School }) {
 
         return { ...room, campusIds: [room.campusId, ...after] };
       },
-      remove: deleteRoom,
+      remove: (id) => deleteRoom(school.id, id),
       // Withdrawing a share is reversible but it is not nothing: a campus loses a room it
       // may have been timetabling into. Asking first is the same courtesy a delete gets.
       confirmSubmit: (draft, row) => {

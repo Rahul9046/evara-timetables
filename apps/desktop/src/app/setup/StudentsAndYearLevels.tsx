@@ -137,7 +137,7 @@ export function StudentsAndYearLevels(props: { school: School }) {
     list: () => listYearLevels(school.id),
     create: (input) => createYearLevel(input),
     update: (id, input) => updateYearLevel(id, input),
-    remove: (id) => deleteYearLevel(id),
+    remove: (id) => deleteYearLevel(school.id, id),
     emptyHint: "No year levels yet. Add the years this school teaches.",
     deleteNote: () =>
       "Students and groups in this year level are kept. They simply stop naming a year.",
@@ -227,7 +227,7 @@ export function StudentsAndYearLevels(props: { school: School }) {
       }),
     create: (input) => createStudent(input),
     update: (id, input) => updateStudent(id, input),
-    remove: (id) => deleteStudent(id),
+    remove: (id) => deleteStudent(school.id, id),
     emptyHint:
       "No students yet — and a timetable does not need any. Add them when you want per-student timetables.",
     deleteNote: (row) => {

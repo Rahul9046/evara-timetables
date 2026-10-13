@@ -49,7 +49,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::row::{FromColumn, entity, opt_text, text};
-use super::{Stamp, delete, require_same_school, translate, update};
+use super::{Stamp, delete, require_same_school, require_school_owner, translate, update};
 use crate::Database;
 use crate::error::{DbError, Result};
 
@@ -589,8 +589,11 @@ impl TimeModel<'_> {
     ///
     /// [`DbError::StillReferenced`] if it still has cycle days or timeslots. Ownership is
     /// RESTRICT: the user removes those deliberately.
-    pub fn delete_cycle(&mut self, id: Uuid) -> Result<()> {
-        self.db.write(|tx| delete(tx, "cycle", "cycle", id))
+    pub fn delete_cycle(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+        self.db.write(|tx| {
+            require_same_school(tx, "cycle", "cycle", id, school_id)?;
+            delete(tx, "cycle", "cycle", id)
+        })
     }
 
     /// Which of a cycle's declared positions actually have a day.
@@ -903,6 +906,10 @@ fn default_ids(tx: &Transaction<'_>, sql: &str, params: &[&dyn ToSql]) -> Result
 
 // =========================================================================== cycle day
 
+/// A cycle day belongs to a school only by way of its cycle.
+const CYCLE_DAY_OWNER: &str = "SELECT cycle.school_id FROM cycle_day \
+     JOIN cycle ON cycle.id = cycle_day.cycle_id WHERE cycle_day.id = ?";
+
 const CYCLE_DAY_COLUMNS: &str =
     "id, cycle_id, ordinal, label, weekday_hint, created_at, updated_at, rev";
 
@@ -1005,8 +1012,11 @@ impl TimeModel<'_> {
     /// [`DbError::StillReferenced`] if a timeslot or a calendar day still points at it.
     /// That is deliberate: see [`TimeModel::plan_materialisation`] for how to find out
     /// what is in the way before trying.
-    pub fn delete_cycle_day(&mut self, id: Uuid) -> Result<()> {
-        self.db.write(|tx| delete(tx, "cycle day", "cycle_day", id))
+    pub fn delete_cycle_day(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+        self.db.write(|tx| {
+            require_school_owner(tx, "cycle day", CYCLE_DAY_OWNER, id, school_id)?;
+            delete(tx, "cycle day", "cycle_day", id)
+        })
     }
 }
 
@@ -1171,9 +1181,11 @@ impl TimeModel<'_> {
     /// # Errors
     ///
     /// [`DbError::StillReferenced`] if it still has periods.
-    pub fn delete_period_structure(&mut self, id: Uuid) -> Result<()> {
-        self.db
-            .write(|tx| delete(tx, "period structure", "period_structure", id))
+    pub fn delete_period_structure(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+        self.db.write(|tx| {
+            require_same_school(tx, "bell schedule", "period_structure", id, school_id)?;
+            delete(tx, "period structure", "period_structure", id)
+        })
     }
 }
 
@@ -1205,6 +1217,11 @@ fn clear_default_period_structure(
 }
 
 // ============================================================================== period
+
+/// A period belongs to a school only by way of its bell schedule.
+const PERIOD_OWNER: &str = "SELECT period_structure.school_id FROM period \
+     JOIN period_structure ON period_structure.id = period.period_structure_id \
+     WHERE period.id = ?";
 
 const PERIOD_COLUMNS: &str = "id, period_structure_id, ordinal, label, starts_at, ends_at, \
                               kind, counts_as_load, created_at, updated_at, rev";
@@ -1318,8 +1335,11 @@ impl TimeModel<'_> {
     /// [`DbError::StillReferenced`] if a timeslot was materialised from it. Use
     /// [`TimeModel::plan_materialisation`] with the period excluded to see exactly which
     /// slots stand in the way before removing anything.
-    pub fn delete_period(&mut self, id: Uuid) -> Result<()> {
-        self.db.write(|tx| delete(tx, "period", "period", id))
+    pub fn delete_period(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+        self.db.write(|tx| {
+            require_school_owner(tx, "period", PERIOD_OWNER, id, school_id)?;
+            delete(tx, "period", "period", id)
+        })
     }
 }
 
@@ -1557,9 +1577,11 @@ impl TimeModel<'_> {
     /// # Errors
     ///
     /// Propagates any database failure.
-    pub fn delete_calendar_day(&mut self, id: Uuid) -> Result<()> {
-        self.db
-            .write(|tx| delete(tx, "calendar day", "calendar_day", id))
+    pub fn delete_calendar_day(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+        self.db.write(|tx| {
+            require_same_school(tx, "calendar day", "calendar_day", id, school_id)?;
+            delete(tx, "calendar day", "calendar_day", id)
+        })
     }
 }
 
@@ -2041,10 +2063,15 @@ impl TimeModel<'_> {
     ///   disappears.
     pub fn release_orphans(
         &mut self,
+        school_id: Uuid,
         request: &MaterialisationRequest,
         reviewed: &PlanFingerprint,
     ) -> Result<Vec<Uuid>> {
         self.db.write(|tx| {
+            // The orphans are whatever the plan over this cycle names, so the cycle is
+            // the thing that has to belong to the acting school. Checked before the
+            // plan is computed, so another school's grid is never even read.
+            require_same_school(tx, "cycle", "cycle", request.cycle_id, school_id)?;
             let plan = plan(tx, request)?;
             require_unchanged(&plan, reviewed)?;
 
@@ -2108,8 +2135,14 @@ impl TimeModel<'_> {
     ///   one of them. That refusal is why timetable entries will never need a cascade.
     ///
     /// Either way the whole call is rolled back: no subset is deleted.
-    pub fn delete_timeslots(&mut self, ids: &[Uuid]) -> Result<()> {
+    pub fn delete_timeslots(&mut self, school_id: Uuid, ids: &[Uuid]) -> Result<()> {
         self.db.write(|tx| {
+            // Every identifier is checked before any row goes. The call is one
+            // transaction, so a list naming one slot from another school removes
+            // nothing at all rather than part of itself.
+            for id in ids {
+                require_same_school(tx, "timeslot", "timeslot", *id, school_id)?;
+            }
             for id in ids {
                 delete(tx, "timeslot", "timeslot", *id)?;
             }

@@ -104,7 +104,7 @@ export function CampusesAndBuildings(props: { school: School }) {
       list: () => listCampuses(school.id),
       create: createCampus,
       update: updateCampus,
-      remove: deleteCampus,
+      remove: (id) => deleteCampus(school.id, id),
       emptyHint:
         "A school needs at least one campus before rooms or bell schedules can be recorded against it. A single-site school has exactly one.",
       deleteNote: () => (
@@ -216,12 +216,12 @@ export function CampusesAndBuildings(props: { school: School }) {
           if (!before.has(campus)) await shareBuilding(id, campus);
         }
         for (const campus of before) {
-          if (!after.has(campus)) await unshareBuilding(id, campus);
+          if (!after.has(campus)) await unshareBuilding(school.id, id, campus);
         }
 
         return { ...building, campusIds: [building.campusId, ...after] };
       },
-      remove: deleteBuilding,
+      remove: (id) => deleteBuilding(school.id, id),
       // Withdrawing a share is reversible but it is not nothing: a campus loses a building
       // its rooms may be organised around. Asking first is the same courtesy a delete gets.
       confirmSubmit: (draft, row) => {

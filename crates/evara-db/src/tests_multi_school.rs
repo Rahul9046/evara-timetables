@@ -30,7 +30,7 @@ use crate::repo::people::{
     GroupKind, StudentGroupInput, StudentInput, TeacherInput, YearLevelInput,
 };
 use crate::repo::structure::{CampusInput, SchoolInput};
-use crate::repo::time_model::{CycleInput, CycleKind};
+use crate::repo::time_model::{CycleInput, CycleKind, MaterialisationRequest};
 use crate::workspace::Workspace;
 use crate::{Database, DbError, PROJECT_EXTENSION};
 
@@ -1194,11 +1194,9 @@ fn an_empty_school_can_be_deleted() {
     let (north, south) = (project.north, project.south);
 
     // The one thing a delete is allowed to remove: the school's own picture of itself.
-    project
-        .db()
-        .structure()
-        .set_school_logo(south, &[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
-        .ok();
+    // Written as a row rather than through `set_school_logo`, so the assertion below
+    // cannot pass merely because no logo was ever created.
+    give_a_logo(&mut project, south);
 
     project
         .db()
@@ -1335,4 +1333,703 @@ fn school_changelog_triggers(db: &Database) -> i64 {
         .map_err(DbError::from)
     })
     .expect("count triggers")
+}
+
+// ================================================== deletion cannot cross a school
+
+/// One school, filled in enough to delete things out of.
+///
+/// Every kind of destructive path is represented: a row with its own `school_id`, a child
+/// whose school is only reachable through a parent, a membership, an availability rule and
+/// a logo.
+struct Filled {
+    campus: Uuid,
+    room_type: Uuid,
+    year_level: Uuid,
+    teacher: Uuid,
+    student: Uuid,
+    group: Uuid,
+    academic_year: Uuid,
+    term: Uuid,
+    cycle: Uuid,
+    cycle_day: Uuid,
+    bells: Uuid,
+    period: Uuid,
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "one school filled with every kind of row a deletion check has to cover"
+)]
+fn fill(project: &mut TwoSchools, school: Uuid, tag: &str) -> Filled {
+    let campus = project
+        .db()
+        .structure()
+        .create_campus(&CampusInput {
+            school_id: school,
+            name: format!("{tag} Campus"),
+            code: format!("{tag}C"),
+            address: None,
+        })
+        .expect("campus")
+        .id;
+    let room_type = project
+        .db()
+        .structure()
+        .create_room_type(&crate::repo::structure::RoomTypeInput {
+            school_id: school,
+            name: format!("{tag} Lab"),
+            code: format!("{tag}LAB"),
+        })
+        .expect("room type")
+        .id;
+    let year_level = project
+        .db()
+        .people()
+        .create_year_level(&year_level(school, "Grade 8", 8))
+        .expect("year level")
+        .id;
+    let teacher_id = project
+        .db()
+        .people()
+        .create_teacher(&teacher(school, "Ada", "Okafor"))
+        .expect("teacher")
+        .id;
+    let student = project
+        .db()
+        .people()
+        .create_student(&StudentInput {
+            school_id: school,
+            code: None,
+            given_name: "Cass".to_owned(),
+            family_name: "Pupilsen".to_owned(),
+            email: None,
+            year_level_id: None,
+            campus_id: None,
+            is_active: true,
+        })
+        .expect("student")
+        .id;
+    let group = project
+        .db()
+        .people()
+        .create_student_group(&StudentGroupInput {
+            school_id: school,
+            name: format!("{tag} Cohort"),
+            code: None,
+            kind: GroupKind::Cohort,
+            year_level_id: None,
+            parent_group_id: None,
+            size: None,
+            campus_id: None,
+        })
+        .expect("group")
+        .id;
+    project
+        .db()
+        .people()
+        .add_student_group_member(&crate::repo::people::StudentGroupMemberInput {
+            student_group_id: group,
+            student_id: student,
+        })
+        .expect("membership");
+    let academic_year = project
+        .db()
+        .structure()
+        .create_academic_year(&crate::repo::structure::AcademicYearInput {
+            school_id: school,
+            name: format!("{tag} 2027"),
+            starts_on: "2027-01-28".to_owned(),
+            ends_on: "2027-12-10".to_owned(),
+        })
+        .expect("academic year")
+        .id;
+    let term = project
+        .db()
+        .structure()
+        .create_term(&crate::repo::structure::TermInput {
+            academic_year_id: academic_year,
+            name: "Term 1".to_owned(),
+            ordinal: 1,
+            starts_on: "2027-01-28".to_owned(),
+            ends_on: "2027-04-02".to_owned(),
+        })
+        .expect("term")
+        .id;
+    let cycle = project
+        .db()
+        .time_model()
+        .create_cycle(&CycleInput {
+            school_id: school,
+            name: format!("{tag} Cycle"),
+            day_count: 4,
+            week_count: 1,
+            is_default: true,
+            kind: CycleKind::Custom,
+        })
+        .expect("cycle")
+        .id;
+    let cycle_day = project
+        .db()
+        .time_model()
+        .cycle_days(cycle)
+        .expect("days")
+        .into_iter()
+        .next()
+        .expect("a cycle has days")
+        .id;
+    let bells = project
+        .db()
+        .time_model()
+        .create_period_structure(&crate::repo::time_model::PeriodStructureInput {
+            school_id: school,
+            campus_id: None,
+            name: format!("{tag} Day"),
+            is_default: true,
+        })
+        .expect("bell schedule")
+        .id;
+    let period = project
+        .db()
+        .time_model()
+        .create_period(&crate::repo::time_model::PeriodInput {
+            period_structure_id: bells,
+            ordinal: 1,
+            label: "Period 1".to_owned(),
+            starts_at: "08:45".to_owned(),
+            ends_at: "09:30".to_owned(),
+            kind: crate::repo::time_model::PeriodKind::Teaching,
+            counts_as_load: true,
+        })
+        .expect("period")
+        .id;
+
+    Filled {
+        campus,
+        room_type,
+        year_level,
+        teacher: teacher_id,
+        student,
+        group,
+        academic_year,
+        term,
+        cycle,
+        cycle_day,
+        bells,
+        period,
+    }
+}
+
+/// Every destructive path, asked to delete the other school's row.
+///
+/// This is the whole of the follow-up to Stage 0A in one test. An identifier was never
+/// authority to delete anything once a project held two schools: a screen scoped to
+/// Northgate, handed a Southmoor identifier, has to be refused — and refused *before*
+/// anything goes, which the row counts at the end are what actually prove.
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one table of every destructive path in one place; a missed row is the risk"
+)]
+fn no_deletion_reaches_into_another_school() {
+    let mut project = TwoSchools::new();
+    let (north, south) = (project.north, project.south);
+    let southern = fill(&mut project, south, "South");
+
+    let before = row_counts(&mut project);
+
+    // Each of these is Northgate asking to delete one of Southmoor's rows.
+    let refusals: Vec<(&str, DbError)> = vec![
+        (
+            "campus",
+            project
+                .db()
+                .structure()
+                .delete_campus(north, southern.campus)
+                .expect_err("campus"),
+        ),
+        (
+            "room type",
+            project
+                .db()
+                .structure()
+                .delete_room_type(north, southern.room_type)
+                .expect_err("room type"),
+        ),
+        (
+            "academic year",
+            project
+                .db()
+                .structure()
+                .delete_academic_year(north, southern.academic_year)
+                .expect_err("academic year"),
+        ),
+        (
+            // Derived: a term's school is reachable only through its academic year.
+            "term",
+            project
+                .db()
+                .structure()
+                .delete_term(north, southern.term)
+                .expect_err("term"),
+        ),
+        (
+            "cycle",
+            project
+                .db()
+                .time_model()
+                .delete_cycle(north, southern.cycle)
+                .expect_err("cycle"),
+        ),
+        (
+            // Derived: through its cycle.
+            "cycle day",
+            project
+                .db()
+                .time_model()
+                .delete_cycle_day(north, southern.cycle_day)
+                .expect_err("cycle day"),
+        ),
+        (
+            "bell schedule",
+            project
+                .db()
+                .time_model()
+                .delete_period_structure(north, southern.bells)
+                .expect_err("bell schedule"),
+        ),
+        (
+            // Derived: through its bell schedule.
+            "period",
+            project
+                .db()
+                .time_model()
+                .delete_period(north, southern.period)
+                .expect_err("period"),
+        ),
+        (
+            "year level",
+            project
+                .db()
+                .people()
+                .delete_year_level(north, southern.year_level)
+                .expect_err("year level"),
+        ),
+        (
+            "teacher",
+            project
+                .db()
+                .people()
+                .delete_teacher(north, southern.teacher)
+                .expect_err("teacher"),
+        ),
+        (
+            "student",
+            project
+                .db()
+                .people()
+                .delete_student(north, southern.student)
+                .expect_err("student"),
+        ),
+        (
+            "student group",
+            project
+                .db()
+                .people()
+                .delete_student_group(north, southern.group)
+                .expect_err("student group"),
+        ),
+        (
+            // Derived: a membership has no school of its own; its group has.
+            "group membership",
+            project
+                .db()
+                .people()
+                .remove_student_group_member(north, southern.group, southern.student)
+                .expect_err("membership"),
+        ),
+    ];
+
+    for (what, error) in &refusals {
+        assert!(
+            matches!(error, DbError::WrongSchool { .. }),
+            "deleting another school's {what} must be WrongSchool, got {error:?}"
+        );
+    }
+    assert_eq!(refusals.len(), 13, "every destructive path is covered");
+
+    // Nothing went. This is the assertion that matters: a check that refused *after*
+    // clearing an availability rule or a membership would still read as a refusal.
+    assert_eq!(
+        row_counts(&mut project),
+        before,
+        "a refused deletion must change no row anywhere"
+    );
+    assert_eq!(orphan_references_of(&mut project), 0);
+
+    // And the owning school can still delete its own, which is what makes the refusals
+    // above a boundary rather than a wall.
+    project
+        .db()
+        .people()
+        .remove_student_group_member(south, southern.group, southern.student)
+        .expect("Southmoor may remove its own membership");
+    project
+        .db()
+        .people()
+        .delete_student(south, southern.student)
+        .expect("Southmoor may delete its own student");
+    project
+        .db()
+        .time_model()
+        .delete_period(south, southern.period)
+        .expect("Southmoor may delete its own period");
+    project
+        .db()
+        .structure()
+        .delete_term(south, southern.term)
+        .expect("Southmoor may delete its own term");
+}
+
+/// An availability rule cannot be cleared from another school's context.
+#[test]
+fn clearing_availability_cannot_cross_a_school() {
+    let mut project = TwoSchools::new();
+    let (north, south) = (project.north, project.south);
+    let southern = fill(&mut project, south, "South");
+
+    let scope = AvailabilityRuleInput {
+        school_id: south,
+        entity_kind: AvailabilityEntity::Teacher,
+        entity_id: southern.teacher,
+        timeslot_id: None,
+        cycle_day_id: Some(southern.cycle_day),
+        period_id: Some(southern.period),
+        term_id: None,
+        status: AvailabilityStatus::Unavailable,
+        weight: None,
+        reason: None,
+        effective_from: None,
+        effective_to: None,
+    };
+    project.db().availability().set(&scope).expect("rule");
+
+    // The same cell, claimed by Northgate. `find_scope` is scoped by school, so there is
+    // nothing for it to find and nothing for it to delete.
+    let cleared = project
+        .db()
+        .availability()
+        .clear(&AvailabilityRuleInput {
+            school_id: north,
+            ..scope.clone()
+        })
+        .expect("clearing a cell that is not yours is not an error, it is a no-op");
+    assert!(!cleared, "it must report that nothing was removed");
+    assert_eq!(
+        project
+            .db()
+            .availability()
+            .count_for(south, AvailabilityEntity::Teacher, southern.teacher)
+            .expect("count"),
+        1,
+        "and Southmoor's rule is still there"
+    );
+
+    // Southmoor clears its own.
+    assert!(
+        project.db().availability().clear(&scope).expect("clear"),
+        "the owning school removes it"
+    );
+}
+
+/// Removing a logo cannot reach another school's.
+#[test]
+fn clearing_a_logo_cannot_cross_a_school() {
+    let mut project = TwoSchools::new();
+    let (north, south) = (project.north, project.south);
+
+    give_a_logo(&mut project, south);
+
+    // Northgate clears "its" logo. It has none, which succeeds and does nothing -- the
+    // operation is addressed by school, so there is no identifier to point at the wrong row.
+    project
+        .db()
+        .structure()
+        .clear_school_logo(north)
+        .expect("clearing a logo that is not there is not an error");
+
+    assert!(
+        project
+            .db()
+            .structure()
+            .school_logo(south)
+            .expect("read")
+            .is_some(),
+        "Southmoor's logo must survive Northgate clearing its own"
+    );
+}
+
+/// A facility another school still uses cannot be destroyed, and sharing keeps working.
+#[test]
+fn a_shared_facility_cannot_be_destroyed_from_one_schools_context() {
+    let mut project = TwoSchools::new();
+    let (north, south) = (project.north, project.south);
+
+    let northern_campus = project
+        .db()
+        .structure()
+        .create_campus(&CampusInput {
+            school_id: north,
+            name: "Riverside".to_owned(),
+            code: "RIV".to_owned(),
+            address: None,
+        })
+        .expect("campus");
+    let southern_campus = project
+        .db()
+        .structure()
+        .create_campus(&CampusInput {
+            school_id: south,
+            name: "Riverside".to_owned(),
+            code: "RIV".to_owned(),
+            address: None,
+        })
+        .expect("campus");
+
+    let hall = project
+        .db()
+        .structure()
+        .create_room(
+            &crate::repo::structure::RoomInput {
+                campus_id: northern_campus.id,
+                building_id: None,
+                room_type_id: None,
+                name: "Sports Hall".to_owned(),
+                code: "HALL".to_owned(),
+                capacity: 200,
+                is_bookable: true,
+                notes: None,
+            },
+            &[southern_campus.id],
+        )
+        .expect("one hall, shared with the other school");
+
+    // Southmoor does not own it and cannot destroy it.
+    let not_yours = project
+        .db()
+        .structure()
+        .delete_room(south, hall.id)
+        .expect_err("Southmoor does not own the hall");
+    assert!(
+        matches!(not_yours, DbError::WrongSchool { .. }),
+        "{not_yours:?}"
+    );
+
+    // Nor can Northgate, while Southmoor is still timetabling into it. This is the case
+    // the ownership check alone would have let through.
+    let still_used = project
+        .db()
+        .structure()
+        .delete_room(north, hall.id)
+        .expect_err("Southmoor still shares it");
+    assert!(
+        matches!(still_used, DbError::StillReferenced { .. }),
+        "expected StillReferenced so the interface says something still uses it, got \
+         {still_used:?}"
+    );
+
+    // The association is intact throughout: nothing was half-removed on the way to the
+    // refusal.
+    assert_eq!(
+        project
+            .db()
+            .structure()
+            .room_campuses(hall.id)
+            .expect("read")
+            .len(),
+        2,
+        "the cross-school share of ADR 0014 survives a refused delete"
+    );
+
+    // A third school has no say in withdrawing the share...
+    let third = project
+        .db()
+        .structure()
+        .create_school(&school_input("Eastbrook Free School"))
+        .expect("third school");
+    let meddling = project
+        .db()
+        .structure()
+        .unshare_room(third.id, hall.id, southern_campus.id)
+        .expect_err("a third school has no say");
+    assert!(
+        matches!(meddling, DbError::WrongSchool { .. }),
+        "{meddling:?}"
+    );
+
+    // ...but the school losing access does, and so would the owner.
+    project
+        .db()
+        .structure()
+        .unshare_room(south, hall.id, southern_campus.id)
+        .expect("Southmoor may give up its own access");
+
+    // And now the owner can destroy it, because nobody else uses it.
+    project
+        .db()
+        .structure()
+        .delete_room(north, hall.id)
+        .expect("with the share withdrawn, the owner may delete it");
+    assert_eq!(orphan_references_of(&mut project), 0);
+}
+
+/// Releasing a grid's orphans cannot reach another school's grid.
+#[test]
+fn releasing_orphans_cannot_cross_a_school() {
+    let mut project = TwoSchools::new();
+    let (north, south) = (project.north, project.south);
+    let southern = fill(&mut project, south, "South");
+
+    let request = MaterialisationRequest::new(southern.cycle, southern.bells, None);
+    let preview = project
+        .db()
+        .time_model()
+        .grid_preview(&request)
+        .expect("preview");
+
+    let refused = project
+        .db()
+        .time_model()
+        .release_orphans(north, &request, &preview.fingerprint)
+        .expect_err("the grid belongs to Southmoor");
+    assert!(
+        matches!(refused, DbError::WrongSchool { .. }),
+        "{refused:?}"
+    );
+
+    let timeslot_refused = project
+        .db()
+        .time_model()
+        .delete_timeslots(north, &[Uuid::now_v7()])
+        .expect_err("a timeslot identifier is not authority either");
+    assert!(
+        matches!(
+            timeslot_refused,
+            DbError::WrongSchool { .. } | DbError::NotFound { .. }
+        ),
+        "{timeslot_refused:?}"
+    );
+}
+
+/// A refused deletion writes nothing to the change feed.
+///
+/// The feed is what a future synchronisation will merge from, so a refusal that logged a
+/// removal would be worse than one that silently deleted the row: the row would still be
+/// there and every other installation would be told it had gone.
+#[test]
+fn a_refused_deletion_is_not_recorded_as_a_deletion() {
+    let mut project = TwoSchools::new();
+    let (north, south) = (project.north, project.south);
+    let southern = fill(&mut project, south, "South");
+
+    let before = deletions_logged(&mut project);
+
+    project
+        .db()
+        .people()
+        .delete_teacher(north, southern.teacher)
+        .expect_err("not Northgate's teacher");
+    project
+        .db()
+        .structure()
+        .delete_campus(north, southern.campus)
+        .expect_err("not Northgate's campus");
+
+    assert_eq!(
+        deletions_logged(&mut project),
+        before,
+        "a refusal is not a deletion and must not be logged as one"
+    );
+
+    // A real deletion still is.
+    project
+        .db()
+        .people()
+        .delete_teacher(south, southern.teacher)
+        .expect("Southmoor's own teacher");
+    assert_eq!(deletions_logged(&mut project), before + 1);
+}
+
+/// Writes a logo row directly.
+///
+/// `set_school_logo` measures real image bytes and refuses anything it cannot decode, and
+/// these tests are about which school a logo belongs to rather than about decoding. The
+/// row is what the scoping acts on, so the row is what they create.
+fn give_a_logo(project: &mut TwoSchools, school: Uuid) {
+    project
+        .db()
+        .write(|tx| {
+            tx.execute(
+                "INSERT INTO school_logo (id, school_id, media_type, bytes, width, height,
+                                           created_at, updated_at, rev)
+                 VALUES (?, ?, 'image/png', x'89504e470d0a1a0a', 16, 16, ?, ?, 1)",
+                (Uuid::now_v7().to_string(), school.to_string(), STAMP, STAMP),
+            )?;
+            Ok(())
+        })
+        .expect("write a logo row");
+}
+
+fn row_counts(project: &mut TwoSchools) -> Vec<(String, i64)> {
+    let tables = [
+        "campus",
+        "room_type",
+        "academic_year",
+        "term",
+        "cycle",
+        "cycle_day",
+        "period_structure",
+        "period",
+        "year_level",
+        "teacher",
+        "student",
+        "student_group",
+        "student_group_member",
+        "availability",
+        "school_logo",
+    ];
+    tables
+        .iter()
+        .map(|table| {
+            let count: i64 = project
+                .db()
+                .read(|conn| {
+                    conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                        row.get(0)
+                    })
+                    .map_err(DbError::from)
+                })
+                .expect("count");
+            ((*table).to_owned(), count)
+        })
+        .collect()
+}
+
+fn deletions_logged(project: &mut TwoSchools) -> i64 {
+    project
+        .db()
+        .read(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM change_log WHERE op = 'DELETE'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(DbError::from)
+        })
+        .expect("count deletions")
+}
+
+fn orphan_references_of(project: &mut TwoSchools) -> i64 {
+    let db: &Database = project.db();
+    orphan_references(db)
 }

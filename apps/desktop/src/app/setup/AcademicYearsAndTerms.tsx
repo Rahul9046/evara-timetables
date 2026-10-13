@@ -87,7 +87,7 @@ export function AcademicYearsAndTerms(props: { school: School }) {
       list: () => listAcademicYears(school.id),
       create: createAcademicYear,
       update: updateAcademicYear,
-      remove: deleteAcademicYear,
+      remove: (id) => deleteAcademicYear(school.id, id),
       emptyHint:
         "Add the year you are timetabling. Terms go inside it, and a term can scope the timetable grid when the bell schedule changes partway through the year.",
       deleteNote: () => (
@@ -145,7 +145,7 @@ export function AcademicYearsAndTerms(props: { school: School }) {
       list: () => (yearId ? listTerms(yearId) : Promise.resolve([])),
       create: createTerm,
       update: updateTerm,
-      remove: deleteTerm,
+      remove: (id) => deleteTerm(school.id, id),
       emptyHint:
         "Terms are optional. Add them if the timetable changes during the year, or if you want the calendar to record which term a date falls in.",
       deleteNote: () => (

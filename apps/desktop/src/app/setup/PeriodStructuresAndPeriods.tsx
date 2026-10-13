@@ -137,7 +137,7 @@ export function PeriodStructuresAndPeriods(props: { school: School }) {
       list: () => listPeriodStructures(school.id),
       create: createPeriodStructure,
       update: updatePeriodStructure,
-      remove: deletePeriodStructure,
+      remove: (id) => deletePeriodStructure(school.id, id),
       emptyHint:
         "A bell schedule is the shape of a single day: period 1, period 2, break, and so on. Add one, then its periods — the timetable grid is the cycle's days crossed with this schedule's periods.",
       deleteNote: () => (
@@ -225,7 +225,7 @@ export function PeriodStructuresAndPeriods(props: { school: School }) {
       list: loadPeriods,
       create: createPeriod,
       update: updatePeriod,
-      remove: deletePeriod,
+      remove: (id) => deletePeriod(school.id, id),
       emptyHint:
         "Add every period of the day, breaks included. Breaks keep the grid honest about when the school is actually running, even though nothing is scheduled into them.",
       deleteNote: () => (

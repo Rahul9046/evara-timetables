@@ -21,6 +21,7 @@ use uuid::Uuid;
 use evara_core::calendar::WorkingDays;
 
 use crate::repo::structure::{BuildingInput, CampusInput, RoomInput, SchoolInput};
+use crate::tests_support;
 use crate::workspace::Workspace;
 use crate::{Database, DbError, PROJECT_EXTENSION};
 
@@ -560,7 +561,7 @@ fn withdrawing_a_share_is_blocked_by_the_rooms_that_depend_on_it() {
         .create_room(&room(south, "S1", Some(shared.id)), &[])
         .expect("create room");
 
-    let outcome = project.db().structure().unshare_building(shared.id, south);
+    let outcome = tests_support::unshare_building_here(project.db(), shared.id, south);
 
     match outcome {
         Err(DbError::Invalid { message }) => {
@@ -612,10 +613,7 @@ fn withdrawing_a_share_succeeds_once_the_rooms_are_reassigned() {
         .update_room(south_room.id, &room(south, "S1", None))
         .expect("clear the room's building");
 
-    project
-        .db()
-        .structure()
-        .unshare_building(shared.id, south)
+    tests_support::unshare_building_here(project.db(), shared.id, south)
         .expect("now it may be withdrawn");
 
     assert!(!visible(&mut project, south).contains(&shared.id));
@@ -642,10 +640,7 @@ fn rooms_on_other_campuses_do_not_block_a_withdrawal() {
         .expect("a room on the home campus");
 
     // Only South's own rooms are South's business.
-    project
-        .db()
-        .structure()
-        .unshare_building(shared.id, south)
+    tests_support::unshare_building_here(project.db(), shared.id, south)
         .expect("North's rooms are irrelevant to withdrawing South");
 }
 
@@ -662,7 +657,7 @@ fn the_home_campus_cannot_be_withdrawn() {
         .create_building(&building(north, "Sports Centre"), &[south])
         .expect("create shared");
 
-    let outcome = project.db().structure().unshare_building(shared.id, north);
+    let outcome = tests_support::unshare_building_here(project.db(), shared.id, north);
 
     match outcome {
         Err(DbError::Invalid { message }) => assert!(
@@ -684,7 +679,7 @@ fn withdrawing_a_share_that_does_not_exist_is_reported_not_ignored() {
         .create_building(&building(north, "Hall"), &[])
         .expect("create building");
 
-    let outcome = project.db().structure().unshare_building(block.id, east);
+    let outcome = tests_support::unshare_building_here(project.db(), block.id, east);
     assert!(
         matches!(
             outcome,
@@ -709,11 +704,7 @@ fn deleting_a_shared_building_removes_it_from_every_campus() {
         .create_building(&building(north, "Sports Centre"), &[south, east])
         .expect("create shared");
 
-    project
-        .db()
-        .structure()
-        .delete_building(shared.id)
-        .expect("delete");
+    tests_support::delete_building_here(project.db(), shared.id).expect("delete");
 
     for campus in [north, south, east] {
         assert!(
@@ -752,11 +743,7 @@ fn deleting_a_shared_building_detaches_rooms_on_every_campus_rather_than_deletin
         .create_room(&room(south, "S1", Some(shared.id)), &[])
         .expect("south room");
 
-    project
-        .db()
-        .structure()
-        .delete_building(shared.id)
-        .expect("delete");
+    tests_support::delete_building_here(project.db(), shared.id).expect("delete");
 
     for (id, campus) in [(north_room.id, north), (south_room.id, south)] {
         let reloaded = project
@@ -786,22 +773,14 @@ fn a_campus_sharing_a_building_cannot_be_deleted_until_the_share_is_withdrawn() 
         .expect("create shared");
 
     // ADR 0010's rule, applied to the new edge: ownership and association both refuse.
-    let outcome = project.db().structure().delete_campus(south);
+    let outcome = tests_support::delete_campus_here(project.db(), south);
     assert!(
         matches!(outcome, Err(DbError::StillReferenced { .. })),
         "expected the campus delete to be refused, got {outcome:?}"
     );
 
-    project
-        .db()
-        .structure()
-        .unshare_building(shared.id, south)
-        .expect("withdraw");
-    project
-        .db()
-        .structure()
-        .delete_campus(south)
-        .expect("now the campus may go");
+    tests_support::unshare_building_here(project.db(), shared.id, south).expect("withdraw");
+    tests_support::delete_campus_here(project.db(), south).expect("now the campus may go");
 }
 
 // ===================================================================== reopening
@@ -860,11 +839,7 @@ fn sharing_and_withdrawing_both_reach_the_change_feed() {
         .structure()
         .share_building(block.id, south)
         .expect("share");
-    project
-        .db()
-        .structure()
-        .unshare_building(block.id, south)
-        .expect("withdraw");
+    tests_support::unshare_building_here(project.db(), block.id, south).expect("withdraw");
 
     let feed = project.db().changes_since(0, 1000).expect("feed");
     let new = &feed[before..];
@@ -924,11 +899,7 @@ fn deleting_a_shared_building_logs_the_removal_of_each_association() {
         .expect("create shared");
 
     let before = project.db().changes_since(0, 1000).expect("feed").len();
-    project
-        .db()
-        .structure()
-        .delete_building(shared.id)
-        .expect("delete");
+    tests_support::delete_building_here(project.db(), shared.id).expect("delete");
 
     let feed = project.db().changes_since(0, 1000).expect("feed");
     let new = &feed[before..];

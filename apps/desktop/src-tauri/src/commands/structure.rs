@@ -300,9 +300,13 @@ pub fn setup_campus_update(
 /// `RESTRICT` by [ADR 0010](../../../../docs/adr/0010-structure-deletion-semantics.md), so
 /// the user removes or reassigns those first.
 #[tauri::command]
-pub fn setup_campus_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_campus_delete(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+    id: Uuid,
+) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.delete_campus(id)?)
+    Ok(ws.structure()?.delete_campus(school_id, id)?)
 }
 
 // -------------------------------------------------------------------------- building
@@ -387,11 +391,14 @@ pub fn setup_building_share(
 #[tauri::command]
 pub fn setup_building_unshare(
     state: State<'_, AppState>,
+    school_id: Uuid,
     building_id: Uuid,
     campus_id: Uuid,
 ) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.unshare_building(building_id, campus_id)?)
+    Ok(ws
+        .structure()?
+        .unshare_building(school_id, building_id, campus_id)?)
 }
 
 /// Deletes a building, detaching its rooms rather than deleting them.
@@ -401,9 +408,13 @@ pub fn setup_building_unshare(
 /// The rooms themselves survive; they simply stop naming a building. Its campus
 /// associations are removed the same way, one change-log entry each.
 #[tauri::command]
-pub fn setup_building_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_building_delete(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+    id: Uuid,
+) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.delete_building(id)?)
+    Ok(ws.structure()?.delete_building(school_id, id)?)
 }
 
 // ------------------------------------------------------------------------- room type
@@ -451,9 +462,13 @@ pub fn setup_room_type_update(
 /// `SET NULL` for the same reason as a building: a classification is not ownership, so
 /// losing the category must not lose the room.
 #[tauri::command]
-pub fn setup_room_type_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_room_type_delete(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+    id: Uuid,
+) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.delete_room_type(id)?)
+    Ok(ws.structure()?.delete_room_type(school_id, id)?)
 }
 
 // ------------------------------------------------------------------------------ room
@@ -537,18 +552,21 @@ pub fn setup_room_share(
 #[tauri::command]
 pub fn setup_room_unshare(
     state: State<'_, AppState>,
+    school_id: Uuid,
     room_id: Uuid,
     campus_id: Uuid,
 ) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.unshare_room(room_id, campus_id)?)
+    Ok(ws
+        .structure()?
+        .unshare_room(school_id, room_id, campus_id)?)
 }
 
 /// Deletes a room. Its campus associations go with it, one change-log entry each.
 #[tauri::command]
-pub fn setup_room_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_room_delete(state: State<'_, AppState>, school_id: Uuid, id: Uuid) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.delete_room(id)?)
+    Ok(ws.structure()?.delete_room(school_id, id)?)
 }
 
 // -------------------------------------------------------------------------- resource
@@ -593,9 +611,13 @@ pub fn setup_resource_update(
 
 /// Deletes a resource.
 #[tauri::command]
-pub fn setup_resource_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_resource_delete(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+    id: Uuid,
+) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.delete_resource(id)?)
+    Ok(ws.structure()?.delete_resource(school_id, id)?)
 }
 
 // --------------------------------------------------------------------- academic year
@@ -643,9 +665,13 @@ pub fn setup_academic_year_update(
 
 /// Deletes an academic year. Refused while it still has terms.
 #[tauri::command]
-pub fn setup_academic_year_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_academic_year_delete(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+    id: Uuid,
+) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.delete_academic_year(id)?)
+    Ok(ws.structure()?.delete_academic_year(school_id, id)?)
 }
 
 // ------------------------------------------------------------------------------ term
@@ -687,7 +713,7 @@ pub fn setup_term_update(
 
 /// Deletes a term. Refused while a timeslot or calendar day still names it.
 #[tauri::command]
-pub fn setup_term_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_term_delete(state: State<'_, AppState>, school_id: Uuid, id: Uuid) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.delete_term(id)?)
+    Ok(ws.structure()?.delete_term(school_id, id)?)
 }

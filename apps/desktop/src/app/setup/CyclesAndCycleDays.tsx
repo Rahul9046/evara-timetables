@@ -250,7 +250,7 @@ export function CyclesAndCycleDays(props: { school: School }) {
       list: () => listCycles(school.id),
       create: createCycle,
       update: updateCycle,
-      remove: deleteCycle,
+      remove: (id) => deleteCycle(school.id, id),
       emptyHint:
         "A cycle is the pattern the timetable repeats. Most schools have one. Choose Weekly for an ordinary school week, or Custom for a rotation — either way its days are created with it.",
       deleteNote: () => (
@@ -343,7 +343,7 @@ export function CyclesAndCycleDays(props: { school: School }) {
       list: () => (cycleId ? listCycleDays(cycleId) : Promise.resolve([])),
       create: createCycleDay,
       update: updateCycleDay,
-      remove: deleteCycleDay,
+      remove: (id) => deleteCycleDay(school.id, id),
       emptyHint: weekly
         ? "A weekly cycle is created with all seven days. If none are listed, edit the cycle above and they will be put back."
         : "A cycle needs one day per position in its pattern. Name them however the school does — the position is what the timetable uses.",

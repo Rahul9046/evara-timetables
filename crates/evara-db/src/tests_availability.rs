@@ -506,10 +506,7 @@ fn deleting_a_cycle_day_that_availability_depends_on_is_refused() {
         .set(&cell(&fixture, 0, 0, AvailabilityStatus::Unavailable))
         .expect("set rule");
 
-    let refused = project
-        .db()
-        .time_model()
-        .delete_cycle_day(fixture.cycle_day_ids[0]);
+    let refused = tests_support::delete_cycle_day_here(project.db(), fixture.cycle_day_ids[0]);
 
     assert!(
         matches!(refused, Err(DbError::StillReferenced { .. })),
@@ -598,11 +595,7 @@ fn deleting_a_teacher_takes_their_availability_and_leaves_no_orphan() {
         .set(&cell(&fixture, 1, 1, AvailabilityStatus::Discouraged))
         .expect("set rule");
 
-    project
-        .db()
-        .people()
-        .delete_teacher(fixture.teacher_id)
-        .expect("delete teacher");
+    tests_support::delete_teacher_here(project.db(), fixture.teacher_id).expect("delete teacher");
 
     assert_eq!(
         tests_support::count_here(
@@ -848,16 +841,8 @@ fn a_room_and_a_group_carry_their_own_rules_and_take_them_when_deleted() {
     // Deleting either one is where a polymorphic reference goes wrong silently: the row
     // stays, points at nothing, and the solver later reads it as a restriction on an
     // entity that no longer exists.
-    project
-        .db()
-        .structure()
-        .delete_room(room_id)
-        .expect("delete room");
-    project
-        .db()
-        .people()
-        .delete_student_group(group_id)
-        .expect("delete group");
+    tests_support::delete_room_here(project.db(), room_id).expect("delete room");
+    tests_support::delete_student_group_here(project.db(), group_id).expect("delete group");
 
     assert_eq!(count(&mut project, AvailabilityEntity::Room, room_id), 0);
     assert_eq!(

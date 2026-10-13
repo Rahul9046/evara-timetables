@@ -180,7 +180,7 @@ export function Teachers(props: { school: School }) {
     list: () => listTeachers(school.id),
     create: (input) => createTeacher(input),
     update: (id, input) => updateTeacher(id, input),
-    remove: (id) => deleteTeacher(id),
+    remove: (id) => deleteTeacher(school.id, id),
     emptyHint: "No teachers yet. Add the staff who will appear on the timetable.",
     deleteNote: (row) =>
       row.isActive

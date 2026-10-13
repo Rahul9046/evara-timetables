@@ -166,7 +166,7 @@ export function GridPreviewSection(props: { school: School }) {
     setBusy(true);
     setMessage(null);
     try {
-      const removed = await releaseOrphans(request, grid.fingerprint);
+      const removed = await releaseOrphans(school.id, request, grid.fingerprint);
       setConfirming(null);
       preview.reload();
       setMessage({

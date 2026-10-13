@@ -21,10 +21,13 @@
 use uuid::Uuid;
 
 use crate::Database;
+use crate::error::Result;
 use crate::repo::availability::{AvailabilityEntity, AvailabilityRule};
 use crate::repo::people::{Student, Teacher};
 use crate::repo::structure::{Campus, RoomType, School, SchoolLogo};
-use crate::repo::time_model::{Cycle, NonWorkingInstructionalDay};
+use crate::repo::time_model::{
+    Cycle, MaterialisationRequest, NonWorkingInstructionalDay, PlanFingerprint,
+};
 use evara_core::calendar::WorkingDays;
 
 /// The project's one school, or `None` if setup has not started.
@@ -142,4 +145,126 @@ pub(crate) fn count_here(
     db.availability()
         .count_for(school, entity_kind, entity_id)
         .expect("count rules")
+}
+
+// ------------------------------------------------------------------------- deletions
+//
+// Only the ones the older suites actually call. The rest of the destructive paths --
+// resources, terms, cycles, bell schedules, calendar days -- are exercised in
+// `tests_multi_school`, which names its schools explicitly because the school is the thing
+// it is testing.
+//
+// Destructive operations take the school they act for, so an identifier alone is not
+// authority to delete anything. These resolve the project's one school and pass it, and —
+// unlike the readers above — they return the `Result` so each suite keeps asserting the
+// outcome it was written to assert: a refusal, a `StillReferenced`, a corruption report.
+
+/// Deletes a campus of the project's one school.
+pub(crate) fn delete_campus_here(db: &mut Database, id: Uuid) -> Result<()> {
+    let school = only_school_id(db);
+    db.structure().delete_campus(school, id)
+}
+
+/// Deletes a room type of the project's one school.
+pub(crate) fn delete_room_type_here(db: &mut Database, id: Uuid) -> Result<()> {
+    let school = only_school_id(db);
+    db.structure().delete_room_type(school, id)
+}
+
+/// Deletes a building of the project's one school.
+pub(crate) fn delete_building_here(db: &mut Database, id: Uuid) -> Result<()> {
+    let school = only_school_id(db);
+    db.structure().delete_building(school, id)
+}
+
+/// Deletes a room of the project's one school.
+pub(crate) fn delete_room_here(db: &mut Database, id: Uuid) -> Result<()> {
+    let school = only_school_id(db);
+    db.structure().delete_room(school, id)
+}
+
+/// Deletes an academic year of the project's one school.
+pub(crate) fn delete_academic_year_here(db: &mut Database, id: Uuid) -> Result<()> {
+    let school = only_school_id(db);
+    db.structure().delete_academic_year(school, id)
+}
+
+/// Withdraws a building share, acting as the project's one school.
+pub(crate) fn unshare_building_here(
+    db: &mut Database,
+    building_id: Uuid,
+    campus_id: Uuid,
+) -> Result<()> {
+    let school = only_school_id(db);
+    db.structure()
+        .unshare_building(school, building_id, campus_id)
+}
+
+/// Withdraws a room share, acting as the project's one school.
+pub(crate) fn unshare_room_here(db: &mut Database, room_id: Uuid, campus_id: Uuid) -> Result<()> {
+    let school = only_school_id(db);
+    db.structure().unshare_room(school, room_id, campus_id)
+}
+
+/// Deletes a cycle day of the project's one school.
+pub(crate) fn delete_cycle_day_here(db: &mut Database, id: Uuid) -> Result<()> {
+    let school = only_school_id(db);
+    db.time_model().delete_cycle_day(school, id)
+}
+
+/// Deletes a period of the project's one school.
+pub(crate) fn delete_period_here(db: &mut Database, id: Uuid) -> Result<()> {
+    let school = only_school_id(db);
+    db.time_model().delete_period(school, id)
+}
+
+/// Deletes timeslots of the project's one school.
+pub(crate) fn delete_timeslots_here(db: &mut Database, ids: &[Uuid]) -> Result<()> {
+    let school = only_school_id(db);
+    db.time_model().delete_timeslots(school, ids)
+}
+
+/// Releases the orphans of a reviewed plan, acting as the project's one school.
+pub(crate) fn release_orphans_here(
+    db: &mut Database,
+    request: &MaterialisationRequest,
+    reviewed: &PlanFingerprint,
+) -> Result<Vec<Uuid>> {
+    let school = only_school_id(db);
+    db.time_model().release_orphans(school, request, reviewed)
+}
+
+/// Deletes a year level of the project's one school.
+pub(crate) fn delete_year_level_here(db: &mut Database, id: Uuid) -> Result<()> {
+    let school = only_school_id(db);
+    db.people().delete_year_level(school, id)
+}
+
+/// Deletes a teacher of the project's one school.
+pub(crate) fn delete_teacher_here(db: &mut Database, id: Uuid) -> Result<()> {
+    let school = only_school_id(db);
+    db.people().delete_teacher(school, id)
+}
+
+/// Deletes a student of the project's one school.
+pub(crate) fn delete_student_here(db: &mut Database, id: Uuid) -> Result<()> {
+    let school = only_school_id(db);
+    db.people().delete_student(school, id)
+}
+
+/// Deletes a student group of the project's one school.
+pub(crate) fn delete_student_group_here(db: &mut Database, id: Uuid) -> Result<()> {
+    let school = only_school_id(db);
+    db.people().delete_student_group(school, id)
+}
+
+/// Removes one group membership in the project's one school.
+pub(crate) fn remove_group_member_here(
+    db: &mut Database,
+    student_group_id: Uuid,
+    student_id: Uuid,
+) -> Result<()> {
+    let school = only_school_id(db);
+    db.people()
+        .remove_student_group_member(school, student_group_id, student_id)
 }

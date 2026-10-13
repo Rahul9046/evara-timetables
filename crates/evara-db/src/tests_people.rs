@@ -330,11 +330,7 @@ fn a_student_identity_outlives_the_year_level_it_was_classified_by() {
         })
         .expect("create student");
 
-    project
-        .db()
-        .people()
-        .delete_year_level(year.id)
-        .expect("delete year level");
+    tests_support::delete_year_level_here(project.db(), year.id).expect("delete year level");
 
     let after = project
         .db()
@@ -524,11 +520,7 @@ fn a_member_can_be_added_and_removed_without_touching_the_student() {
         })
         .expect("add member");
 
-    project
-        .db()
-        .people()
-        .remove_student_group_member(set.id, pupil.id)
-        .expect("remove member");
+    tests_support::remove_group_member_here(project.db(), set.id, pupil.id).expect("remove member");
 
     assert_eq!(
         project
@@ -698,7 +690,7 @@ fn deleting_a_student_who_is_still_in_a_group_is_refused() {
         })
         .expect("add member");
 
-    let refused = project.db().people().delete_student(pupil.id);
+    let refused = tests_support::delete_student_here(project.db(), pupil.id);
     assert!(
         matches!(refused, Err(DbError::StillReferenced { .. })),
         "expected a refusal, got {refused:?}"
@@ -758,11 +750,7 @@ fn deleting_a_group_removes_its_memberships_but_not_its_students() {
         1
     );
 
-    project
-        .db()
-        .people()
-        .delete_student_group(set.id)
-        .expect("delete group");
+    tests_support::delete_student_group_here(project.db(), set.id).expect("delete group");
 
     assert!(
         project
@@ -803,7 +791,7 @@ fn deleting_a_group_that_was_split_into_others_is_refused() {
         })
         .expect("child");
 
-    let refused = project.db().people().delete_student_group(cohort.id);
+    let refused = tests_support::delete_student_group_here(project.db(), cohort.id);
     assert!(
         matches!(refused, Err(DbError::StillReferenced { .. })),
         "flattening a hierarchy is not a side effect; got {refused:?}"
@@ -848,7 +836,7 @@ fn a_refused_group_delete_destroys_nothing_on_its_way_to_refusing() {
         })
         .expect("add member");
 
-    let refused = project.db().people().delete_student_group(cohort.id);
+    let refused = tests_support::delete_student_group_here(project.db(), cohort.id);
     assert!(
         matches!(refused, Err(DbError::StillReferenced { .. })),
         "got {refused:?}"
@@ -1152,11 +1140,7 @@ fn every_people_write_reaches_the_change_feed() {
             student_id: pupil.id,
         })
         .expect("add member");
-    project
-        .db()
-        .people()
-        .remove_student_group_member(set.id, pupil.id)
-        .expect("remove member");
+    tests_support::remove_group_member_here(project.db(), set.id, pupil.id).expect("remove member");
 
     let tables: Vec<String> = project
         .db()

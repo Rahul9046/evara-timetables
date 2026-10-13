@@ -355,11 +355,7 @@ fn campus_create_read_list_update_delete() {
         "listing is ordered by name, deterministically"
     );
 
-    project
-        .db()
-        .structure()
-        .delete_campus(second.id)
-        .expect("delete");
+    tests_support::delete_campus_here(project.db(), second.id).expect("delete");
     assert!(
         project
             .db()
@@ -429,7 +425,7 @@ fn a_campus_that_still_owns_buildings_cannot_be_deleted() {
         )
         .expect("create building");
 
-    let outcome = project.db().structure().delete_campus(campus);
+    let outcome = tests_support::delete_campus_here(project.db(), campus);
     assert!(
         matches!(outcome, Err(DbError::StillReferenced { entity: "campus" })),
         "deleting a campus with buildings must be refused, not cascaded: {outcome:?}"
@@ -447,7 +443,7 @@ fn a_campus_that_still_owns_rooms_cannot_be_deleted() {
         .create_room(&room(campus, "R1"), &[])
         .expect("create room");
 
-    let outcome = project.db().structure().delete_campus(campus);
+    let outcome = tests_support::delete_campus_here(project.db(), campus);
     assert!(
         matches!(outcome, Err(DbError::StillReferenced { .. })),
         "{outcome:?}"
@@ -470,7 +466,7 @@ fn a_campus_that_still_owns_resources_cannot_be_deleted() {
         })
         .expect("create resource");
 
-    let outcome = project.db().structure().delete_campus(campus);
+    let outcome = tests_support::delete_campus_here(project.db(), campus);
     assert!(
         matches!(outcome, Err(DbError::StillReferenced { .. })),
         "campus deletion means the same thing everywhere: {outcome:?}"
@@ -501,11 +497,7 @@ fn deleting_a_room_type_unclassifies_its_rooms_and_advances_their_revision() {
         .expect("create room");
     assert_eq!(created.rev, 1);
 
-    project
-        .db()
-        .structure()
-        .delete_room_type(lab.id)
-        .expect("delete room type");
+    tests_support::delete_room_type_here(project.db(), lab.id).expect("delete room type");
 
     let after = project
         .db()
@@ -548,11 +540,7 @@ fn deleting_a_building_detaches_its_rooms() {
         .create_room(&input, &[])
         .expect("create room");
 
-    project
-        .db()
-        .structure()
-        .delete_building(block.id)
-        .expect("delete building");
+    tests_support::delete_building_here(project.db(), block.id).expect("delete building");
 
     let after = project
         .db()
@@ -591,7 +579,7 @@ fn an_academic_year_with_terms_cannot_be_deleted() {
         })
         .expect("create term");
 
-    let outcome = project.db().structure().delete_academic_year(year.id);
+    let outcome = tests_support::delete_academic_year_here(project.db(), year.id);
     assert!(
         matches!(
             outcome,
@@ -926,11 +914,7 @@ fn change_log_follows_a_row_through_update_and_delete() {
             },
         )
         .expect("update");
-    project
-        .db()
-        .structure()
-        .delete_building(block.id)
-        .expect("delete");
+    tests_support::delete_building_here(project.db(), block.id).expect("delete");
 
     let changes = project.db().changes_since(0, 100).expect("read feed");
     let ours: Vec<_> = changes
@@ -1013,11 +997,7 @@ fn a_multi_step_delete_is_one_transaction() {
     }
 
     let before = project.db().changes_since(0, 1000).expect("feed").len();
-    project
-        .db()
-        .structure()
-        .delete_room_type(lab.id)
-        .expect("delete");
+    tests_support::delete_room_type_here(project.db(), lab.id).expect("delete");
     let after = project.db().changes_since(0, 1000).expect("feed");
 
     // Three room updates plus one room_type delete, all from one logical operation.
@@ -1291,10 +1271,7 @@ fn detaching_a_reference_reports_corruption_rather_than_a_missing_row() {
          UPDATE room_campus SET room_id = 'broken';",
     );
 
-    let error = project
-        .db()
-        .structure()
-        .delete_room_type(lab.id)
+    let error = tests_support::delete_room_type_here(project.db(), lab.id)
         .expect_err("detaching a damaged room must fail");
 
     assert!(

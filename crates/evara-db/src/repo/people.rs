@@ -333,8 +333,9 @@ impl People<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`] if no such year level exists.
-    pub fn delete_year_level(&mut self, id: Uuid) -> Result<()> {
+    pub fn delete_year_level(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
         self.db.write(|tx| {
+            require_same_school(tx, "year level", "year_level", id, school_id)?;
             detach_year_level(tx, "student", id)?;
             detach_year_level(tx, "student_group", id)?;
             delete(tx, "year level", "year_level", id)
@@ -507,8 +508,12 @@ impl People<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`] if no such teacher exists.
-    pub fn delete_teacher(&mut self, id: Uuid) -> Result<()> {
+    pub fn delete_teacher(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
         self.db.write(|tx| {
+            // Before the availability rules go, not after: those rows are the teacher's,
+            // and clearing another school's teacher's rules and *then* refusing the delete
+            // would be the worst of both outcomes.
+            require_same_school(tx, "teacher", "teacher", id, school_id)?;
             clear_for_entity(tx, AvailabilityEntity::Teacher, id)?;
             delete(tx, "teacher", "teacher", id)
         })
@@ -627,8 +632,9 @@ impl People<'_> {
     /// the difference between a record entered by mistake and a student who has left:
     /// the first has no memberships and goes, the second has history worth keeping and
     /// should be marked inactive instead. The message says which.
-    pub fn delete_student(&mut self, id: Uuid) -> Result<()> {
+    pub fn delete_student(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
         self.db.write(|tx| {
+            require_same_school(tx, "student", "student", id, school_id)?;
             let groups: i64 = tx.query_row(
                 "SELECT COUNT(*) FROM student_group_member WHERE student_id = ?",
                 [text(id)],
@@ -801,8 +807,9 @@ impl People<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`], or [`DbError::StillReferenced`] if it still has child groups.
-    pub fn delete_student_group(&mut self, id: Uuid) -> Result<()> {
+    pub fn delete_student_group(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
         self.db.write(|tx| {
+            require_same_school(tx, "student group", "student_group", id, school_id)?;
             let children: i64 = tx.query_row(
                 "SELECT COUNT(*) FROM student_group WHERE parent_group_id = ?",
                 [text(id)],
@@ -979,10 +986,21 @@ impl People<'_> {
     /// [`DbError::NotFound`] if that student is not in that group.
     pub fn remove_student_group_member(
         &mut self,
+        school_id: Uuid,
         student_group_id: Uuid,
         student_id: Uuid,
     ) -> Result<()> {
         self.db.write(|tx| {
+            // A membership has no `school_id` of its own and is not given one: the group
+            // owns it, and the group names its school. Checking the group is therefore
+            // checking the membership, with no second copy of the same fact to go stale.
+            require_same_school(
+                tx,
+                "student group",
+                "student_group",
+                student_group_id,
+                school_id,
+            )?;
             let raw: Option<String> = tx
                 .query_row(
                     "SELECT id FROM student_group_member

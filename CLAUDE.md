@@ -95,11 +95,14 @@ disagree about whether a placement is legal, the product is broken.
   tests.
 - **A project holds several schools, and every school-owned read says which.** Since V12
   there is no "the school": a repository list of a school-owned entity takes an explicit
-  `school_id`, and `update_*` refuses an identifier that belongs to another school
-  (`DbError::WrongSchool`). A `LIMIT 1` read of `school` would hand the caller an arbitrary
-  institution and silently scope everything after it. Facilities are the exception by
-  design — `building_campus` and `room_campus` reach across schools, and `room-clash` stays
-  a per-`room_id` rule for the whole project. See
+  `school_id`, and **every `update_*` and `delete_*` refuses an identifier belonging to
+  another school** (`DbError::WrongSchool`), checked in the same transaction as the write
+  and before anything is cleared. A `LIMIT 1` read of `school` would hand the caller an
+  arbitrary institution and silently scope everything after it. A child's school is resolved
+  through its parent chain, never by adding it a second `school_id` column. Facilities are
+  the exception by design — `building_campus` and `room_campus` reach across schools, so a
+  shared building or room can be *destroyed* only by its home school and only while nobody
+  else shares it, and `room-clash` stays a per-`room_id` rule for the whole project. See
   [docs/adr/0019](docs/adr/0019-multiple-schools-in-one-project.md).
 - **Identity is split three ways and must stay that way:** `project_id` and
   `created_by_site_id` live in the project; the installation's `site_id` lives in the

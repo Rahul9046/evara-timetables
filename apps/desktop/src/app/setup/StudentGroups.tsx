@@ -243,7 +243,7 @@ export function StudentGroups(props: { school: School }) {
     list: () => listStudentGroups(school.id),
     create: (input) => createStudentGroup(input),
     update: (id, input) => updateStudentGroup(id, input),
-    remove: (id) => deleteStudentGroup(id),
+    remove: (id) => deleteStudentGroup(school.id, id),
     emptyHint:
       "No groups yet. A group is whoever a lesson is taught to — a class, a cohort, a homeroom or an elective set.",
     deleteNote: (row) => {
@@ -357,7 +357,7 @@ function GroupMembers(props: {
     if (!selected || pending === null) return;
     const studentId = pending.id;
     setBusy(true);
-    void removeGroupMember(selected.id, studentId)
+    void removeGroupMember(school.id, selected.id, studentId)
       .then(() => {
         setPending(null);
         refresh(selected.id);

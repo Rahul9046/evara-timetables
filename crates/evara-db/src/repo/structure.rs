@@ -29,7 +29,7 @@ use uuid::Uuid;
 
 use super::availability::{AvailabilityEntity, clear_for_entity};
 use super::row::{entity, opt_text, parse_id_text, text};
-use super::{Stamp, delete, require_same_school, translate, update};
+use super::{Stamp, delete, require_same_school, require_school_owner, translate, update};
 use crate::Database;
 use crate::error::{DbError, Result};
 
@@ -649,6 +649,89 @@ impl Structure<'_> {
     }
 }
 
+/// Refuses destroying a facility that another school still uses.
+///
+/// # Why a shared facility needs more than an ownership check
+///
+/// ADR 0013 and ADR 0014 make a building and a room shareable **by campus**, and since
+/// `V12` those campuses may belong to different schools. That is the point: one physical
+/// sports hall, one occupancy record, two institutions timetabling into it.
+///
+/// It also means "the school that owns the home campus" is not sufficient authority to
+/// *destroy* it. A hall created on Northgate's campus and shared with Southmoor's is a hall
+/// Southmoor is timetabling into, and Northgate deleting it would take Southmoor's room
+/// away without Southmoor being asked.
+///
+/// So three operations stay distinct:
+///
+/// | Operation | Who may | Effect |
+/// | --- | --- | --- |
+/// | Withdraw one school's access | that school, or the home school | one association row |
+/// | Remove the home campus | nobody | refused; a facility must never reach zero campuses |
+/// | Destroy the facility | the home school, **and only while nobody else shares it** | the row and all its associations |
+///
+/// The refusal is [`DbError::StillReferenced`] — the error a blocked delete already
+/// produces, so the interface's existing handling applies. The way forward is to withdraw
+/// the other school's access first, which is an operation that already exists and that the
+/// other school can see.
+fn require_unshared(
+    tx: &Transaction<'_>,
+    entity: &'static str,
+    sharers_query: &str,
+    id: Uuid,
+    school_id: Uuid,
+) -> Result<()> {
+    let others: i64 = tx.query_row(sharers_query, [text(id), text(school_id)], |row| row.get(0))?;
+    if others > 0 {
+        return Err(DbError::StillReferenced { entity });
+    }
+    Ok(())
+}
+
+/// Refuses withdrawing an association that is none of the acting school's business.
+///
+/// Either authority will do, and both are legitimate:
+///
+/// - the school that owns **the campus being removed** — "we no longer use this room";
+/// - the school that owns **the facility's home campus** — "we are no longer lending it".
+///
+/// A third school has no say in either. The home campus itself is refused separately and
+/// for a different reason — a facility must never reach zero campuses and vanish from every
+/// screen (ADR 0014) — so that check stays where it was, after this one.
+fn require_may_unshare(
+    tx: &Transaction<'_>,
+    entity: &'static str,
+    owner_query: &str,
+    id: Uuid,
+    campus_id: Uuid,
+    school_id: Uuid,
+) -> Result<()> {
+    // Resolving the facility first also produces the NotFound for an identifier that is
+    // not there, before anything else is considered.
+    let owner: Option<String> = tx
+        .query_row(owner_query, [text(id)], |row| row.get(0))
+        .optional()?;
+    let Some(owner) = owner else {
+        return Err(DbError::NotFound { entity });
+    };
+
+    if owner == text(school_id) {
+        return Ok(());
+    }
+
+    let campus_owner: Option<String> = tx
+        .query_row(
+            "SELECT school_id FROM campus WHERE id = ?",
+            [text(campus_id)],
+            |row| row.get(0),
+        )
+        .optional()?;
+    match campus_owner {
+        Some(raw) if raw == text(school_id) => Ok(()),
+        _ => Err(DbError::WrongSchool { entity }),
+    }
+}
+
 // ---------------------------------------------------------------------------- campus
 
 const CAMPUS_COLUMNS: &str = "id, school_id, name, code, address, created_at, updated_at, rev";
@@ -745,8 +828,9 @@ impl Structure<'_> {
     ///
     /// [`DbError::StillReferenced`] if buildings, rooms or resources remain on it. Campus
     /// ownership is RESTRICT: the user removes or moves those deliberately.
-    pub fn delete_campus(&mut self, id: Uuid) -> Result<()> {
+    pub fn delete_campus(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
         self.db.write(|tx| {
+            require_same_school(tx, "campus", "campus", id, school_id)?;
             // Availability is polymorphic and so has no foreign key to catch this. A rule
             // about a campus means nothing once the campus is gone.
             clear_for_entity(tx, AvailabilityEntity::Campus, id)?;
@@ -756,6 +840,15 @@ impl Structure<'_> {
 }
 
 // -------------------------------------------------------------------------- building
+
+/// A building belongs to the school that owns its home campus.
+const BUILDING_OWNER: &str = "SELECT campus.school_id FROM building \
+     JOIN campus ON campus.id = building.campus_id WHERE building.id = ?";
+
+/// How many campuses of *other* schools (`?2` is the acting school) share `?1`.
+const BUILDING_SHARERS: &str = "SELECT COUNT(*) FROM building_campus \
+     JOIN campus ON campus.id = building_campus.campus_id \
+     WHERE building_campus.building_id = ?1 AND campus.school_id <> ?2";
 
 const BUILDING_COLUMNS: &str = "id, campus_id, name, created_at, updated_at, rev";
 
@@ -998,8 +1091,21 @@ impl Structure<'_> {
     ///   campus are still in the building. Neither may proceed: the first would leave the
     ///   building with no campus and no screen it appears on, the second would leave rooms
     ///   pointing at a building their own campus no longer has.
-    pub fn unshare_building(&mut self, building_id: Uuid, campus_id: Uuid) -> Result<()> {
+    pub fn unshare_building(
+        &mut self,
+        school_id: Uuid,
+        building_id: Uuid,
+        campus_id: Uuid,
+    ) -> Result<()> {
         self.db.write(|tx| {
+            require_may_unshare(
+                tx,
+                "building",
+                BUILDING_OWNER,
+                building_id,
+                campus_id,
+                school_id,
+            )?;
             let home = building_home_campus(tx, building_id)?;
             if home == campus_id {
                 let campus = campus_name(tx, campus_id)?;
@@ -1053,8 +1159,10 @@ impl Structure<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`] if there is no such building.
-    pub fn delete_building(&mut self, id: Uuid) -> Result<()> {
+    pub fn delete_building(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
         self.db.write(|tx| {
+            require_school_owner(tx, "building", BUILDING_OWNER, id, school_id)?;
+            require_unshared(tx, "building", BUILDING_SHARERS, id, school_id)?;
             detach_rooms(tx, "building_id", id)?;
             for association_id in associations_of(tx, id)? {
                 delete(tx, "building", "building_campus", association_id)?;
@@ -1328,8 +1436,9 @@ impl Structure<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`] if there is no such room type.
-    pub fn delete_room_type(&mut self, id: Uuid) -> Result<()> {
+    pub fn delete_room_type(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
         self.db.write(|tx| {
+            require_same_school(tx, "room type", "room_type", id, school_id)?;
             detach_rooms(tx, "room_type_id", id)?;
             delete(tx, "room type", "room_type", id)
         })
@@ -1364,6 +1473,15 @@ fn detach_rooms(tx: &rusqlite::Transaction<'_>, column: &str, id: Uuid) -> Resul
 }
 
 // ------------------------------------------------------------------------------ room
+
+/// A room belongs to the school that owns its home campus.
+const ROOM_OWNER: &str = "SELECT campus.school_id FROM room \
+     JOIN campus ON campus.id = room.campus_id WHERE room.id = ?";
+
+/// How many campuses of *other* schools (`?2` is the acting school) share `?1`.
+const ROOM_SHARERS: &str = "SELECT COUNT(*) FROM room_campus \
+     JOIN campus ON campus.id = room_campus.campus_id \
+     WHERE room_campus.room_id = ?1 AND campus.school_id <> ?2";
 
 const ROOM_COLUMNS: &str = "id, campus_id, building_id, room_type_id, name, code, capacity, \
                             is_bookable, notes, created_at, updated_at, rev";
@@ -1646,8 +1764,9 @@ impl Structure<'_> {
     /// - [`DbError::NotFound`] if that campus does not share this room.
     /// - [`DbError::Invalid`] if it is the room's home campus. Withdrawing that would
     ///   leave the room with no campus and no screen it appears on.
-    pub fn unshare_room(&mut self, room_id: Uuid, campus_id: Uuid) -> Result<()> {
+    pub fn unshare_room(&mut self, school_id: Uuid, room_id: Uuid, campus_id: Uuid) -> Result<()> {
         self.db.write(|tx| {
+            require_may_unshare(tx, "room", ROOM_OWNER, room_id, campus_id, school_id)?;
             let home = room_home_campus(tx, room_id)?;
             if home == campus_id {
                 let campus = campus_name(tx, campus_id)?;
@@ -1683,8 +1802,10 @@ impl Structure<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`] if there is no such room.
-    pub fn delete_room(&mut self, id: Uuid) -> Result<()> {
+    pub fn delete_room(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
         self.db.write(|tx| {
+            require_school_owner(tx, "room", ROOM_OWNER, id, school_id)?;
+            require_unshared(tx, "room", ROOM_SHARERS, id, school_id)?;
             clear_for_entity(tx, AvailabilityEntity::Room, id)?;
             for association_id in room_associations_of(tx, id)? {
                 delete(tx, "room", "room_campus", association_id)?;
@@ -1958,8 +2079,9 @@ impl Structure<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`] if there is no such resource.
-    pub fn delete_resource(&mut self, id: Uuid) -> Result<()> {
+    pub fn delete_resource(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
         self.db.write(|tx| {
+            require_same_school(tx, "resource", "resource", id, school_id)?;
             clear_for_entity(tx, AvailabilityEntity::Resource, id)?;
             delete(tx, "resource", "resource", id)
         })
@@ -2068,13 +2190,19 @@ impl Structure<'_> {
     ///
     /// [`DbError::StillReferenced`] if it still has terms. Terms are removed deliberately,
     /// never as a side effect.
-    pub fn delete_academic_year(&mut self, id: Uuid) -> Result<()> {
-        self.db
-            .write(|tx| delete(tx, "academic year", "academic_year", id))
+    pub fn delete_academic_year(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+        self.db.write(|tx| {
+            require_same_school(tx, "academic year", "academic_year", id, school_id)?;
+            delete(tx, "academic year", "academic_year", id)
+        })
     }
 }
 
 // ------------------------------------------------------------------------------ term
+
+/// A term belongs to a school only by way of its academic year.
+const TERM_OWNER: &str = "SELECT academic_year.school_id FROM term \
+     JOIN academic_year ON academic_year.id = term.academic_year_id WHERE term.id = ?";
 
 const TERM_COLUMNS: &str =
     "id, academic_year_id, name, ordinal, starts_on, ends_on, created_at, updated_at, rev";
@@ -2170,7 +2298,10 @@ impl Structure<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`] if there is no such term.
-    pub fn delete_term(&mut self, id: Uuid) -> Result<()> {
-        self.db.write(|tx| delete(tx, "term", "term", id))
+    pub fn delete_term(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+        self.db.write(|tx| {
+            require_school_owner(tx, "term", TERM_OWNER, id, school_id)?;
+            delete(tx, "term", "term", id)
+        })
     }
 }

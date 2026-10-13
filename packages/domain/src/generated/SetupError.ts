@@ -23,6 +23,14 @@ entity: string,
 /**
  * Message to show.
  */
+message: string, } | { "kind": "wrongSchool", 
+/**
+ * What kind of record it was.
+ */
+entity: string, 
+/**
+ * Message to show.
+ */
 message: string, } | { "kind": "duplicate", 
 /**
  * What kind of record collided.

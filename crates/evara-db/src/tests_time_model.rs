@@ -158,9 +158,7 @@ impl Project {
             .map(|day| day.id)
             .collect();
         for day in days {
-            self.db()
-                .time_model()
-                .delete_cycle_day(day)
+            tests_support::delete_cycle_day_here(self.db(), day)
                 .expect("a brand-new day is referenced by nothing");
         }
         cycle
@@ -1078,17 +1076,11 @@ fn a_materialised_grid_blocks_deleting_the_day_or_period_it_came_from() {
         .apply_materialisation(&MaterialisationRequest::new(cycle, structure, Some(term)))
         .expect("materialise");
 
-    let day = project
-        .db()
-        .time_model()
-        .delete_cycle_day(days[0])
+    let day = tests_support::delete_cycle_day_here(project.db(), days[0])
         .expect_err("a materialised day cannot just vanish");
     assert!(matches!(day, DbError::StillReferenced { .. }), "{day:?}");
 
-    let period = project
-        .db()
-        .time_model()
-        .delete_period(periods[0])
+    let period = tests_support::delete_period_here(project.db(), periods[0])
         .expect_err("nor a materialised period");
     assert!(
         matches!(period, DbError::StillReferenced { .. }),
@@ -1119,18 +1111,11 @@ fn releasing_orphans_explicitly_is_what_finally_allows_a_removal() {
         .expect("plan");
 
     // Step 2: a human has now seen the counts and agreed.
-    project
-        .db()
-        .time_model()
-        .delete_timeslots(&plan.orphaned_ids())
+    tests_support::delete_timeslots_here(project.db(), &plan.orphaned_ids())
         .expect("release the slots the plan named");
 
     // Step 3: only now will the day go.
-    project
-        .db()
-        .time_model()
-        .delete_cycle_day(doomed)
-        .expect("the obstruction is gone");
+    tests_support::delete_cycle_day_here(project.db(), doomed).expect("the obstruction is gone");
 
     let remaining = project.slots(cycle, Some(term));
     assert_eq!(
@@ -1156,10 +1141,7 @@ fn releasing_orphans_explicitly_is_what_finally_allows_a_removal() {
 #[test]
 fn deleting_a_timeslot_that_does_not_exist_is_an_error_not_a_silent_no_op() {
     let mut project = Project::new();
-    let error = project
-        .db()
-        .time_model()
-        .delete_timeslots(&[Uuid::now_v7()])
+    let error = tests_support::delete_timeslots_here(project.db(), &[Uuid::now_v7()])
         .expect_err("a phantom identifier must not pass quietly");
     assert!(matches!(error, DbError::NotFound { .. }), "{error:?}");
 }
@@ -1568,10 +1550,7 @@ fn a_mapped_date_blocks_deleting_the_cycle_day_it_names() {
         })
         .expect("calendar day");
 
-    let error = project
-        .db()
-        .time_model()
-        .delete_cycle_day(day)
+    let error = tests_support::delete_cycle_day_here(project.db(), day)
         .expect_err("ADR 0011 Q2: RESTRICT, not a silent reinterpretation");
     assert!(
         matches!(error, DbError::StillReferenced { .. }),

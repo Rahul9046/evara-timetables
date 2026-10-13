@@ -224,8 +224,8 @@ export function updateCampus(id: string, input: CampusInput): Promise<Campus> {
 }
 
 /** Deletes a campus. Refused while it still owns buildings, rooms or resources. */
-export function deleteCampus(id: string): Promise<void> {
-  return invoke<void>("setup_campus_delete", { id });
+export function deleteCampus(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_campus_delete", { schoolId, id });
 }
 
 // ------------------------------------------------------------------------- building
@@ -279,13 +279,17 @@ export function shareBuilding(buildingId: string, campusId: string): Promise<voi
  * Refused while rooms on that campus are still in the building, and refused outright for
  * the campus the building was created on. Nothing is detached or deleted either way.
  */
-export function unshareBuilding(buildingId: string, campusId: string): Promise<void> {
-  return invoke<void>("setup_building_unshare", { buildingId, campusId });
+export function unshareBuilding(
+  schoolId: string,
+  buildingId: string,
+  campusId: string,
+): Promise<void> {
+  return invoke<void>("setup_building_unshare", { schoolId, buildingId, campusId });
 }
 
 /** Deletes a building. Its rooms survive, detached rather than deleted. */
-export function deleteBuilding(id: string): Promise<void> {
-  return invoke<void>("setup_building_delete", { id });
+export function deleteBuilding(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_building_delete", { schoolId, id });
 }
 
 // ------------------------------------------------------------------------ room type
@@ -311,8 +315,8 @@ export function updateRoomType(id: string, input: RoomTypeInput): Promise<RoomTy
 }
 
 /** Deletes a room type. Rooms that used it survive, unclassified. */
-export function deleteRoomType(id: string): Promise<void> {
-  return invoke<void>("setup_room_type_delete", { id });
+export function deleteRoomType(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_room_type_delete", { schoolId, id });
 }
 
 // ----------------------------------------------------------------------------- room
@@ -370,13 +374,17 @@ export function shareRoom(roomId: string, campusId: string): Promise<void> {
  * Refused outright for the campus the room was created on. Nothing is moved, duplicated
  * or deleted — the room keeps its identity and every other campus keeps it.
  */
-export function unshareRoom(roomId: string, campusId: string): Promise<void> {
-  return invoke<void>("setup_room_unshare", { roomId, campusId });
+export function unshareRoom(
+  schoolId: string,
+  roomId: string,
+  campusId: string,
+): Promise<void> {
+  return invoke<void>("setup_room_unshare", { schoolId, roomId, campusId });
 }
 
 /** Deletes a room. Its campus associations go with it. */
-export function deleteRoom(id: string): Promise<void> {
-  return invoke<void>("setup_room_delete", { id });
+export function deleteRoom(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_room_delete", { schoolId, id });
 }
 
 // ------------------------------------------------------------------------- resource
@@ -402,8 +410,8 @@ export function updateResource(id: string, input: ResourceInput): Promise<Resour
 }
 
 /** Deletes a resource. */
-export function deleteResource(id: string): Promise<void> {
-  return invoke<void>("setup_resource_delete", { id });
+export function deleteResource(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_resource_delete", { schoolId, id });
 }
 
 // -------------------------------------------------------------------- academic year
@@ -432,8 +440,8 @@ export function updateAcademicYear(
 }
 
 /** Deletes an academic year. Refused while it still has terms. */
-export function deleteAcademicYear(id: string): Promise<void> {
-  return invoke<void>("setup_academic_year_delete", { id });
+export function deleteAcademicYear(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_academic_year_delete", { schoolId, id });
 }
 
 // ----------------------------------------------------------------------------- term
@@ -459,8 +467,8 @@ export function updateTerm(id: string, input: TermInput): Promise<Term> {
 }
 
 /** Deletes a term. Refused while a timeslot or calendar day still names it. */
-export function deleteTerm(id: string): Promise<void> {
-  return invoke<void>("setup_term_delete", { id });
+export function deleteTerm(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_term_delete", { schoolId, id });
 }
 
 // ---------------------------------------------------------------------------- cycle
@@ -486,8 +494,8 @@ export function updateCycle(id: string, input: CycleInput): Promise<Cycle> {
 }
 
 /** Deletes a cycle. Refused while it still has days or timeslots. */
-export function deleteCycle(id: string): Promise<void> {
-  return invoke<void>("setup_cycle_delete", { id });
+export function deleteCycle(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_cycle_delete", { schoolId, id });
 }
 
 /**
@@ -540,8 +548,8 @@ export function updateCycleDay(id: string, input: CycleDayInput): Promise<CycleD
 }
 
 /** Deletes a cycle day. Refused while a timeslot or mapped date still names it. */
-export function deleteCycleDay(id: string): Promise<void> {
-  return invoke<void>("setup_cycle_day_delete", { id });
+export function deleteCycleDay(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_cycle_day_delete", { schoolId, id });
 }
 
 // ----------------------------------------------------------------- period structure
@@ -572,8 +580,8 @@ export function updatePeriodStructure(
 }
 
 /** Deletes a bell schedule. Refused while it still has periods. */
-export function deletePeriodStructure(id: string): Promise<void> {
-  return invoke<void>("setup_period_structure_delete", { id });
+export function deletePeriodStructure(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_period_structure_delete", { schoolId, id });
 }
 
 // --------------------------------------------------------------------------- period
@@ -599,8 +607,8 @@ export function updatePeriod(id: string, input: PeriodInput): Promise<Period> {
 }
 
 /** Deletes a period. Refused while a timeslot was materialised from it. */
-export function deletePeriod(id: string): Promise<void> {
-  return invoke<void>("setup_period_delete", { id });
+export function deletePeriod(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_period_delete", { schoolId, id });
 }
 
 // --------------------------------------------------------------------- calendar day
@@ -638,8 +646,8 @@ export function updateCalendarDay(
 }
 
 /** Deletes a calendar day. The dates around it are untouched. */
-export function deleteCalendarDay(id: string): Promise<void> {
-  return invoke<void>("setup_calendar_day_delete", { id });
+export function deleteCalendarDay(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_calendar_day_delete", { schoolId, id });
 }
 
 /**
@@ -697,10 +705,15 @@ export function rebuildGrid(
  * confirmation first.
  */
 export function releaseOrphans(
+  schoolId: string,
   request: MaterialisationRequest,
   reviewed: PlanFingerprint,
 ): Promise<string[]> {
-  return invoke<string[]>("setup_grid_release_orphans", { request, reviewed });
+  return invoke<string[]>("setup_grid_release_orphans", {
+    schoolId,
+    request,
+    reviewed,
+  });
 }
 
 /** Every stored slot of one grid, in cycle order. */
@@ -737,8 +750,8 @@ export function updateYearLevel(
 }
 
 /** Deletes a year level, detaching anything classified by it. */
-export function deleteYearLevel(id: string): Promise<void> {
-  return invoke<void>("setup_year_level_delete", { id });
+export function deleteYearLevel(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_year_level_delete", { schoolId, id });
 }
 
 // -------------------------------------------------------------------------- teacher
@@ -769,8 +782,8 @@ export function updateTeacher(id: string, input: TeacherInput): Promise<Teacher>
 }
 
 /** Deletes a teacher. */
-export function deleteTeacher(id: string): Promise<void> {
-  return invoke<void>("setup_teacher_delete", { id });
+export function deleteTeacher(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_teacher_delete", { schoolId, id });
 }
 
 // -------------------------------------------------------------------------- student
@@ -801,8 +814,8 @@ export function updateStudent(id: string, input: StudentInput): Promise<Student>
  * Rejects when they are still in one; {@link listGroupsForStudent} is how a screen finds
  * that out before offering the action rather than after it.
  */
-export function deleteStudent(id: string): Promise<void> {
-  return invoke<void>("setup_student_delete", { id });
+export function deleteStudent(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_student_delete", { schoolId, id });
 }
 
 // -------------------------------------------------------------------- student group
@@ -833,8 +846,8 @@ export function updateStudentGroup(
 }
 
 /** Deletes a group and the memberships that only existed because of it. */
-export function deleteStudentGroup(id: string): Promise<void> {
-  return invoke<void>("setup_student_group_delete", { id });
+export function deleteStudentGroup(schoolId: string, id: string): Promise<void> {
+  return invoke<void>("setup_student_group_delete", { schoolId, id });
 }
 
 // ----------------------------------------------------------------------- membership
@@ -848,10 +861,12 @@ export function addGroupMember(
 
 /** Removes one student from one group. The student is untouched. */
 export function removeGroupMember(
+  schoolId: string,
   studentGroupId: string,
   studentId: string,
 ): Promise<void> {
   return invoke<void>("setup_student_group_member_remove", {
+    schoolId,
     studentGroupId,
     studentId,
   });

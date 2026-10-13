@@ -23,6 +23,7 @@ use uuid::Uuid;
 use evara_core::calendar::WorkingDays;
 
 use crate::repo::structure::{BuildingInput, CampusInput, RoomInput, SchoolInput};
+use crate::tests_support;
 use crate::workspace::Workspace;
 use crate::{Database, DbError, PROJECT_EXTENSION};
 
@@ -473,7 +474,7 @@ fn the_home_campus_cannot_be_withdrawn() {
         .create_room(&room(north, "HALL", None), &[south])
         .expect("create shared room");
 
-    let outcome = project.db().structure().unshare_room(shared.id, north);
+    let outcome = tests_support::unshare_room_here(project.db(), shared.id, north);
     assert!(
         matches!(outcome, Err(DbError::Invalid { .. })),
         "a room must never reach zero campuses and vanish from every screen"
@@ -493,7 +494,7 @@ fn withdrawing_a_share_that_does_not_exist_is_reported_not_ignored() {
         .expect("create room");
 
     assert!(matches!(
-        project.db().structure().unshare_room(local.id, east),
+        tests_support::unshare_room_here(project.db(), local.id, east),
         Err(DbError::NotFound {
             entity: "room share"
         })
@@ -511,11 +512,7 @@ fn withdrawing_a_share_takes_the_room_from_that_campus_only() {
         .create_room(&room(north, "HALL", None), &[south, east])
         .expect("create shared room");
 
-    project
-        .db()
-        .structure()
-        .unshare_room(shared.id, south)
-        .expect("withdraw");
+    tests_support::unshare_room_here(project.db(), shared.id, south).expect("withdraw");
 
     assert!(!visible(&mut project, south).contains(&shared.id));
     assert!(visible(&mut project, north).contains(&shared.id));
@@ -799,10 +796,7 @@ fn a_shared_room_blocks_withdrawing_the_building_share_it_depends_on() {
         .create_room(&room(north, "SC1", Some(shared_building.id)), &[south])
         .expect("create shared room");
 
-    let outcome = project
-        .db()
-        .structure()
-        .unshare_building(shared_building.id, south);
+    let outcome = tests_support::unshare_building_here(project.db(), shared_building.id, south);
 
     let Err(DbError::Invalid { message }) = outcome else {
         panic!("a room shared to south still depends on the building reaching south");
@@ -834,15 +828,9 @@ fn withdrawing_a_building_share_is_allowed_once_the_room_share_is_withdrawn() {
         .create_room(&room(north, "SC1", Some(shared_building.id)), &[south])
         .expect("create shared room");
 
-    project
-        .db()
-        .structure()
-        .unshare_room(shared_room.id, south)
+    tests_support::unshare_room_here(project.db(), shared_room.id, south)
         .expect("withdraw the room first");
-    project
-        .db()
-        .structure()
-        .unshare_building(shared_building.id, south)
+    tests_support::unshare_building_here(project.db(), shared_building.id, south)
         .expect("now the building has nothing depending on it");
 
     assert!(visible(&mut project, north).contains(&shared_room.id));
@@ -865,10 +853,7 @@ fn deleting_a_building_detaches_the_rooms_shared_through_it_rather_than_deleting
         .create_room(&room(north, "SC1", Some(shared_building.id)), &[south])
         .expect("create shared room");
 
-    project
-        .db()
-        .structure()
-        .delete_building(shared_building.id)
+    tests_support::delete_building_here(project.db(), shared_building.id)
         .expect("delete the building");
 
     let survivor = project
@@ -902,11 +887,7 @@ fn deleting_a_shared_room_removes_it_from_every_campus() {
         .create_room(&room(north, "HALL", None), &[south, east])
         .expect("create shared room");
 
-    project
-        .db()
-        .structure()
-        .delete_room(shared.id)
-        .expect("delete");
+    tests_support::delete_room_here(project.db(), shared.id).expect("delete");
 
     for campus in [north, south, east] {
         assert!(visible(&mut project, campus).is_empty());
@@ -934,19 +915,12 @@ fn a_campus_sharing_a_room_cannot_be_deleted_until_the_share_is_withdrawn() {
         .expect("create shared room");
 
     assert!(
-        project.db().structure().delete_campus(south).is_err(),
+        tests_support::delete_campus_here(project.db(), south).is_err(),
         "RESTRICT on room_campus.campus_id, so 'delete a campus' means the same on every edge"
     );
 
-    project
-        .db()
-        .structure()
-        .unshare_room(shared.id, south)
-        .expect("withdraw");
-    project
-        .db()
-        .structure()
-        .delete_campus(south)
+    tests_support::unshare_room_here(project.db(), shared.id, south).expect("withdraw");
+    tests_support::delete_campus_here(project.db(), south)
         .expect("now south has nothing of its own");
 }
 
@@ -1263,11 +1237,7 @@ fn sharing_and_withdrawing_both_reach_the_change_feed() {
         .structure()
         .share_room(shared.id, south)
         .expect("share");
-    project
-        .db()
-        .structure()
-        .unshare_room(shared.id, south)
-        .expect("withdraw");
+    tests_support::unshare_room_here(project.db(), shared.id, south).expect("withdraw");
 
     let feed = project.db().changes_since(0, 1000).expect("feed");
     let new = &feed[before..];
@@ -1300,11 +1270,7 @@ fn deleting_a_shared_room_logs_the_removal_of_each_association() {
 
     let before = project.db().changes_since(0, 1000).expect("feed").len();
 
-    project
-        .db()
-        .structure()
-        .delete_room(shared.id)
-        .expect("delete");
+    tests_support::delete_room_here(project.db(), shared.id).expect("delete");
 
     let feed = project.db().changes_since(0, 1000).expect("feed");
     let new = &feed[before..];

@@ -429,17 +429,25 @@ impl Availability<'_> {
 }
 
 /// Identifier of the rule covering one scope, if any.
+///
+/// Scoped by `school_id` as well as by the identity index's own columns. That index does
+/// not include the school, so without this a clear sent by one school could match a rule
+/// another school had recorded -- and `clear` deletes whatever this finds. V12's triggers
+/// make the combination unreachable today, because a rule's time references must belong to
+/// its own school; this closes it at the query rather than relying on that staying true.
 fn find_scope(tx: &Transaction<'_>, scope: &AvailabilityRuleInput) -> Result<Option<Uuid>> {
     let raw: Option<String> = tx
         .query_row(
             "SELECT id FROM availability
-             WHERE entity_kind = ?
+             WHERE school_id = ?
+               AND entity_kind = ?
                AND entity_id = ?
                AND COALESCE(timeslot_id, '') = ?
                AND COALESCE(cycle_day_id, '') = ?
                AND COALESCE(period_id, '') = ?
                AND COALESCE(term_id, '') = ?",
             rusqlite::params![
+                text(scope.school_id),
                 scope.entity_kind.as_str(),
                 text(scope.entity_id),
                 opt_text(scope.timeslot_id).unwrap_or_default(),

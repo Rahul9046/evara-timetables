@@ -310,10 +310,7 @@ fn editing_a_weekly_cycle_restores_a_day_that_went_missing() {
     let before = snapshot(&mut project, cycle);
     let sunday = before[6].1;
 
-    project
-        .db()
-        .time_model()
-        .delete_cycle_day(sunday)
+    tests_support::delete_cycle_day_here(project.db(), sunday)
         .expect("nothing references a brand-new day");
     assert_eq!(days_of(&mut project, cycle).len(), 6);
 

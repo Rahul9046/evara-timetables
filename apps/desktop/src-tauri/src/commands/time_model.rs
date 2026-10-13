@@ -89,9 +89,13 @@ pub fn setup_cycle_update(
 
 /// Deletes a cycle. Refused while it still has days or timeslots.
 #[tauri::command]
-pub fn setup_cycle_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_cycle_delete(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+    id: Uuid,
+) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.time_model()?.delete_cycle(id)?)
+    Ok(ws.time_model()?.delete_cycle(school_id, id)?)
 }
 
 /// Which of a cycle's declared positions have a day, and which are missing.
@@ -178,9 +182,13 @@ pub fn setup_cycle_day_update(
 /// point: see [`super::grid::setup_grid_preview`] for how to find out what is in the way
 /// *before* trying, by previewing the grid without this day.
 #[tauri::command]
-pub fn setup_cycle_day_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_cycle_day_delete(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+    id: Uuid,
+) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.time_model()?.delete_cycle_day(id)?)
+    Ok(ws.time_model()?.delete_cycle_day(school_id, id)?)
 }
 
 // -------------------------------------------------------------------- period structure
@@ -234,9 +242,13 @@ pub fn setup_period_structure_update(
 
 /// Deletes a bell schedule. Refused while it still has periods.
 #[tauri::command]
-pub fn setup_period_structure_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_period_structure_delete(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+    id: Uuid,
+) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.time_model()?.delete_period_structure(id)?)
+    Ok(ws.time_model()?.delete_period_structure(school_id, id)?)
 }
 
 // ---------------------------------------------------------------------------- period
@@ -285,9 +297,13 @@ pub fn setup_period_update(
 
 /// Deletes a period. Refused while a timeslot was materialised from it.
 #[tauri::command]
-pub fn setup_period_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_period_delete(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+    id: Uuid,
+) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.time_model()?.delete_period(id)?)
+    Ok(ws.time_model()?.delete_period(school_id, id)?)
 }
 
 // ----------------------------------------------------------------------- calendar day
@@ -342,9 +358,13 @@ pub fn setup_calendar_day_update(
 
 /// Deletes a calendar day. The dates around it are untouched.
 #[tauri::command]
-pub fn setup_calendar_day_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_calendar_day_delete(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+    id: Uuid,
+) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.time_model()?.delete_calendar_day(id)?)
+    Ok(ws.time_model()?.delete_calendar_day(school_id, id)?)
 }
 
 /// Mapped teaching dates that land on a weekday the school does not work.
