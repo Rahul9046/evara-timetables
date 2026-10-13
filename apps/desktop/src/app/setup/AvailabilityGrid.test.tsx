@@ -313,3 +313,41 @@ describe("rules the grid cannot show", () => {
     expect(screen.queryByText(/not shown above/i)).toBeNull();
   });
 });
+
+describe("a rule scoped to one term", () => {
+  // The grid writes all-year rules only, so a term-scoped cell is a rule of another
+  // granularity that happens to name a cell. Drawing it would claim an all-year
+  // restriction that is not there, and the next click would write a second rule beside
+  // it rather than editing the one on screen.
+  it("is counted as not shown rather than drawn in its cell", async () => {
+    listAvailability.mockResolvedValue([rule({ id: "rule-4", termId: "term-1" })]);
+    renderGrid();
+
+    expect(await screen.findByText(/1 rule is not shown above/i)).toBeTruthy();
+    const table = await screen.findByRole("table");
+    expect(
+      within(table).getByRole("button", {
+        name: "Amara Okafor, Mon, P1: available",
+      }),
+    ).toBeTruthy();
+  });
+
+  it("is left alone when the same cell is edited for the whole year", async () => {
+    listAvailability.mockResolvedValue([rule({ id: "rule-4", termId: "term-1" })]);
+    renderGrid();
+
+    const table = await screen.findByRole("table");
+    await userEvent.click(
+      within(table).getByRole("button", { name: "Amara Okafor, Mon, P1: available" }),
+    );
+
+    await waitFor(() => expect(setAvailability).toHaveBeenCalledTimes(1));
+    expect(setAvailability.mock.calls[0]?.[0]).toMatchObject({
+      cycleDayId: "day-1",
+      periodId: "period-1",
+      termId: null,
+      status: "UNAVAILABLE",
+    });
+    expect(clearAvailability).not.toHaveBeenCalled();
+  });
+});

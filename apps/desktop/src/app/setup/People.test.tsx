@@ -13,6 +13,7 @@
  * - a blank group size is sent as `null`, so "use the member list" survives the round trip
  * - a student in groups is warned *before* Delete is pressed, not refused after
  * - membership is per-group and plural, and removing one does not touch the student
+ * - removing a membership asks first, because nothing else records it ever existed
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -304,23 +305,54 @@ describe("Student groups", () => {
     expect(deleteStudent).not.toHaveBeenCalled();
   });
 
-  it("removes a member by the pair, leaving the student alone", async () => {
-    const user = userEvent.setup();
+  /** Opens the member panel on `8A Homeroom` with Ines Varga in it. */
+  async function openMembers(user: ReturnType<typeof userEvent.setup>) {
     listStudentGroups.mockResolvedValue([group()]);
     listStudents.mockResolvedValue([student()]);
     listGroupMembers.mockResolvedValue([student()]);
-    removeGroupMember.mockResolvedValue(undefined);
 
     render(<StudentGroups school={SCHOOL} />);
     await user.selectOptions(
       await screen.findByLabelText(/group to edit members of/i),
       "g-1",
     );
+    // The row's button says "Remove" and spells out the rest for a screen reader, and the
+    // accessible name is matched unnormalised — hence the loose leading whitespace.
+    return screen.findByRole("button", { name: /Ines Varga from 8A Homeroom/i });
+  }
 
-    await user.click(await screen.findByRole("button", { name: /remove/i }));
+  it("removes a member by the pair, leaving the student alone", async () => {
+    const user = userEvent.setup();
+    removeGroupMember.mockResolvedValue(undefined);
+
+    await user.click(await openMembers(user));
+    await user.click(screen.getByRole("button", { name: "Remove from group" }));
 
     await waitFor(() => expect(removeGroupMember).toHaveBeenCalledWith("g-1", "s-1"));
     expect(deleteStudent).not.toHaveBeenCalled();
+  });
+
+  it("asks before removing a member, because nothing else records they were in it", async () => {
+    // Membership is the only record a student was ever in a group until Phase 3's
+    // enrolment arrives, and the change feed stores which row changed rather than what it
+    // held. An unconfirmed click therefore destroys history irrecoverably.
+    const user = userEvent.setup();
+
+    await user.click(await openMembers(user));
+
+    expect(removeGroupMember).not.toHaveBeenCalled();
+    expect(screen.getByText(/cannot be undone/i)).toBeTruthy();
+    expect(screen.getByText(/currently enrolled/i)).toBeTruthy();
+  });
+
+  it("removes nothing when the confirmation is dismissed", async () => {
+    const user = userEvent.setup();
+
+    await user.click(await openMembers(user));
+    await user.click(screen.getByRole("button", { name: /cancel/i }));
+
+    expect(removeGroupMember).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Remove from group" })).toBeNull();
   });
 
   it("offers only students who are not already in the group", async () => {

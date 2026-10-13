@@ -549,6 +549,92 @@ fn a_member_can_be_added_and_removed_without_touching_the_student() {
 }
 
 #[test]
+fn a_student_who_leaves_keeps_every_group_they_were_in() {
+    // The whole argument for `is_active` existing. If deactivation dropped memberships it
+    // would be a soft delete wearing a different name, and the record it was meant to
+    // preserve -- the only evidence of who was taught in which set, until Phase 3's
+    // `enrolment` -- would be the exact thing it destroyed.
+    let mut project = Project::new();
+    let (school_id, _) = project.with_school();
+
+    let pupil = project
+        .db()
+        .people()
+        .create_student(&student(school_id, "Ines", "Varga"))
+        .expect("create student");
+
+    for (name, kind) in [
+        ("8A Homeroom", GroupKind::Homeroom),
+        ("French elective", GroupKind::ElectiveSet),
+    ] {
+        let created = project
+            .db()
+            .people()
+            .create_student_group(&group(school_id, name, kind))
+            .expect("create group");
+        project
+            .db()
+            .people()
+            .add_student_group_member(&StudentGroupMemberInput {
+                student_group_id: created.id,
+                student_id: pupil.id,
+            })
+            .expect("add member");
+    }
+
+    let left = project
+        .db()
+        .people()
+        .update_student(
+            pupil.id,
+            &StudentInput {
+                is_active: false,
+                ..student(school_id, "Ines", "Varga")
+            },
+        )
+        .expect("deactivate student");
+    assert!(!left.is_active);
+    assert_eq!(left.id, pupil.id, "deactivating must not re-identify");
+
+    assert_eq!(
+        project
+            .db()
+            .people()
+            .groups_for_student(pupil.id)
+            .expect("groups for student")
+            .len(),
+        2,
+        "deactivation must not take the memberships with it"
+    );
+
+    // And still there tomorrow, which is the half a struct-level assertion cannot see.
+    project.reopen();
+
+    let reopened = project
+        .db()
+        .people()
+        .student(pupil.id)
+        .expect("read student")
+        .expect("the student must survive a reopen");
+    assert!(!reopened.is_active, "the state must survive the reopen too");
+    assert_eq!(
+        project
+            .db()
+            .people()
+            .groups_for_student(pupil.id)
+            .expect("groups for student")
+            .len(),
+        2
+    );
+
+    // An inactive student is still listed, for the reason an inactive teacher is: a
+    // timetable that names them is still a timetable.
+    let listed = project.db().people().students().expect("students");
+    assert_eq!(listed.len(), 1);
+    assert!(!listed[0].is_active);
+}
+
+#[test]
 fn the_same_student_cannot_be_added_to_one_group_twice() {
     let mut project = Project::new();
     let (school_id, _) = project.with_school();

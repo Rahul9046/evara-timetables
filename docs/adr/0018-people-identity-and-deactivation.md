@@ -130,6 +130,11 @@ Two things follow, and both are deliberate:
   record and the rule is protecting less than it does now.
 - Year-rollover tooling belongs with Phase 3, after `enrolment` can absorb the history it
   would otherwise discard.
+- Until then the interface must say so where the loss actually happens. Removing a student
+  from a group is confirmed like a delete, and the confirmation states that this membership
+  is the only record of it and that marking the student as having left keeps their groups.
+  A refusal at the *student* delete is not enough on its own: emptying a group one member
+  at a time reaches the same end without ever meeting that refusal.
 
 ## Alternatives considered
 

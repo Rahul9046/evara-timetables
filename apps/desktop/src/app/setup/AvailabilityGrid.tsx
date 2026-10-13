@@ -101,6 +101,29 @@ function cellKey(cycleDayId: string, periodId: string): string {
   return `${cycleDayId}|${periodId}`;
 }
 
+/**
+ * Whether this grid both draws and writes a rule.
+ *
+ * One predicate for both halves of that question, because the two drifting apart is the
+ * defect it replaces: a rule naming a cell *and a term* was drawn in the grid and left
+ * out of the "not shown" count, so the screen claimed an all-year restriction that was
+ * not there — and the next click wrote a second, all-year rule beside it rather than
+ * editing the one on screen.
+ *
+ * A cell this grid owns is therefore all four things: no exact slot, a day, a period, and
+ * all year.
+ */
+function isPlainCell(
+  rule: AvailabilityRule,
+): rule is AvailabilityRule & { cycleDayId: string; periodId: string } {
+  return (
+    rule.timeslotId === null &&
+    rule.cycleDayId !== null &&
+    rule.periodId !== null &&
+    rule.termId === null
+  );
+}
+
 export function AvailabilityGrid(props: {
   school: School;
   entityKind: AvailabilityEntity;
@@ -185,11 +208,11 @@ export function AvailabilityGrid(props: {
     };
   }, [cycleId, structureId]);
 
-  /** Only the recurring cell rules — what this grid can show and edit. */
+  /** Only the all-year recurring cell rules — what this grid can show and edit. */
   const byCell = useMemo(() => {
     const map = new Map<string, AvailabilityRule>();
     for (const rule of rules ?? []) {
-      if (rule.cycleDayId !== null && rule.periodId !== null && rule.timeslotId === null) {
+      if (isPlainCell(rule)) {
         map.set(cellKey(rule.cycleDayId, rule.periodId), rule);
       }
     }
@@ -204,11 +227,7 @@ export function AvailabilityGrid(props: {
    * that silently misrepresents what is configured.
    */
   const otherRules = useMemo(
-    () =>
-      (rules ?? []).filter(
-        (rule) =>
-          rule.timeslotId !== null || rule.cycleDayId === null || rule.periodId === null,
-      ),
+    () => (rules ?? []).filter((rule) => !isPlainCell(rule)),
     [rules],
   );
 
@@ -429,11 +448,14 @@ export function AvailabilityGrid(props: {
       {otherRules.length > 0 && (
         <Banner tone="warning">
           <strong>
-            {otherRules.length} rule{otherRules.length === 1 ? "" : "s"} are not shown above.
+            {otherRules.length === 1
+              ? "1 rule is not shown above."
+              : `${otherRules.length} rules are not shown above.`}
           </strong>{" "}
-          They cover a whole day, a whole period, one exact slot or a single term, which
-          this editor does not write. They are still in effect and are left untouched by
-          anything you do here.
+          {otherRules.length === 1 ? "It covers" : "They cover"} a whole day, a whole
+          period, one exact slot or a single term, which this editor does not write.{" "}
+          {otherRules.length === 1 ? "It is" : "They are"} still in effect and{" "}
+          {otherRules.length === 1 ? "is" : "are"} left untouched by anything you do here.
         </Banner>
       )}
     </div>

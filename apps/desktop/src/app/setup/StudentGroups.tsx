@@ -24,6 +24,15 @@
  * inconsistency to repair. The panel shows both numbers and lets them disagree, because
  * reconciling them would mean choosing which one to silently overwrite.
  *
+ * ## Removing a member asks first
+ *
+ * Membership is the *only* record that a student was ever in a group: `enrolment` arrives
+ * with Phase 3, and the change feed stores which row changed, never what it held. So a
+ * mis-clicked "Remove" destroys history that nothing in the file can reconstruct, and the
+ * removal is confirmed for the same reason a delete is. It reuses {@link ConfirmDialog} so
+ * that what a destructive action asks is worded and behaved the same here as in
+ * {@link CrudPanel}.
+ *
  * ## The hierarchy is what clash detection will read
  *
  * `parentGroupId` is how a cohort and the sets it was split into are known to be the same
@@ -56,7 +65,7 @@ import {
 } from "../../ipc/setup";
 import { CrudPanel, type CrudSpec } from "../ui/CrudPanel";
 import type { Choice } from "../ui/Field";
-import { Banner, EmptyState } from "../ui/Shell";
+import { Banner, ConfirmDialog, EmptyState } from "../ui/Shell";
 import {
   number,
   text,
@@ -257,6 +266,7 @@ function GroupMembers(props: {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState<string>("");
+  const [pending, setPending] = useState<Student | null>(null);
 
   const refresh = useCallback((groupId: string) => {
     void listGroupMembers(groupId)
@@ -293,17 +303,23 @@ function GroupMembers(props: {
       .finally(() => setBusy(false));
   }, [adding, refresh, selected]);
 
-  const remove = useCallback(
-    (studentId: string) => {
-      if (!selected) return;
-      setBusy(true);
-      void removeGroupMember(selected.id, studentId)
-        .then(() => refresh(selected.id))
-        .catch((cause: unknown) => setError(describeSetupError(cause)))
-        .finally(() => setBusy(false));
-    },
-    [refresh, selected],
-  );
+  const remove = useCallback(() => {
+    if (!selected || pending === null) return;
+    const studentId = pending.id;
+    setBusy(true);
+    void removeGroupMember(selected.id, studentId)
+      .then(() => {
+        setPending(null);
+        refresh(selected.id);
+      })
+      // The banner is on the page rather than in the dialogue, which is closing either
+      // way — the same choice CrudPanel makes for a delete that was refused.
+      .catch((cause: unknown) => {
+        setPending(null);
+        setError(describeSetupError(cause));
+      })
+      .finally(() => setBusy(false));
+  }, [pending, refresh, selected]);
 
   // Only students not already in the group, so adding one is never a no-op that fails.
   const addable = useMemo(() => {
@@ -405,7 +421,7 @@ function GroupMembers(props: {
                         type="button"
                         className="secondary"
                         disabled={busy}
-                        onClick={() => remove(student.id)}
+                        onClick={() => setPending(student)}
                       >
                         Remove
                         <span className="srOnly">
@@ -421,6 +437,32 @@ function GroupMembers(props: {
           )}
         </>
       )}
+
+      <ConfirmDialog
+        open={pending !== null && selected !== null}
+        title="Remove from group"
+        confirmLabel="Remove from group"
+        tone="danger"
+        busy={busy}
+        onConfirm={remove}
+        onCancel={() => setPending(null)}
+      >
+        {pending !== null && selected !== null && (
+          <>
+            <p>
+              {pending.givenName} {pending.familyName} stops being a member of{" "}
+              {selected.name}. The student record itself, and every other group they belong
+              to, are untouched.
+            </p>
+            <p>
+              This membership is the only record that they were ever in this group — Evara
+              keeps no enrolment history yet — so removing it cannot be undone. To record
+              that a student has left the school, clear “Currently enrolled” on them
+              instead and their groups are kept.
+            </p>
+          </>
+        )}
+      </ConfirmDialog>
     </div>
   );
 }

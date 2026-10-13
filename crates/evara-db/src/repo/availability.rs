@@ -233,9 +233,10 @@ impl Availability<'_> {
     ///
     /// # Errors
     ///
-    /// - [`DbError::NotFound`] if the entity does not exist, or if the kind has no table
-    ///   yet (`SUBJECT`).
-    /// - [`DbError::Invalid`] if the rule names no time at all.
+    /// - [`DbError::NotFound`] if the entity does not exist.
+    /// - [`DbError::Invalid`] if the rule names no time at all, or if the kind has no
+    ///   table yet (`SUBJECT`) — a phase boundary rather than a missing row, and the
+    ///   message says so.
     pub fn set(&mut self, input: &AvailabilityRuleInput) -> Result<AvailabilityRule> {
         if input.timeslot_id.is_none() && input.cycle_day_id.is_none() && input.period_id.is_none()
         {
