@@ -356,6 +356,34 @@ fn the_three_granularities_are_separate_rules() {
             .expect("count"),
         3
     );
+
+    // And clearing the cell is a statement about the cell alone. The grid editor writes
+    // and clears this one granularity, so if a clear reached wider than its own scope it
+    // would silently discard rules no screen in this phase can even display.
+    assert!(
+        project
+            .db()
+            .availability()
+            .clear(&cell(&fixture, 0, 0, AvailabilityStatus::Unavailable))
+            .expect("clear the cell")
+    );
+
+    let left = project
+        .db()
+        .availability()
+        .rules_for(AvailabilityEntity::Teacher, fixture.teacher_id)
+        .expect("rules");
+    assert_eq!(left.len(), 2, "only the cell was cleared");
+    assert!(
+        left.iter()
+            .any(|rule| rule.period_id.is_none() && rule.cycle_day_id.is_some()),
+        "the whole-day rule must survive"
+    );
+    assert!(
+        left.iter()
+            .any(|rule| rule.cycle_day_id.is_none() && rule.period_id.is_some()),
+        "the whole-period rule must survive"
+    );
 }
 
 #[test]
