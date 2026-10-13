@@ -974,8 +974,12 @@ describe("a custom cycle", () => {
     render(<CyclesAndCycleDays school={SCHOOL} />);
     await screen.findByRole("button", { name: "Edit Two-week rotation" });
 
-    const preview = await screen.findByText(/comes back round to/);
-    expect(preview.textContent).toMatch(
+    // Awaiting the *finished* sentence, not a fragment of it. The panel renders once with
+    // "Position N" placeholders and again once `listCycleDays` has supplied the labels, so
+    // a weaker pattern resolves against the first render and then asserts on text that is
+    // already stale — which is how this file came to fail intermittently under load and
+    // pass every time in isolation.
+    const preview = await screen.findByText(
       /After Day 5 the rotation comes back round to Day 1/,
     );
     // And it says where dates come from, because they do not come from here.
@@ -994,10 +998,8 @@ describe("a custom cycle", () => {
     render(<CyclesAndCycleDays school={SCHOOL} />);
     await screen.findByRole("button", { name: "Edit Two-week rotation" });
 
-    const preview = await screen.findByText(/comes back round to/);
-    expect(preview.textContent).toMatch(
-      /After Green the rotation comes back round to Red/,
-    );
+    // Same race as above: the chosen labels arrive a tick after the panel first renders.
+    await screen.findByText(/After Green the rotation comes back round to Red/);
   });
 
   it("shows no weekday column and no week table", async () => {
