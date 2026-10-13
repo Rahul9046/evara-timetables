@@ -20,8 +20,8 @@ use uuid::Uuid;
 use evara_core::calendar::WorkingDays;
 
 use crate::repo::availability::{AvailabilityEntity, AvailabilityRuleInput, AvailabilityStatus};
-use crate::repo::people::TeacherInput;
-use crate::repo::structure::{CampusInput, SchoolInput};
+use crate::repo::people::{GroupKind, StudentGroupInput, TeacherInput};
+use crate::repo::structure::{CampusInput, RoomInput, SchoolInput};
 use crate::repo::time_model::{CycleInput, PeriodInput, PeriodStructureInput};
 use crate::workspace::Workspace;
 use crate::{CycleKind, Database, DbError, PROJECT_EXTENSION, PeriodKind};
@@ -39,6 +39,7 @@ struct Project {
 /// The identifiers a test needs to write a rule.
 struct Fixture {
     school_id: Uuid,
+    campus_id: Uuid,
     teacher_id: Uuid,
     cycle_day_ids: Vec<Uuid>,
     period_ids: Vec<Uuid>,
@@ -171,6 +172,7 @@ impl Project {
 
         Fixture {
             school_id: school.id,
+            campus_id: campus.id,
             teacher_id: teacher.id,
             cycle_day_ids,
             period_ids,
@@ -727,4 +729,136 @@ fn every_availability_write_reaches_the_change_feed() {
         ],
         "the insert, the edit and the removal must each be recorded"
     );
+}
+
+// --------------------------------------------------------------- the other two kinds
+
+/// A room on the fixture's campus.
+fn room_on(project: &mut Project, fixture: &Fixture) -> Uuid {
+    project
+        .db()
+        .structure()
+        .create_room(
+            &RoomInput {
+                campus_id: fixture.campus_id,
+                building_id: None,
+                room_type_id: None,
+                name: "Science 1".to_owned(),
+                code: "S1".to_owned(),
+                capacity: 30,
+                is_bookable: true,
+                notes: None,
+            },
+            &[],
+        )
+        .expect("create room")
+        .id
+}
+
+/// A class group in the fixture's school.
+fn group_in(project: &mut Project, fixture: &Fixture) -> Uuid {
+    project
+        .db()
+        .people()
+        .create_student_group(&StudentGroupInput {
+            school_id: fixture.school_id,
+            name: "Grade 8A".to_owned(),
+            code: None,
+            kind: GroupKind::Class,
+            year_level_id: None,
+            parent_group_id: None,
+            size: None,
+            campus_id: None,
+        })
+        .expect("create group")
+        .id
+}
+
+#[test]
+fn a_room_and_a_group_carry_their_own_rules_and_take_them_when_deleted() {
+    // Every other test in this file is about a teacher, and the interface wires the same
+    // grid to Teachers, Rooms and Student groups. The three share one table and one
+    // repository, so what is worth testing is not that each can store a rule but that the
+    // *polymorphic* reference keeps them apart -- and that the two deletes which had to
+    // learn to clear it do, since no foreign key will do it for them.
+    let mut project = Project::new();
+    let fixture = project.with_timetable_shape(CycleKind::Custom, 5);
+    let room_id = room_on(&mut project, &fixture);
+    let group_id = group_in(&mut project, &fixture);
+
+    // The same cell, for all three kinds. Three rules, not one: the identity index leads
+    // on entity_kind, and a room being busy says nothing about a teacher.
+    let everyone = [
+        (AvailabilityEntity::Teacher, fixture.teacher_id),
+        (AvailabilityEntity::Room, room_id),
+        (AvailabilityEntity::StudentGroup, group_id),
+    ];
+    for (kind, id) in everyone {
+        project
+            .db()
+            .availability()
+            .set(&AvailabilityRuleInput {
+                entity_kind: kind,
+                entity_id: id,
+                ..cell(&fixture, 0, 0, AvailabilityStatus::Unavailable)
+            })
+            .expect("set rule");
+    }
+
+    project.reopen();
+
+    for (kind, id) in everyone {
+        assert_eq!(
+            count(&mut project, kind, id),
+            1,
+            "{kind:?} must keep its own rule across a reopen"
+        );
+    }
+
+    // Deleting either one is where a polymorphic reference goes wrong silently: the row
+    // stays, points at nothing, and the solver later reads it as a restriction on an
+    // entity that no longer exists.
+    project
+        .db()
+        .structure()
+        .delete_room(room_id)
+        .expect("delete room");
+    project
+        .db()
+        .people()
+        .delete_student_group(group_id)
+        .expect("delete group");
+
+    assert_eq!(count(&mut project, AvailabilityEntity::Room, room_id), 0);
+    assert_eq!(
+        count(&mut project, AvailabilityEntity::StudentGroup, group_id),
+        0
+    );
+    assert_eq!(
+        count(
+            &mut project,
+            AvailabilityEntity::Teacher,
+            fixture.teacher_id
+        ),
+        1,
+        "and the teacher's rule is none of their business"
+    );
+    assert!(
+        project
+            .db()
+            .availability()
+            .orphans()
+            .expect("orphans")
+            .is_empty(),
+        "no rule may outlive the thing it is about"
+    );
+}
+
+/// How many rules one entity has.
+fn count(project: &mut Project, kind: AvailabilityEntity, id: Uuid) -> i64 {
+    project
+        .db()
+        .availability()
+        .count_for(kind, id)
+        .expect("count")
 }
