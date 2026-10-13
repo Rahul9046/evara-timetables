@@ -809,6 +809,70 @@ fn deleting_a_group_that_was_split_into_others_is_refused() {
 }
 
 #[test]
+fn a_refused_group_delete_destroys_nothing_on_its_way_to_refusing() {
+    // `delete_student_group` refuses, clears availability, removes memberships and then
+    // deletes -- four steps in one transaction, of which only the first can say no. The
+    // property worth pinning is that the no happens *before* any of the destruction and
+    // that the transaction would undo it anyway: a half-applied delete would leave a
+    // cohort whose members had quietly gone.
+    let mut project = Project::new();
+    let (school_id, _) = project.with_school();
+
+    let cohort = project
+        .db()
+        .people()
+        .create_student_group(&group(school_id, "Grade 9", GroupKind::Cohort))
+        .expect("cohort");
+    project
+        .db()
+        .people()
+        .create_student_group(&StudentGroupInput {
+            parent_group_id: Some(cohort.id),
+            ..group(school_id, "9 Set 1", GroupKind::TeachingSet)
+        })
+        .expect("child");
+
+    let pupil = project
+        .db()
+        .people()
+        .create_student(&student(school_id, "Ines", "Varga"))
+        .expect("create student");
+    project
+        .db()
+        .people()
+        .add_student_group_member(&StudentGroupMemberInput {
+            student_group_id: cohort.id,
+            student_id: pupil.id,
+        })
+        .expect("add member");
+
+    let refused = project.db().people().delete_student_group(cohort.id);
+    assert!(
+        matches!(refused, Err(DbError::StillReferenced { .. })),
+        "got {refused:?}"
+    );
+
+    assert_eq!(
+        project
+            .db()
+            .people()
+            .student_group_members(cohort.id)
+            .expect("members")
+            .len(),
+        1,
+        "a refused delete must not have taken the membership with it"
+    );
+    assert!(
+        project
+            .db()
+            .people()
+            .student_group(cohort.id)
+            .expect("group")
+            .is_some()
+    );
+}
+
+#[test]
 fn a_group_cannot_become_its_own_ancestor() {
     // SQLite can refuse the one-step case with a CHECK. The two-step case is why the
     // repository walks the chain: without it, resolving the hierarchy never terminates.
