@@ -37,6 +37,7 @@ const updateStudentGroup = vi.fn();
 const deleteStudentGroup = vi.fn();
 const listGroupMembers = vi.fn<(groupId: string) => Promise<Student[]>>();
 const addGroupMember = vi.fn();
+const countGroupMembers = vi.fn<(groupId: string) => Promise<number>>();
 const removeGroupMember = vi.fn();
 const listGroupsForStudent = vi.fn<(studentId: string) => Promise<StudentGroup[]>>();
 
@@ -59,6 +60,7 @@ vi.mock("../../ipc/setup", () => ({
   updateStudentGroup: (id: string, input: unknown) => updateStudentGroup(id, input),
   deleteStudentGroup: (id: string) => deleteStudentGroup(id),
   listGroupMembers: (groupId: string) => listGroupMembers(groupId),
+  countGroupMembers: (groupId: string) => countGroupMembers(groupId),
   addGroupMember: (input: unknown) => addGroupMember(input),
   removeGroupMember: (groupId: string, studentId: string) =>
     removeGroupMember(groupId, studentId),
@@ -158,6 +160,7 @@ beforeEach(() => {
   listStudents.mockResolvedValue([]);
   listStudentGroups.mockResolvedValue([]);
   listGroupMembers.mockResolvedValue([]);
+  countGroupMembers.mockResolvedValue(0);
   listGroupsForStudent.mockResolvedValue([]);
 });
 
@@ -330,6 +333,22 @@ describe("Student groups", () => {
 
     await waitFor(() => expect(removeGroupMember).toHaveBeenCalledWith("g-1", "s-1"));
     expect(deleteStudent).not.toHaveBeenCalled();
+  });
+
+  it("says how many students a group delete will unlist", async () => {
+    // `countGroupMembers` exists for this dialogue and nothing else -- the command's own
+    // documentation says so. Without it the confirmation says what is kept and never what
+    // goes, which is the half the user needs.
+    const user = userEvent.setup();
+    listStudentGroups.mockResolvedValue([group()]);
+    countGroupMembers.mockResolvedValue(23);
+
+    render(<StudentGroups school={SCHOOL} />);
+    await user.click(await screen.findByRole("button", { name: /^Delete/ }));
+
+    expect(await screen.findByText(/23 students are listed in this group/i)).toBeTruthy();
+    expect(screen.getByText(/nothing else records them/i)).toBeTruthy();
+    expect(deleteStudentGroup).not.toHaveBeenCalled();
   });
 
   it("asks before removing a member, because nothing else records they were in it", async () => {

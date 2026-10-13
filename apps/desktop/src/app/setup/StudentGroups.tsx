@@ -39,7 +39,7 @@
  * students — the sets clash with the cohort, not with each other. Nothing reads it yet;
  * it is collected now because inferring it later from names would be guesswork.
  */
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type {
   Campus,
@@ -52,6 +52,7 @@ import type {
 } from "@evara/domain";
 import {
   addGroupMember,
+  countGroupMembers,
   createStudentGroup,
   deleteStudentGroup,
   describeSetupError,
@@ -102,6 +103,38 @@ export function StudentGroups(props: { school: School }) {
 
   const loadGroups = useCallback(() => listStudentGroups(), []);
   const groups = useList<StudentGroup>(loadGroups);
+
+  /**
+   * How many students are listed in each group, for the delete confirmation.
+   *
+   * Asked of the backend per group rather than counted from a member list the screen does
+   * not hold, and asked up front rather than when Delete is pressed: a confirmation that
+   * has to wait for a round trip either flickers or asks before it knows, and the number
+   * is the whole reason the dialogue is worth reading.
+   */
+  const [memberCounts, setMemberCounts] = useState<Readonly<Record<string, number>>>({});
+
+  useEffect(() => {
+    const rows = groups.items;
+    if (!rows || rows.length === 0) return;
+    let live = true;
+    void Promise.all(
+      rows.map((group) =>
+        countGroupMembers(group.id).then(
+          (count) => [group.id, count] as const,
+          // A count that cannot be read must not take the screen with it. The
+          // confirmation falls back to its wording without a number.
+          () => null,
+        ),
+      ),
+    ).then((pairs) => {
+      if (!live) return;
+      setMemberCounts(Object.fromEntries(pairs.filter((pair) => pair !== null)));
+    });
+    return () => {
+      live = false;
+    };
+  }, [groups.items]);
 
   const campusChoices: readonly Choice[] = useMemo(
     () => (campuses.items ?? []).map((campus) => ({ value: campus.id, label: campus.name })),
@@ -213,8 +246,23 @@ export function StudentGroups(props: { school: School }) {
     remove: (id) => deleteStudentGroup(id),
     emptyHint:
       "No groups yet. A group is whoever a lesson is taught to — a class, a cohort, a homeroom or an elective set.",
-    deleteNote: () =>
-      "The students themselves are kept; only their membership of this group goes.",
+    deleteNote: (row) => {
+      const listed = memberCounts[row.id];
+      if (listed === undefined || listed === 0) {
+        return "The students themselves are kept; only their membership of this group goes.";
+      }
+      return (
+        <p>
+          <strong>
+            {listed} student{listed === 1 ? "" : "s"} {listed === 1 ? "is" : "are"} listed
+            in this group.
+          </strong>{" "}
+          {listed === 1 ? "That membership goes" : "Those memberships go"} with it and
+          nothing else records {listed === 1 ? "it" : "them"} — the students themselves are
+          kept.
+        </p>
+      );
+    },
   };
 
   return (
