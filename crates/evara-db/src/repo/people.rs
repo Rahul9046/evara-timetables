@@ -36,6 +36,11 @@ use rusqlite::{OptionalExtension, Transaction};
 use uuid::Uuid;
 
 use super::availability::{AvailabilityEntity, clear_for_entity};
+use super::membership::{
+    EnrolmentStatus, StudentEnrolmentInput, eligibility_of_teacher, enrolments_of_student,
+    insert_enrolment, insert_membership, memberships_of_teacher, mirror_student_onto_enrolment,
+    other_employers, other_schools_attended,
+};
 use super::row::{entity, opt_text, text};
 use super::{Stamp, delete, require_same_school, translate, update};
 use crate::Database;
@@ -338,6 +343,10 @@ impl People<'_> {
             require_same_school(tx, "year level", "year_level", id, school_id)?;
             detach_year_level(tx, "student", id)?;
             detach_year_level(tx, "student_group", id)?;
+            // V13 added a third table that classifies by year level, and it is the
+            // authoritative one. Leaving it to the schema's SET NULL would change rows
+            // without incrementing `rev`, which is the thing this helper exists to avoid.
+            detach_year_level(tx, "student_school_enrolment", id)?;
             delete(tx, "year level", "year_level", id)
         })
     }
@@ -373,7 +382,7 @@ fn detach_year_level(tx: &Transaction<'_>, table: &'static str, year_level_id: U
 
 // --------------------------------------------------------------------------- teacher
 
-const TEACHER_COLUMNS: &str = "id, school_id, code, given_name, family_name, email, \
+pub(crate) const TEACHER_COLUMNS: &str = "id, school_id, code, given_name, family_name, email, \
      home_campus_id, fte_percent, max_periods_per_day, max_periods_per_cycle, \
      max_consecutive_periods, notes, is_active, created_at, updated_at, rev";
 
@@ -383,13 +392,24 @@ const TEACHER_ASSIGNMENTS: &str = "code = ?, given_name = ?, family_name = ?, em
      max_consecutive_periods = ?, notes = ?, is_active = ?";
 
 impl People<'_> {
-    /// Creates a teacher.
+    /// Creates a teacher, and the membership of their home school.
+    ///
+    /// Both in one transaction, because a teacher with no membership would be in a state
+    /// the rest of the model treats as impossible: `teacher_school` is the authority on
+    /// which schools employ somebody, so a teacher without the row would be employed by
+    /// nobody and appear in no staff list -- including the one of the school that had just
+    /// created them.
+    ///
+    /// The teacher row is written first out of necessity: the membership references it.
+    /// That ordering is why `teacher_references_a_member_school_insert` still accepts the
+    /// home school directly, and the migration says so.
     ///
     /// # Errors
     ///
     /// [`DbError::DuplicateValue`] if the code is taken within the school.
     pub fn create_teacher(&mut self, input: &TeacherInput) -> Result<Teacher> {
         let stamp = Stamp::new();
+        let membership = Stamp::new();
         self.db.write(|tx| {
             tx.execute(
                 "INSERT INTO teacher (id, school_id, code, given_name, family_name, email,
@@ -416,7 +436,14 @@ impl People<'_> {
                 ],
             )
             .map_err(|error| translate(error, "teacher"))?;
-            Ok(())
+
+            // The membership inherits the project-level flag, which is what the V13
+            // backfill did for every teacher that already existed: before memberships,
+            // `is_active` WAS the per-school answer, and a teacher entered as inactive is
+            // being recorded rather than employed. The two flags diverge from here --
+            // `update_teacher` never touches this row again, and eligibility is their
+            // conjunction.
+            insert_membership(tx, &membership, stamp.id, input.school_id, input.is_active)
         })?;
         self.teacher(stamp.id)?
             .ok_or(DbError::NotFound { entity: "teacher" })
@@ -437,10 +464,20 @@ impl People<'_> {
         })
     }
 
-    /// Every teacher, active and inactive, ordered by name.
+    /// Every teacher one school employs, active and inactive, ordered by name.
     ///
-    /// Inactive teachers are included. Filtering them is the interface's decision, and a
-    /// repository that hid them would also hide them from a timetable that names one.
+    /// Reads `teacher_school`, **not** `teacher.school_id`. Since `V13` the home school is
+    /// one membership among possibly several, and a listing built on the column would miss
+    /// every shared teacher the school had been given -- which is the whole thing ADR 0021
+    /// exists to make work. A teacher belonging to two schools appears in both lists, once
+    /// each, as the same row with the same identifier.
+    ///
+    /// Inactive teachers and inactive memberships are both included. Filtering them is the
+    /// interface's decision, and a repository that hid them would also hide them from a
+    /// timetable that names one. [`Membership::school_teachers`] carries each school's own
+    /// view of employment alongside the person, for a screen that needs to show it.
+    ///
+    /// [`Membership::school_teachers`]: super::membership::Membership::school_teachers
     ///
     /// # Errors
     ///
@@ -448,8 +485,15 @@ impl People<'_> {
     pub fn teachers(&self, school_id: Uuid) -> Result<Vec<Teacher>> {
         self.db.read(|conn| {
             let mut stmt = conn.prepare(&format!(
-                "SELECT {TEACHER_COLUMNS} FROM teacher WHERE school_id = ? \
-                 ORDER BY family_name, given_name, id"
+                "SELECT {} FROM teacher t
+                 JOIN teacher_school ts ON ts.teacher_id = t.id
+                 WHERE ts.school_id = ?
+                 ORDER BY t.family_name, t.given_name, t.id",
+                TEACHER_COLUMNS
+                    .split(", ")
+                    .map(|column| format!("t.{column}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ))?;
             let rows = stmt.query_map([text(school_id)], Teacher::from_row)?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -493,28 +537,63 @@ impl People<'_> {
             .ok_or(DbError::NotFound { entity: "teacher" })
     }
 
-    /// Deletes a teacher, and the availability rules that were about them.
+    /// Deletes a teacher nobody else employs, and the rows that were only about them.
     ///
-    /// Their availability goes because it is *theirs* — a rule saying "not on Friday
-    /// afternoons" means nothing once the person it describes is gone, and `entity_id` is
-    /// polymorphic so no foreign key would have caught it. The rows are removed through
-    /// `repo::delete` so each is a truthful change-log entry rather than a silent orphan.
+    /// # Deleting a person is not the same as letting go of them
     ///
-    /// Nothing else references a teacher yet — activities arrive in Phase 3 — so this
-    /// otherwise succeeds today. When `activity_teacher` exists its RESTRICT edge makes
-    /// this refuse for a teacher who is timetabled, which is the behaviour the schema is
-    /// already shaped for.
+    /// Since `V13` a teacher may be employed by several schools, and this is the operation
+    /// that destroys the person rather than a relationship. So it takes the authority a
+    /// shared facility takes in ADR 0019, for the same reason: a hall created on
+    /// Northgate's campus and shared with Southmoor's is a hall Southmoor is timetabling
+    /// into, and Northgate deleting it would take Southmoor's room away without Southmoor
+    /// being asked.
+    ///
+    /// - Only the **home** school may delete a teacher -- [`require_same_school`] reads
+    ///   `teacher.school_id`, which is exactly that.
+    /// - And only **while nobody else employs them**: another school's membership makes
+    ///   this [`DbError::StillReferenced`], and the way forward is for that school to
+    ///   remove its own membership first -- an operation that exists, and that the other
+    ///   school can see.
+    ///
+    /// A school merely finished with a shared teacher wants
+    /// `Membership::remove_teacher_from_school`; a school whose teacher has left wants
+    /// `Membership::set_teacher_membership_active`. Neither of them can reach this.
+    ///
+    /// # What goes with them
+    ///
+    /// Their home membership and every campus eligibility, in this transaction and through
+    /// [`super::delete`] so each is a truthful change-log entry rather than a silent
+    /// orphan. Their availability goes for the reason it always did -- a rule saying "not
+    /// on Friday afternoons" means nothing once the person it describes is gone, and
+    /// `entity_id` is polymorphic so no foreign key would have caught it.
+    ///
+    /// Nothing else references a teacher yet -- activities arrive in Phase 3. When
+    /// `activity_teacher` exists its RESTRICT edge makes this refuse for a teacher who is
+    /// timetabled, which is the behaviour the schema is already shaped for.
     ///
     /// # Errors
     ///
-    /// [`DbError::NotFound`] if no such teacher exists.
+    /// - [`DbError::NotFound`] if no such teacher exists.
+    /// - [`DbError::WrongSchool`] if another school created them.
+    /// - [`DbError::StillReferenced`] if another school still employs them.
     pub fn delete_teacher(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
         self.db.write(|tx| {
-            // Before the availability rules go, not after: those rows are the teacher's,
-            // and clearing another school's teacher's rules and *then* refusing the delete
-            // would be the worst of both outcomes.
+            // Both checks before anything is cleared, not after: these rows are the
+            // teacher's, and clearing a shared teacher's availability and *then* refusing
+            // the delete would be the worst of both outcomes. V12 made that mistake
+            // impossible for the school check and the rule is the same for this one.
             require_same_school(tx, "teacher", "teacher", id, school_id)?;
+            if other_employers(tx, id, school_id)? > 0 {
+                return Err(DbError::StillReferenced { entity: "teacher" });
+            }
+
             clear_for_entity(tx, AvailabilityEntity::Teacher, id)?;
+            for eligibility in eligibility_of_teacher(tx, id)? {
+                delete(tx, "campus eligibility", "teacher_campus", eligibility)?;
+            }
+            for membership in memberships_of_teacher(tx, id)? {
+                delete(tx, "school membership", "teacher_school", membership)?;
+            }
             delete(tx, "teacher", "teacher", id)
         })
     }
@@ -522,20 +601,31 @@ impl People<'_> {
 
 // --------------------------------------------------------------------------- student
 
-const STUDENT_COLUMNS: &str = "id, school_id, code, given_name, family_name, email, \
+pub(crate) const STUDENT_COLUMNS: &str = "id, school_id, code, given_name, family_name, email, \
      year_level_id, campus_id, is_active, created_at, updated_at, rev";
 
 const STUDENT_ASSIGNMENTS: &str = "code = ?, given_name = ?, family_name = ?, email = ?, \
      year_level_id = ?, campus_id = ?, is_active = ?";
 
 impl People<'_> {
-    /// Creates a student.
+    /// Creates a student, and their enrolment at their home school.
+    ///
+    /// Both in one transaction, for the reason [`People::create_teacher`] writes a
+    /// membership: `student_school_enrolment` is the authority on where a student is
+    /// placed, and a student with no spell would appear on no roll -- including the one of
+    /// the school that had just entered them.
+    ///
+    /// The spell carries the placement and the code the caller gave, which is what makes
+    /// the two representations agree from the first moment rather than after a later edit.
+    /// `is_active` decides its status: a student entered as having left becomes a `LEFT`
+    /// spell, because that flag has meant "has not left" since `V10`.
     ///
     /// # Errors
     ///
     /// [`DbError::DuplicateValue`] if the admission number is taken within the school.
     pub fn create_student(&mut self, input: &StudentInput) -> Result<Student> {
         let stamp = Stamp::new();
+        let enrolment = Stamp::new();
         self.db.write(|tx| {
             tx.execute(
                 "INSERT INTO student (id, school_id, code, given_name, family_name, email,
@@ -557,7 +647,25 @@ impl People<'_> {
                 ],
             )
             .map_err(|error| translate(error, "student"))?;
-            Ok(())
+
+            insert_enrolment(
+                tx,
+                &enrolment,
+                &StudentEnrolmentInput {
+                    student_id: stamp.id,
+                    school_id: input.school_id,
+                    admission_no: input.code.clone(),
+                    year_level_id: input.year_level_id,
+                    campus_id: input.campus_id,
+                    status: if input.is_active {
+                        EnrolmentStatus::Enrolled
+                    } else {
+                        EnrolmentStatus::Left
+                    },
+                    enrolled_on: None,
+                    left_on: None,
+                },
+            )
         })?;
         self.student(stamp.id)?
             .ok_or(DbError::NotFound { entity: "student" })
@@ -578,7 +686,21 @@ impl People<'_> {
         })
     }
 
-    /// Every student, enrolled and left, ordered by name.
+    /// Every student one school has ever enrolled, current and past, ordered by name.
+    ///
+    /// Reads `student_school_enrolment`, **not** `student.school_id`, for the reason
+    /// [`People::teachers`] reads membership: the column names only the school that
+    /// entered them, and a roll built on it would miss every student shared with or
+    /// transferred into this school.
+    ///
+    /// Past spells are included, which keeps this method meaning exactly what it meant
+    /// before `V13` -- "enrolled and left" -- and is what stops a transferred-away student
+    /// vanishing from the school that still holds their history.
+    /// `Membership::school_students` is the current roll, with each student's placement
+    /// alongside them.
+    ///
+    /// `DISTINCT` because a student who left and rejoined has more than one spell here and
+    /// is still one student.
     ///
     /// # Errors
     ///
@@ -586,8 +708,15 @@ impl People<'_> {
     pub fn students(&self, school_id: Uuid) -> Result<Vec<Student>> {
         self.db.read(|conn| {
             let mut stmt = conn.prepare(&format!(
-                "SELECT {STUDENT_COLUMNS} FROM student WHERE school_id = ? \
-                 ORDER BY family_name, given_name, id"
+                "SELECT DISTINCT {} FROM student s
+                 JOIN student_school_enrolment e ON e.student_id = s.id
+                 WHERE e.school_id = ?
+                 ORDER BY s.family_name, s.given_name, s.id",
+                STUDENT_COLUMNS
+                    .split(", ")
+                    .map(|column| format!("s.{column}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ))?;
             let rows = stmt.query_map([text(school_id)], Student::from_row)?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -597,9 +726,31 @@ impl People<'_> {
 
     /// Replaces a student's details. Their school never changes, and neither does their id.
     ///
+    /// # Two representations, one authority
+    ///
+    /// `V13` made `student_school_enrolment` the authority on where a student is placed,
+    /// and left `student.code`, `student.year_level_id` and `student.campus_id` in place
+    /// as the **home-school** values -- the same treatment `room.campus_id` got in ADR
+    /// 0014. Two writable copies of one fact is exactly the drift the brief for this stage
+    /// forbids, so they are not independent: changing them here rewrites the student's
+    /// current spell at their home school, in this transaction, through [`super::update`]
+    /// so the spell's `rev` and the change feed stay truthful.
+    ///
+    /// What is *not* mirrored is `is_active`. That is the project-level flag -- "in the
+    /// project at all" -- and the per-school answer is the spell's status, exactly as
+    /// `teacher.is_active` and `teacher_school.is_active` are kept apart. Recording that a
+    /// student has left one school of a trust is
+    /// `Membership::leave_school`, and it must not be reachable by editing a shared
+    /// person's details.
+    ///
+    /// A student with no current spell at their home school -- one who has transferred
+    /// away -- has nothing to mirror into, and this edits only the `student` row. ADR 0021
+    /// section 6 records the whole policy.
+    ///
     /// # Errors
     ///
-    /// [`DbError::NotFound`] or [`DbError::DuplicateValue`].
+    /// [`DbError::NotFound`], [`DbError::DuplicateValue`], or [`DbError::Invalid`] if the
+    /// placement belongs to another school.
     pub fn update_student(&mut self, id: Uuid, input: &StudentInput) -> Result<Student> {
         self.db.write(|tx| {
             require_same_school(tx, "student", "student", id, input.school_id)?;
@@ -618,23 +769,40 @@ impl People<'_> {
                     opt_text(input.campus_id),
                     input.is_active,
                 ],
-            )
+            )?;
+            mirror_student_onto_enrolment(tx, id)
         })?;
         self.student(id)?
             .ok_or(DbError::NotFound { entity: "student" })
     }
 
-    /// Deletes a student who belongs to no group.
+    /// Deletes a student who belongs to no group and no other school.
+    ///
+    /// Two refusals, for two different reasons, and both are deliberate:
+    ///
+    /// - **Still in a group.** The difference between a record entered by mistake and a
+    ///   student who has left: the first has no memberships and goes, the second has
+    ///   history worth keeping and should be marked inactive instead.
+    /// - **Still enrolled somewhere else.** Since `V13` a student may attend two schools,
+    ///   and this operation destroys the person rather than one school's relationship with
+    ///   them. Only the home school may reach it, and only while no other school holds a
+    ///   spell -- the authority a shared facility takes in ADR 0019, applied to a shared
+    ///   person. `Membership::leave_school` is what a school finished with a shared
+    ///   student wants, and it cannot reach this.
+    ///
+    /// Their own spells go with them, through [`super::delete`] so each is a truthful
+    /// change-log entry.
     ///
     /// # Errors
     ///
-    /// [`DbError::StillReferenced`] if they are still in one. That is deliberate and is
-    /// the difference between a record entered by mistake and a student who has left:
-    /// the first has no memberships and goes, the second has history worth keeping and
-    /// should be marked inactive instead. The message says which.
+    /// [`DbError::StillReferenced`] in either case; [`DbError::WrongSchool`] if another
+    /// school created them.
     pub fn delete_student(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
         self.db.write(|tx| {
             require_same_school(tx, "student", "student", id, school_id)?;
+            if other_schools_attended(tx, id, school_id)? > 0 {
+                return Err(DbError::StillReferenced { entity: "student" });
+            }
             let groups: i64 = tx.query_row(
                 "SELECT COUNT(*) FROM student_group_member WHERE student_id = ?",
                 [text(id)],
@@ -650,6 +818,9 @@ impl People<'_> {
                 return Err(DbError::StillReferenced { entity: "student" });
             }
 
+            for enrolment in enrolments_of_student(tx, id)? {
+                delete(tx, "enrolment", "student_school_enrolment", enrolment)?;
+            }
             delete(tx, "student", "student", id)
         })
     }
@@ -934,18 +1105,50 @@ entity! {
 const MEMBER_COLUMNS: &str = "id, student_group_id, student_id, created_at, updated_at, rev";
 
 impl People<'_> {
-    /// Adds a student to a group.
+    /// Adds a student to a group of a school they have been enrolled in.
+    ///
+    /// The enrolment requirement is new in `V13` and closes a hole `V12` could not: a
+    /// membership carries no school of its own, so nothing stopped Northgate's student
+    /// being put into Southmoor's cohort -- and a cohort containing another institution's
+    /// students is not an audience anything can be timetabled for.
+    ///
+    /// Stated against enrolment rather than against `student.school_id`, which is what
+    /// makes it correct under sharing: a student enrolled in both schools may legitimately
+    /// be in a group in either. Any spell counts, past ones included, for the reason ADR
+    /// 0018 gives throughout -- membership of 9-MAT-A last year is the only evidence it
+    /// happened, and a student who has left must not have their history refused.
+    ///
+    /// ADR 0006 is untouched: a school that timetables with `student_group.size` and no
+    /// student records at all never reaches this method.
     ///
     /// # Errors
     ///
-    /// [`DbError::DuplicateValue`] if they are already in it, or [`DbError::NotFound`]
-    /// shape errors if either end does not exist.
+    /// [`DbError::DuplicateValue`] if they are already in it, [`DbError::Invalid`] if they
+    /// have never been enrolled in the group's school, or [`DbError::NotFound`] shape
+    /// errors if either end does not exist.
     pub fn add_student_group_member(
         &mut self,
         input: &StudentGroupMemberInput,
     ) -> Result<StudentGroupMember> {
         let stamp = Stamp::new();
         self.db.write(|tx| {
+            // Checked here as well as by the trigger, because the trigger can say the rule
+            // but not the remedy, and "enrol them in this school first" is the remedy.
+            let enrolled: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM student_group g
+                 JOIN student_school_enrolment e ON e.school_id = g.school_id
+                 WHERE g.id = ? AND e.student_id = ?",
+                [text(input.student_group_id), text(input.student_id)],
+                |row| row.get(0),
+            )?;
+            if enrolled == 0 {
+                return Err(DbError::Invalid {
+                    message: "This student is not enrolled in the group's school. Enrol them \
+                              there first."
+                        .to_owned(),
+                });
+            }
+
             tx.execute(
                 "INSERT INTO student_group_member
                      (id, student_group_id, student_id, created_at, updated_at, rev)

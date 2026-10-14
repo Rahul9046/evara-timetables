@@ -23,9 +23,11 @@ tempted to undo it without knowing why.
 | [0015](0015-school-working-days.md) | School working days are a calendar default, stored as a seven-bit set; `cycle.week_count` retired from the UI only | Accepted |
 | [0016](0016-school-logos-in-the-project.md) | School logos are BLOBs in the project, validated from their bytes; Evara's mark is the fallback | Accepted |
 | [0017](0017-weekly-and-custom-cycles.md) | A cycle is weekly or custom; a weekly cycle holds all seven weekdays and no school's calendar | Accepted |
-| [0018](0018-people-identity-and-deactivation.md) | People keep their identity; leaving is a state, not a deletion | Accepted |
+| [0018](0018-people-identity-and-deactivation.md) | People keep their identity; leaving is a state, not a deletion | Accepted — amended by [0021](0021-project-level-people-and-school-membership.md), which gives *leaving* two scopes |
 | [0019](0019-multiple-schools-in-one-project.md) | A project may describe several schools, each owning its own academic structure | Accepted |
 | [0020](0020-in-place-table-rebuild.md) | A table can be rebuilt in place under deferred foreign keys, inside a migration | Accepted |
+| [0021](0021-project-level-people-and-school-membership.md) | People belong to the project; membership, eligibility and enrolment belong to the school | Accepted |
+| [0022](0022-resources-shared-across-campuses.md) | A resource may serve many campuses, and so many schools; one identity, so availability is global | Accepted |
 
 Statuses: **Proposed** (awaiting a decision), **Accepted**, **Superseded by NNNN**,
 **Deprecated**. Accepted records are not edited to reflect a change of mind — a new

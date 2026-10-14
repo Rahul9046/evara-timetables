@@ -173,6 +173,12 @@ pub const TRACKED_TABLES: &[&str] = &[
     "student_group_member",
     // V11 — availability.
     "availability",
+    // V13 — shared identities: school membership, campus eligibility, enrolment history,
+    // and resources shared across campuses.
+    "teacher_school",
+    "teacher_campus",
+    "student_school_enrolment",
+    "resource_campus",
 ];
 
 /// Installs the change-log triggers for one table.

@@ -146,14 +146,16 @@ fn write_all() -> (Vec<Generated>, Vec<String>) {
         AcademicYear, AcademicYearInput, AvailabilityEntity, AvailabilityRule,
         AvailabilityRuleInput, AvailabilityStatus, Building, BuildingInput, BuildingWithCampuses,
         CalendarDay, CalendarDayInput, CalendarDayKind, Campus, CampusInput, Cycle, CycleDay,
-        CycleDayInput, CycleInput, CycleKind, CycleShape, GridCell, GridPreview, GroupKind,
-        MaterialisationCounts, MaterialisationPlan, MaterialisationRequest,
+        CycleDayInput, CycleInput, CycleKind, CycleShape, EnrolmentStatus, GridCell, GridPreview,
+        GroupKind, MaterialisationCounts, MaterialisationPlan, MaterialisationRequest,
         NonWorkingInstructionalDay, Period, PeriodInput, PeriodKind, PeriodStructure,
         PeriodStructureInput, PlanFingerprint, PlannedSlot, Resource, ResourceInput, Room,
         RoomInput, RoomType, RoomTypeInput, RoomWithCampuses, School, SchoolDependents,
-        SchoolInput, Student, StudentGroup, StudentGroupInput, StudentGroupMember,
-        StudentGroupMemberInput, StudentInput, Teacher, TeacherInput, Term, TermInput, Timeslot,
-        TimeslotInput, WeeklyCycleDay, YearLevel, YearLevelInput,
+        SchoolInput, Student, StudentEnrolment, StudentEnrolmentInput, StudentGroup,
+        StudentGroupInput, StudentGroupMember, StudentGroupMemberInput, StudentInSchool,
+        StudentInput, Teacher, TeacherCampus, TeacherCampusInput, TeacherInSchool, TeacherInput,
+        TeacherSchool, TeacherSchoolInput, Term, TermInput, Timeslot, TimeslotInput,
+        WeeklyCycleDay, YearLevel, YearLevelInput,
     };
     use evara_desktop_lib::commands::AppInfo;
     use evara_desktop_lib::commands::error::SetupError;
@@ -192,6 +194,16 @@ fn write_all() -> (Vec<Generated>, Vec<String>) {
         GroupKind,
         StudentGroupMember,
         StudentGroupMemberInput,
+        // Shared identities — Stage 0B.
+        TeacherSchool,
+        TeacherSchoolInput,
+        TeacherInSchool,
+        TeacherCampus,
+        TeacherCampusInput,
+        StudentEnrolment,
+        StudentEnrolmentInput,
+        StudentInSchool,
+        EnrolmentStatus,
         // Availability.
         AvailabilityRule,
         AvailabilityRuleInput,

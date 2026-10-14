@@ -300,6 +300,47 @@ between campuses on different bell schedules has no protection against double-bo
 and will not be warned by anything. The model permits the configuration; the solver cannot
 yet reason about it.
 
+**Widened by `V13`.** `resource_campus` ([adr/0022](adr/0022-resources-shared-across-campuses.md))
+makes a resource shareable on the same terms, so whatever answers this for `room-clash`
+answers it for a resource too. `teacher_school`
+([adr/0021](adr/0021-project-level-people-and-school-membership.md)) makes it worse in
+kind rather than in degree: two *schools* may be in different timezones, so comparing their
+wall-clock bell times is wrong before any period structure is considered. A shared teacher
+double-booked across two schools is the same unprotected configuration as a shared hall,
+and is why cross-school scheduling is explicitly not claimed by Stage 0B.
+
+---
+
+### D23 — Is a teacher's staff code project-wide or per school? ✅ RESOLVED 2026-10-14 (Stage 0B)
+
+**Neither, for now: it stays per school, and the honest model is per membership.**
+
+The pre-implementation audit recommended project-wide — *"one person, one employee code"* —
+and Stage 0B declined, keeping `teacher_code_unique (school_id, code)` from `V10`.
+
+Two reasons, recorded in full in ADR 0021's *Known limitation*:
+
+1. **Tightening it in a migration is unsafe.** Collisions are possible, SQLite has no
+   conditional DDL, and a `.sql` migration can only create the project-wide index
+   unconditionally. On a collision the migration aborts — which rewrites no identifier, the
+   right half of the behaviour — but refinery's grouped transaction then leaves the project
+   **unopenable**, and the user cannot edit the colliding codes in a project that will not
+   open. A released migration is immutable, so the trap would be permanent.
+2. **A staff number is the employer's identifier, not the person's.** A teacher shared
+   between two schools of a trust may hold two payroll numbers, one per school, and a single
+   project-wide `teacher.code` cannot express that at all.
+
+The forward path is therefore a `code` on `teacher_school` alongside the existing column —
+additive, no collision possible, and it says the true thing. Reserved for **Stage B** with
+the rest of the staff model.
+
+One narrow consequence is live and tested: at a student's **home** school, reissuing a
+retired admission number is refused, because `student_code_unique (school_id, code)` spans
+every student a school has ever entered and ADR 0021 §6's mirror brings it to bear. The same
+operation at any other school succeeds. `V10`'s index is standalone, so a later migration can
+relax it to current students; Stage 0B does not, because changing a shipped uniqueness rule
+is its own decision.
+
 ## Technical risks
 
 ### R1 — Incremental scoring correctness (highest)

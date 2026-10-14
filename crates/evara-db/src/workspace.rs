@@ -24,6 +24,7 @@ use crate::Database;
 use crate::cloud_sync::{self, SyncedFolder};
 use crate::error::{DbError, Result};
 use crate::repo::availability::Availability;
+use crate::repo::membership::Membership;
 use crate::repo::people::People;
 use crate::repo::structure::Structure;
 use crate::repo::time_model::TimeModel;
@@ -251,6 +252,22 @@ impl Workspace {
     /// [`DbError::NoProjectOpen`] if nothing is open.
     pub fn people(&mut self) -> Result<People<'_>> {
         Ok(self.open.as_mut().ok_or(DbError::NoProjectOpen)?.people())
+    }
+
+    /// The membership repository for the open project.
+    ///
+    /// School membership, campus eligibility and enrolment history — the relationships
+    /// that since `V13` connect a project-level person to a school.
+    ///
+    /// # Errors
+    ///
+    /// [`DbError::NoProjectOpen`] if nothing is open.
+    pub fn membership(&mut self) -> Result<Membership<'_>> {
+        Ok(self
+            .open
+            .as_mut()
+            .ok_or(DbError::NoProjectOpen)?
+            .membership())
     }
 
     /// The availability repository for the open project.

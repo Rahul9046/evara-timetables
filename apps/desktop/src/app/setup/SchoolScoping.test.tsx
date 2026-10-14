@@ -19,9 +19,10 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 
 import userEvent from "@testing-library/user-event";
 
-import type { Campus, School, Teacher } from "@evara/domain";
+import type { Campus, School, Teacher, TeacherInSchool } from "@evara/domain";
 
 const listTeachers = vi.fn<(schoolId: string) => Promise<Teacher[]>>();
+const listSchoolTeachers = vi.fn<(schoolId: string) => Promise<TeacherInSchool[]>>();
 const deleteTeacher = vi.fn<(schoolId: string, id: string) => Promise<void>>();
 const listCampuses = vi.fn<(schoolId: string) => Promise<Campus[]>>();
 const listAvailability = vi.fn(() => Promise.resolve([]));
@@ -29,6 +30,7 @@ const countAvailability = vi.fn(() => Promise.resolve(0));
 
 vi.mock("../../ipc/setup", () => ({
   listTeachers: (schoolId: string) => listTeachers(schoolId),
+  listSchoolTeachers: (schoolId: string) => listSchoolTeachers(schoolId),
   createTeacher: vi.fn(() => Promise.resolve({})),
   updateTeacher: vi.fn(() => Promise.resolve({})),
   deleteTeacher: (schoolId: string, id: string) => deleteTeacher(schoolId, id),
@@ -88,7 +90,33 @@ beforeEach(() => {
         : [teacher("t-south", "Southwell")],
     ),
   );
+  // Stage 0B: the screen also reads this school's own view of each teacher's employment,
+  // which is school-scoped for exactly the same reason the teacher list is.
+  listSchoolTeachers.mockImplementation((schoolId: string) =>
+    Promise.resolve(
+      (schoolId === NORTH.id
+        ? [teacher("t-north", "Northwood")]
+        : [teacher("t-south", "Southwell")]
+      ).map((row) => membership(row, schoolId)),
+    ),
+  );
 });
+
+/** One school's employment record for one teacher. */
+function membership(row: Teacher, schoolId: string): TeacherInSchool {
+  return {
+    teacher: row,
+    membership: {
+      id: `ts-${row.id}`,
+      teacherId: row.id,
+      schoolId,
+      isActive: true,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      rev: 1,
+    },
+  } as TeacherInSchool;
+}
 
 describe("a school-owned listing", () => {
   it("is asked for with the active school's identifier", async () => {
@@ -98,13 +126,14 @@ describe("a school-owned listing", () => {
     expect(listTeachers).toHaveBeenCalledWith(NORTH.id);
     // Every list on the screen carries it, not just the main one.
     expect(listCampuses).toHaveBeenCalledWith(NORTH.id);
+    expect(listSchoolTeachers).toHaveBeenCalledWith(NORTH.id);
   });
 
   it("never asks without one", async () => {
     render(<Teachers school={NORTH} />);
 
     await waitFor(() => expect(listTeachers).toHaveBeenCalled());
-    for (const call of listTeachers.mock.calls) {
+    for (const call of [...listTeachers.mock.calls, ...listSchoolTeachers.mock.calls]) {
       expect(call[0]).toBe(NORTH.id);
     }
   });

@@ -196,6 +196,8 @@ fn the_schema_contains_exactly_the_phases_shipped_so_far() {
             "period_structure".to_owned(),
             "refinery_schema_history".to_owned(),
             "resource".to_owned(),
+            // V13 — resources shared across campuses.
+            "resource_campus".to_owned(),
             "room".to_owned(),
             // V6 — rooms shared across campuses.
             "room_campus".to_owned(),
@@ -207,7 +209,12 @@ fn the_schema_contains_exactly_the_phases_shipped_so_far() {
             "student".to_owned(),
             "student_group".to_owned(),
             "student_group_member".to_owned(),
+            // V13 — project-level people: school membership, campus eligibility and
+            // enrolment history.
+            "student_school_enrolment".to_owned(),
             "teacher".to_owned(),
+            "teacher_campus".to_owned(),
+            "teacher_school".to_owned(),
             "term".to_owned(),
             "timeslot".to_owned(),
             "year_level".to_owned(),

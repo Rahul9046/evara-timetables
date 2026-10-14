@@ -61,13 +61,20 @@ import type {
   SchoolLogoView,
   SetupError,
   Student,
+  StudentEnrolment,
+  StudentEnrolmentInput,
   StudentGroup,
   StudentGroupInput,
   StudentGroupMember,
   StudentGroupMemberInput,
+  StudentInSchool,
   StudentInput,
   Teacher,
+  TeacherCampus,
+  TeacherInSchool,
   TeacherInput,
+  TeacherSchool,
+  TeacherSchoolInput,
   Term,
   TermInput,
   Timeslot,
@@ -949,4 +956,183 @@ export function countAvailability(
  */
 export function availabilityOrphans(): Promise<AvailabilityRule[]> {
   return invoke<AvailabilityRule[]>("setup_availability_orphans");
+}
+
+// =================================================== shared identities — Stage 0B
+//
+// A teacher and a student are one record each, for one real person. Which schools employ
+// or enrol them is a relationship, and a project may hold several per person — so these
+// functions are about relationships, never about creating a second copy of somebody.
+//
+// Every mutation names the school it acts for. Holding a shared person's identifier is
+// ordinary now, and is not authority to touch another school's employment of them; the
+// backend refuses it with `WrongSchool`. `transferStudent` is the one exception, and names
+// both schools, because a transfer is a single fact about two institutions.
+
+// --------------------------------------------------------------------- school membership
+
+/** Adds an existing teacher to another school. Creates no teacher record. */
+export function addTeacherToSchool(input: TeacherSchoolInput): Promise<TeacherSchool> {
+  return invoke<TeacherSchool>("setup_teacher_membership_add", { input });
+}
+
+/**
+ * Every school one teacher belongs to.
+ *
+ * The complete answer. `teacher.schoolId` names only the school that created them and is
+ * never the whole membership set.
+ */
+export function listTeacherMemberships(teacherId: string): Promise<TeacherSchool[]> {
+  return invoke<TeacherSchool[]>("setup_teacher_membership_list", { teacherId });
+}
+
+/**
+ * Every teacher one school employs, with that school's own view of their employment.
+ *
+ * A shared teacher appears here as the same record, with the same identifier, that the
+ * other school sees. Use this rather than `listTeachers` wherever a screen shows
+ * per-school status: the plain list carries only the project-level flag.
+ */
+export function listSchoolTeachers(schoolId: string): Promise<TeacherInSchool[]> {
+  return invoke<TeacherInSchool[]>("setup_school_teacher_list", { schoolId });
+}
+
+/** Activates or deactivates one school's employment of a teacher. Not a delete. */
+export function setTeacherMembershipActive(
+  schoolId: string,
+  teacherId: string,
+  isActive: boolean,
+): Promise<TeacherSchool> {
+  return invoke<TeacherSchool>("setup_teacher_membership_set_active", {
+    schoolId,
+    teacherId,
+    isActive,
+  });
+}
+
+/** Withdraws one school's employment of a teacher. The person is untouched. */
+export function removeTeacherFromSchool(schoolId: string, teacherId: string): Promise<void> {
+  return invoke<void>("setup_teacher_membership_remove", { schoolId, teacherId });
+}
+
+// -------------------------------------------------------------------- campus eligibility
+
+/** Every campus one teacher may be based at, across every school they belong to. */
+export function listTeacherCampuses(teacherId: string): Promise<string[]> {
+  return invoke<string[]>("setup_teacher_campus_list", { teacherId });
+}
+
+/** Makes a teacher eligible at one of the acting school's campuses. */
+export function assignTeacherCampus(
+  schoolId: string,
+  teacherId: string,
+  campusId: string,
+): Promise<TeacherCampus> {
+  return invoke<TeacherCampus>("setup_teacher_campus_assign", {
+    schoolId,
+    teacherId,
+    campusId,
+  });
+}
+
+/** Withdraws a teacher's eligibility for one campus. Their membership is untouched. */
+export function removeTeacherCampus(
+  schoolId: string,
+  teacherId: string,
+  campusId: string,
+): Promise<void> {
+  return invoke<void>("setup_teacher_campus_remove", { schoolId, teacherId, campusId });
+}
+
+// ---------------------------------------------------------------------- student enrolment
+
+/** Enrols an existing student at a school. Creates no student record. */
+export function enrolStudent(input: StudentEnrolmentInput): Promise<StudentEnrolment> {
+  return invoke<StudentEnrolment>("setup_enrolment_create", { input });
+}
+
+/** Every student currently at one school, with that school's placement for them. */
+export function listSchoolStudents(schoolId: string): Promise<StudentInSchool[]> {
+  return invoke<StudentInSchool[]>("setup_school_student_list", { schoolId });
+}
+
+/**
+ * Every spell one student has ever had, at every school, oldest first.
+ *
+ * A transfer keeps the previous spell rather than rewriting it, so this is where "was she
+ * ever at Northgate?" is answered.
+ */
+export function listEnrolmentHistory(studentId: string): Promise<StudentEnrolment[]> {
+  return invoke<StudentEnrolment[]>("setup_enrolment_history", { studentId });
+}
+
+/** One student's current spell at one school, or `null`. */
+export function currentEnrolment(
+  schoolId: string,
+  studentId: string,
+): Promise<StudentEnrolment | null> {
+  return invoke<StudentEnrolment | null>("setup_enrolment_current", { schoolId, studentId });
+}
+
+/** Replaces one spell's placement, status and dates. */
+export function updateEnrolment(
+  schoolId: string,
+  id: string,
+  input: StudentEnrolmentInput,
+): Promise<StudentEnrolment> {
+  return invoke<StudentEnrolment>("setup_enrolment_update", { schoolId, id, input });
+}
+
+/** Records that a student has left one school. The spell is kept, not deleted. */
+export function leaveSchool(
+  schoolId: string,
+  studentId: string,
+  leftOn: string | null,
+): Promise<StudentEnrolment> {
+  return invoke<StudentEnrolment>("setup_enrolment_leave", { schoolId, studentId, leftOn });
+}
+
+/**
+ * Moves a student between two schools, preserving the identity and both spells.
+ *
+ * Names both schools deliberately: a transfer is one fact about two institutions, and
+ * splitting it would let a student end up enrolled nowhere.
+ */
+export function transferStudent(
+  fromSchoolId: string,
+  toSchoolId: string,
+  studentId: string,
+  arriving: StudentEnrolmentInput,
+): Promise<StudentEnrolment> {
+  return invoke<StudentEnrolment>("setup_student_transfer", {
+    fromSchoolId,
+    toSchoolId,
+    studentId,
+    arriving,
+  });
+}
+
+// ----------------------------------------------------------------------- resource sharing
+
+/** Every campus one resource serves. Possibly empty: a resource may be school-wide. */
+export function listResourceCampuses(resourceId: string): Promise<string[]> {
+  return invoke<string[]>("setup_resource_campus_list", { resourceId });
+}
+
+/** Shares a resource with a campus, which may belong to another school. */
+export function shareResource(
+  schoolId: string,
+  resourceId: string,
+  campusId: string,
+): Promise<void> {
+  return invoke<void>("setup_resource_share", { schoolId, resourceId, campusId });
+}
+
+/** Stops sharing a resource with a campus. Nothing is moved or duplicated. */
+export function unshareResource(
+  schoolId: string,
+  resourceId: string,
+  campusId: string,
+): Promise<void> {
+  return invoke<void>("setup_resource_unshare", { schoolId, resourceId, campusId });
 }

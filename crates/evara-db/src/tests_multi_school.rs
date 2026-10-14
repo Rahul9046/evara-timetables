@@ -1951,13 +1951,20 @@ fn a_refused_deletion_is_not_recorded_as_a_deletion() {
         "a refusal is not a deletion and must not be logged as one"
     );
 
-    // A real deletion still is.
+    // A real deletion still is -- twice over since V13, because a teacher now owns a
+    // school membership and that row is removed through `repo::delete` rather than by a
+    // CASCADE. Two rows went, so two removals are logged; a feed that reported one would
+    // leave every other installation believing the membership was still there.
     project
         .db()
         .people()
         .delete_teacher(south, southern.teacher)
         .expect("Southmoor's own teacher");
-    assert_eq!(deletions_logged(&mut project), before + 1);
+    assert_eq!(
+        deletions_logged(&mut project),
+        before + 2,
+        "the teacher and their home-school membership"
+    );
 }
 
 /// Writes a logo row directly.

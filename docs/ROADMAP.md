@@ -174,10 +174,28 @@ in School Setup, shown only when there is a choice to make. See
 [adr/0019](adr/0019-multiple-schools-in-one-project.md) and
 [adr/0020](adr/0020-in-place-table-rebuild.md).
 
-> Deliberately **not** in Stage 0A, and not implied by it: a teacher or student belonging to
-> several schools (Stage 0B), the school-management interface (Stage 0C), project-level
-> availability, shared resources, and cross-school scheduling. A teacher and a student each
-> still belong to exactly one school.
+**Shared identities and school memberships (Stage 0B) ✅ complete.** Migration `V13`,
+additive: `teacher_school` (which schools employ a person — the authority),
+`teacher_campus` (which campuses they may be based at, refused outside their member
+schools by a trigger pair), `student_school_enrolment` (one row per spell, so a transfer
+keeps history rather than rewriting it) and `resource_campus` (a resource shared by campus,
+the way a building and a room already were). `V12`'s teacher trigger pair widened to
+membership rather than being dropped; a new pair refuses a group member who has never been
+enrolled in the group's school, which is a hole `V12` could not close. Every existing row
+backfilled from what it already said, with its own `created_at` and no revision consumed.
+School-scoped teacher and student listings now read the relationship, not the home column,
+so a shared person appears in both schools' lists as **one** record. Repository and command
+surface for membership, eligibility, enrolment, transfer and resource sharing; the two
+People screens show this school's status and placement rather than the project-level flag.
+See [adr/0021](adr/0021-project-level-people-and-school-membership.md) and
+[adr/0022](adr/0022-resources-shared-across-campuses.md).
+
+> Deliberately **not** in Stage 0A or 0B, and not implied by either: the school-management
+> interface (Stage 0C), a project-wide teacher code (ADR 0021 records the blocker and the
+> better alternative), `department` and `teacher_qualification` (Stage B), project-level
+> availability — a rule still names exactly one school — and cross-school scheduling.
+> Detecting a shared teacher double-booked across two schools needs dated occurrences
+> rather than cycle positions, and nothing here claims it works.
 
 Remaining in this phase:
 

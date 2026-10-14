@@ -28,6 +28,7 @@ use rusqlite::{OptionalExtension, Transaction};
 use uuid::Uuid;
 
 use super::availability::{AvailabilityEntity, clear_for_entity};
+use super::membership::eligibility_at_campus;
 use super::row::{entity, opt_text, parse_id_text, text};
 use super::{Stamp, delete, require_same_school, require_school_owner, translate, update};
 use crate::Database;
@@ -349,6 +350,21 @@ impl Structure<'_> {
             let student_groups = count("SELECT COUNT(*) FROM student_group WHERE school_id = ?")?;
             let availability_rules =
                 count("SELECT COUNT(*) FROM availability WHERE school_id = ?")?;
+            // Only people the school did NOT create. Its own are already counted above,
+            // and counting a home teacher twice would make the "can this be deleted?"
+            // total disagree with itself. These are the shared ones: somebody another
+            // school entered, whom this school employs or enrols -- a RESTRICT edge V13
+            // added, and one the user has to be told about or the refusal is a mystery.
+            let shared_teachers = count(
+                "SELECT COUNT(*) FROM teacher_school ts
+                 JOIN teacher t ON t.id = ts.teacher_id
+                 WHERE ts.school_id = ? AND t.school_id <> ts.school_id",
+            )?;
+            let shared_students = count(
+                "SELECT COUNT(DISTINCT e.student_id) FROM student_school_enrolment e
+                 JOIN student st ON st.id = e.student_id
+                 WHERE e.school_id = ? AND st.school_id <> e.school_id",
+            )?;
 
             Ok(SchoolDependents {
                 total: campuses
@@ -363,7 +379,9 @@ impl Structure<'_> {
                     + teachers
                     + students
                     + student_groups
-                    + availability_rules,
+                    + availability_rules
+                    + shared_teachers
+                    + shared_students,
                 campuses,
                 room_types,
                 resources,
@@ -377,6 +395,8 @@ impl Structure<'_> {
                 students,
                 student_groups,
                 availability_rules,
+                shared_teachers,
+                shared_students,
             })
         })
     }
@@ -478,6 +498,16 @@ pub struct SchoolDependents {
     pub student_groups: i64,
     /// Availability rules recorded against the school.
     pub availability_rules: i64,
+    /// Teachers another school created whom this one employs.
+    ///
+    /// Counted separately from [`SchoolDependents::teachers`] so the two never
+    /// double-count the same person. A shared teacher blocks the delete through
+    /// `teacher_school`, and the school has to withdraw its own membership first.
+    pub shared_teachers: i64,
+    /// Students another school created whom this one has enrolled.
+    ///
+    /// The same separation, for the same reason, through `student_school_enrolment`.
+    pub shared_students: i64,
 }
 
 // ------------------------------------------------------------------------ school logo
@@ -688,7 +718,11 @@ fn require_unshared(
     Ok(())
 }
 
-/// Refuses withdrawing an association that is none of the acting school's business.
+/// Refuses changing an association that is none of the acting school's business.
+///
+/// Written for withdrawing a share and reused for granting one (`share_resource`), because
+/// the question is identical in both directions: does the acting school stand at either end
+/// of this relationship?
 ///
 /// Either authority will do, and both are legitimate:
 ///
@@ -824,16 +858,36 @@ impl Structure<'_> {
 
     /// Deletes a campus.
     ///
+    /// # What is cleared rather than refused
+    ///
+    /// Buildings, rooms and resources based here are RESTRICT and block the delete: the
+    /// user removes or moves them deliberately. The relationships that merely *point* at a
+    /// campus are cleared instead, each through [`super::delete`] so each removal is a
+    /// truthful change-log entry:
+    ///
+    /// - **Availability** about the campus. Polymorphic, so no foreign key would catch it,
+    ///   and a rule about a campus means nothing once the campus is gone.
+    /// - **Teacher campus eligibility** (`V13`). Eligibility is a restriction, and a
+    ///   restriction naming somewhere that no longer exists is not information. Refusing
+    ///   instead would also have been a regression: the `V13` backfill gave every teacher
+    ///   with a home campus one of these rows, so a campus that used to delete cleanly
+    ///   would suddenly not.
+    /// - **Resource shares** to the campus (`V13`). A resource whose *home* campus this is
+    ///   still blocks the delete, through `resource.campus_id`.
+    ///
     /// # Errors
     ///
-    /// [`DbError::StillReferenced`] if buildings, rooms or resources remain on it. Campus
-    /// ownership is RESTRICT: the user removes or moves those deliberately.
+    /// [`DbError::StillReferenced`] if buildings, rooms or resources remain on it.
     pub fn delete_campus(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
         self.db.write(|tx| {
             require_same_school(tx, "campus", "campus", id, school_id)?;
-            // Availability is polymorphic and so has no foreign key to catch this. A rule
-            // about a campus means nothing once the campus is gone.
             clear_for_entity(tx, AvailabilityEntity::Campus, id)?;
+            for eligibility in eligibility_at_campus(tx, id)? {
+                delete(tx, "campus eligibility", "teacher_campus", eligibility)?;
+            }
+            for share in resource_associations_at(tx, id)? {
+                delete(tx, "resource", "resource_campus", share)?;
+            }
             delete(tx, "campus", "campus", id)
         })
     }
@@ -1984,8 +2038,29 @@ fn room_error(error: rusqlite::Error) -> DbError {
 const RESOURCE_COLUMNS: &str =
     "id, school_id, campus_id, name, code, quantity, created_at, updated_at, rev";
 
+/// The same columns, qualified, for the joins through `resource_campus`.
+const RESOURCE_COLUMNS_QUALIFIED: &str = "r.id, r.school_id, r.campus_id, r.name, r.code, \
+     r.quantity, r.created_at, r.updated_at, r.rev";
+
+/// A resource is owned by the school named on it.
+const RESOURCE_OWNER: &str = "SELECT school_id FROM resource WHERE id = ?";
+
+/// How many campuses of *other* schools (`?2` is the acting school) share `?1`.
+const RESOURCE_SHARERS: &str = "SELECT COUNT(*) FROM resource_campus \
+     JOIN campus ON campus.id = resource_campus.campus_id \
+     WHERE resource_campus.resource_id = ?1 AND campus.school_id <> ?2";
+
 impl Structure<'_> {
-    /// Creates a resource.
+    /// Creates a resource, and the association with its home campus if it has one.
+    ///
+    /// Both in one transaction, mirroring [`Structure::create_room`]: `resource_campus` is
+    /// what every later query reads to answer "which campuses?", so leaving
+    /// `resource.campus_id` to imply the home one would mean two tables to consult for one
+    /// answer.
+    ///
+    /// A school-wide resource -- one with no campus -- gets no association, and that is
+    /// not an error state. `V3` made `resource.campus_id` optional on purpose, and
+    /// ADR 0022 keeps it that way: unlike a room, a resource may serve no particular site.
     ///
     /// # Errors
     ///
@@ -2010,6 +2085,10 @@ impl Structure<'_> {
                 ],
             )
             .map_err(|error| translate(error, "resource"))?;
+
+            if let Some(campus_id) = input.campus_id {
+                associate_resource(tx, stamp.id, campus_id)?;
+            }
             Ok(())
         })?;
         self.resource(stamp.id)?
@@ -2031,7 +2110,16 @@ impl Structure<'_> {
         })
     }
 
-    /// Every resource, by name.
+    /// Every resource available to one school, by name.
+    ///
+    /// "Available to" rather than "owned by": a resource another school shared with one of
+    /// this school's campuses appears here, as the same row with the same identifier it
+    /// has at home. That is what makes one minibus show up in two schools' lists without
+    /// being duplicated -- and what will make its occupancy one fact rather than one per
+    /// school when scheduling arrives (ADR 0022).
+    ///
+    /// `DISTINCT` because a resource shared with several of this school's campuses is
+    /// still one resource.
     ///
     /// # Errors
     ///
@@ -2039,15 +2127,145 @@ impl Structure<'_> {
     pub fn resources(&self, school_id: Uuid) -> Result<Vec<Resource>> {
         self.db.read(|conn| {
             let mut stmt = conn.prepare(&format!(
-                "SELECT {RESOURCE_COLUMNS} FROM resource WHERE school_id = ? ORDER BY name, id"
+                "SELECT DISTINCT {RESOURCE_COLUMNS_QUALIFIED} FROM resource r
+                 LEFT JOIN resource_campus rc ON rc.resource_id = r.id
+                 LEFT JOIN campus c ON c.id = rc.campus_id
+                 WHERE r.school_id = ? OR c.school_id = ?
+                 ORDER BY r.name, r.id"
             ))?;
-            let rows = stmt.query_map([text(school_id)], Resource::from_row)?;
+            let rows = stmt.query_map([text(school_id), text(school_id)], Resource::from_row)?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(DbError::from)
         })
     }
 
-    /// Replaces a resource's details.
+    /// Every campus one resource serves.
+    ///
+    /// Complete, and possibly empty: a school-wide resource serves no particular campus.
+    ///
+    /// # Errors
+    ///
+    /// Propagates any database failure, or [`DbError::CorruptIdentifier`].
+    pub fn resource_campuses(&self, resource_id: Uuid) -> Result<Vec<Uuid>> {
+        self.db.read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT rc.campus_id FROM resource_campus rc
+                 JOIN campus c ON c.id = rc.campus_id
+                 WHERE rc.resource_id = ? ORDER BY c.name, c.id",
+            )?;
+            let raw = stmt
+                .query_map([text(resource_id)], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            raw.iter()
+                .map(|value| parse_id_text("resource_campus.campus_id", value))
+                .collect()
+        })
+    }
+
+    /// Shares an existing resource with a campus, which may belong to another school.
+    ///
+    /// Cross-school sharing is the point, so the acting school must own **one** end: the
+    /// resource, or the campus being given it. A third school has no say in either.
+    ///
+    /// # Errors
+    ///
+    /// - [`DbError::NotFound`] if the resource or the campus does not exist.
+    /// - [`DbError::WrongSchool`] if the acting school owns neither end.
+    /// - [`DbError::Invalid`] if that campus already has it. Refused rather than quietly
+    ///   ignored: reaching this point means the caller's idea of the share set is stale.
+    pub fn share_resource(
+        &mut self,
+        school_id: Uuid,
+        resource_id: Uuid,
+        campus_id: Uuid,
+    ) -> Result<()> {
+        self.db.write(|tx| {
+            // The campus first: an identifier that is not there must read as NotFound
+            // rather than as "that belongs to another school", which is what the authority
+            // check would say about a campus with no owner to compare.
+            require_campus(tx, campus_id)?;
+            // Same authority as withdrawing, and the same two legitimate answers -- the
+            // school that owns the resource is lending it, the school that owns the campus
+            // is accepting it. A third school has no say in either direction.
+            require_may_unshare(
+                tx,
+                "resource",
+                RESOURCE_OWNER,
+                resource_id,
+                campus_id,
+                school_id,
+            )?;
+
+            if resource_campuses_in(tx, resource_id)?.contains(&campus_id) {
+                let campus = campus_name(tx, campus_id)?;
+                return Err(DbError::Invalid {
+                    message: format!("{campus} already has this resource."),
+                });
+            }
+            associate_resource(tx, resource_id, campus_id)
+        })
+    }
+
+    /// Stops sharing a resource with a campus.
+    ///
+    /// Nothing is moved, duplicated or deleted: the resource keeps its identity and every
+    /// other campus keeps it.
+    ///
+    /// # Errors
+    ///
+    /// - [`DbError::WrongSchool`] if the acting school owns neither the resource nor the
+    ///   campus. Either authority will do and both are legitimate -- "we no longer use
+    ///   this" and "we are no longer lending it" -- and a third school has neither.
+    /// - [`DbError::NotFound`] if that campus does not share this resource.
+    /// - [`DbError::Invalid`] if it is the resource's home campus. Withdrawing that would
+    ///   contradict `resource.campus_id`, which is immutable here for the reason
+    ///   `room.campus_id` is.
+    pub fn unshare_resource(
+        &mut self,
+        school_id: Uuid,
+        resource_id: Uuid,
+        campus_id: Uuid,
+    ) -> Result<()> {
+        self.db.write(|tx| {
+            require_may_unshare(
+                tx,
+                "resource",
+                RESOURCE_OWNER,
+                resource_id,
+                campus_id,
+                school_id,
+            )?;
+            if resource_home_campus(tx, resource_id)? == Some(campus_id) {
+                let campus = campus_name(tx, campus_id)?;
+                return Err(DbError::Invalid {
+                    message: format!(
+                        "This resource is based at {campus}, so {campus} cannot be removed \
+                         from it. Delete the resource instead, or remove the other campuses."
+                    ),
+                });
+            }
+
+            let Some(association_id) = resource_association(tx, resource_id, campus_id)? else {
+                return Err(DbError::NotFound {
+                    entity: "resource share",
+                });
+            };
+            delete(tx, "resource", "resource_campus", association_id)
+        })
+    }
+
+    /// Replaces a resource's details, moving its home campus association with it.
+    ///
+    /// Unlike a room's, a resource's home campus has always been editable, and that stays
+    /// true. What `V13` adds is that the association has to follow: the old home's row is
+    /// withdrawn and the new home's written, in this transaction and through
+    /// [`super::delete`] so both are truthful change-log entries. Campuses the resource was
+    /// *shared* with are untouched -- another school's access is not this school's to
+    /// revoke by editing a field.
+    ///
+    /// If the new home campus is one it was already shared with, the existing association
+    /// is kept rather than rewritten. The row says the same thing either way, and
+    /// rewriting it would consume a revision to record nothing.
     ///
     /// # Errors
     ///
@@ -2055,6 +2273,7 @@ impl Structure<'_> {
     pub fn update_resource(&mut self, id: Uuid, input: &ResourceInput) -> Result<Resource> {
         self.db.write(|tx| {
             require_same_school(tx, "resource", "resource", id, input.school_id)?;
+            let previous_home = resource_home_campus(tx, id)?;
             let campus = opt_text(input.campus_id);
             update(
                 tx,
@@ -2068,24 +2287,152 @@ impl Structure<'_> {
                     &input.code,
                     &input.quantity,
                 ],
-            )
+            )?;
+
+            if previous_home != input.campus_id {
+                if let Some(old) = previous_home
+                    && let Some(association) = resource_association(tx, id, old)?
+                {
+                    delete(tx, "resource", "resource_campus", association)?;
+                }
+                if let Some(new) = input.campus_id
+                    && resource_association(tx, id, new)?.is_none()
+                {
+                    associate_resource(tx, id, new)?;
+                }
+            }
+            Ok(())
         })?;
         self.resource(id)?
             .ok_or(DbError::NotFound { entity: "resource" })
     }
 
-    /// Deletes a resource.
+    /// Deletes a resource nobody else shares.
+    ///
+    /// The ADR 0019 rule for a shared facility, now that a resource can be one: ownership
+    /// is not sufficient authority to *destroy* something another school is timetabling
+    /// into. Only the owning school may delete, and only while no other school's campus
+    /// shares it -- otherwise [`DbError::StillReferenced`], and the way forward is to
+    /// withdraw that school's access first, an operation that exists and that the other
+    /// school can see.
+    ///
+    /// Its own campus associations are removed explicitly through [`super::delete`], one
+    /// change-log entry each, rather than by a `CASCADE` SQLite would apply without firing
+    /// the trigger.
     ///
     /// # Errors
     ///
-    /// [`DbError::NotFound`] if there is no such resource.
+    /// - [`DbError::NotFound`] if there is no such resource.
+    /// - [`DbError::WrongSchool`] if another school owns it.
+    /// - [`DbError::StillReferenced`] if another school still shares it.
     pub fn delete_resource(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
         self.db.write(|tx| {
             require_same_school(tx, "resource", "resource", id, school_id)?;
+            require_unshared(tx, "resource", RESOURCE_SHARERS, id, school_id)?;
             clear_for_entity(tx, AvailabilityEntity::Resource, id)?;
+            for association_id in resource_associations_of(tx, id)? {
+                delete(tx, "resource", "resource_campus", association_id)?;
+            }
             delete(tx, "resource", "resource", id)
         })
     }
+}
+
+/// Writes one resource-campus association row.
+fn associate_resource(tx: &Transaction<'_>, resource_id: Uuid, campus_id: Uuid) -> Result<()> {
+    let stamp = Stamp::new();
+    tx.execute(
+        "INSERT INTO resource_campus (id, resource_id, campus_id, created_at, updated_at, rev)
+         VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            text(stamp.id),
+            text(resource_id),
+            text(campus_id),
+            &stamp.created_at,
+            &stamp.updated_at,
+            stamp.rev,
+        ),
+    )
+    .map_err(|error| translate(error, "resource"))?;
+    Ok(())
+}
+
+/// Identifier of one association, or `None` when that campus does not share the resource.
+fn resource_association(
+    tx: &Transaction<'_>,
+    resource_id: Uuid,
+    campus_id: Uuid,
+) -> Result<Option<Uuid>> {
+    let found: Option<String> = tx
+        .query_row(
+            "SELECT id FROM resource_campus WHERE resource_id = ? AND campus_id = ?",
+            [text(resource_id), text(campus_id)],
+            |row| row.get(0),
+        )
+        .optional()?;
+    found
+        .as_deref()
+        .map(|value| parse_id_text("resource_campus.id", value))
+        .transpose()
+}
+
+/// Identifiers of every association of one resource.
+fn resource_associations_of(tx: &Transaction<'_>, resource_id: Uuid) -> Result<Vec<Uuid>> {
+    association_ids(
+        tx,
+        "SELECT id FROM resource_campus WHERE resource_id = ? ORDER BY id",
+        resource_id,
+    )
+}
+
+/// Identifiers of every resource association at one campus.
+fn resource_associations_at(tx: &Transaction<'_>, campus_id: Uuid) -> Result<Vec<Uuid>> {
+    association_ids(
+        tx,
+        "SELECT id FROM resource_campus WHERE campus_id = ? ORDER BY id",
+        campus_id,
+    )
+}
+
+/// Every campus one resource serves, inside a transaction.
+fn resource_campuses_in(tx: &Transaction<'_>, resource_id: Uuid) -> Result<Vec<Uuid>> {
+    let mut stmt = tx.prepare(
+        "SELECT campus_id FROM resource_campus WHERE resource_id = ? ORDER BY campus_id",
+    )?;
+    let raw = stmt
+        .query_map([text(resource_id)], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(stmt);
+    raw.iter()
+        .map(|value| parse_id_text("resource_campus.campus_id", value))
+        .collect()
+}
+
+/// The resource's home campus, which it may not have, or [`DbError::NotFound`].
+fn resource_home_campus(tx: &Transaction<'_>, resource_id: Uuid) -> Result<Option<Uuid>> {
+    let found: Option<Option<String>> = tx
+        .query_row(
+            "SELECT campus_id FROM resource WHERE id = ?",
+            [text(resource_id)],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let raw = found.ok_or(DbError::NotFound { entity: "resource" })?;
+    raw.as_deref()
+        .map(|value| parse_id_text("resource.campus_id", value))
+        .transpose()
+}
+
+/// Reads a list of association identifiers addressed by one parameter.
+fn association_ids(tx: &Transaction<'_>, sql: &str, id: Uuid) -> Result<Vec<Uuid>> {
+    let mut stmt = tx.prepare(sql)?;
+    let raw = stmt
+        .query_map([text(id)], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(stmt);
+    raw.iter()
+        .map(|value| parse_id_text("resource_campus.id", value))
+        .collect()
 }
 
 // --------------------------------------------------------------------- academic_year

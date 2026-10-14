@@ -65,6 +65,10 @@ pub use crate::repo::Stamp;
 pub use crate::repo::availability::{
     Availability, AvailabilityEntity, AvailabilityRule, AvailabilityRuleInput, AvailabilityStatus,
 };
+pub use crate::repo::membership::{
+    EnrolmentStatus, Membership, StudentEnrolment, StudentEnrolmentInput, StudentInSchool,
+    TeacherCampus, TeacherCampusInput, TeacherInSchool, TeacherSchool, TeacherSchoolInput,
+};
 pub use crate::repo::people::{
     GroupKind, People, Student, StudentGroup, StudentGroupInput, StudentGroupMember,
     StudentGroupMemberInput, StudentInput, Teacher, TeacherInput, YearLevel, YearLevelInput,
@@ -303,6 +307,16 @@ impl Database {
         Availability::new(self)
     }
 
+    /// Reads and writes school membership, campus eligibility and enrolment history.
+    ///
+    /// Separate from [`Database::people`] because the two answer different questions. A
+    /// person is one row for one real human being; which schools employ or enrol them is a
+    /// relationship, and since `V13` a project may hold several of those per person. See
+    /// [`Membership`] for the whole shape.
+    pub fn membership(&mut self) -> Membership<'_> {
+        Membership::new(self)
+    }
+
     /// Reads the connection settings back from SQLite, for diagnostics and tests.
     ///
     /// # Errors
@@ -415,3 +429,7 @@ mod tests_availability;
 /// Stage 0A: several schools in one project, and what the table rebuild had to preserve.
 #[cfg(test)]
 mod tests_multi_school;
+
+/// Stage 0B: shared teachers, students and resources, and what sharing must never permit.
+#[cfg(test)]
+mod tests_membership;
