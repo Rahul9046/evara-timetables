@@ -57,8 +57,9 @@ import { RoomsAndRoomTypes } from "./RoomsAndRoomTypes";
 import { SchoolDetails } from "./SchoolDetails";
 import { Schools } from "./Schools";
 import { StudentGroups } from "./StudentGroups";
-import { StudentsAndYearLevels } from "./StudentsAndYearLevels";
+import { Students } from "./Students";
 import { Teachers } from "./Teachers";
+import { YearLevels } from "./YearLevels";
 import { useValue } from "./useList";
 
 /**
@@ -85,30 +86,74 @@ export interface SetupContext {
 
 /** One entry in the setup navigation. */
 interface Section {
+  /**
+   * Stable identifier, and the only thing anything else may address a section by.
+   *
+   * Never a position. Stage A reordered the list and split one section in two, and every
+   * caller survived it — `SetupContext.openSection`, the empty states that navigate, the
+   * tests — because none of them counts. An index would have made the reorder a silent
+   * behaviour change in six places.
+   */
   readonly id: string;
   readonly label: string;
   /** One line in the sidebar, so the user can tell the sections apart at a glance. */
   readonly blurb: string;
   /** Whether this section can be used before a school record exists. */
   readonly needsSchool: boolean;
-  readonly render: (school: School, context: SetupContext) => ReactNode;
+  /**
+   * Announced in the navigation, not yet built.
+   *
+   * Exactly one entry carries this: **Lessons**, which Stage C implements after Stage B
+   * brings Subjects and Departments. It is in the list because the *order* is the thing
+   * Stage A is for — somebody configuring a school should be able to see that lessons come
+   * after year levels and before teachers — and a section that simply appeared later would
+   * leave the workflow looking shorter than it is.
+   *
+   * The entry is disabled and has no `render`. An empty functional screen would be worse
+   * than an absent one: it would invite a user to look for a feature that does not exist,
+   * and it would need deleting rather than filling in when Stage C arrives.
+   */
+  readonly comingLater?: string;
+  /** Absent for a {@link comingLater} entry, which has nothing to render. */
+  readonly render?: (school: School, context: SetupContext) => ReactNode;
 }
 
 /**
- * The thirteen sections, in setup order.
+ * The fifteen sections, in the order a school is actually configured.
  *
- * Exported so a test can assert the list rather than the rendering: the set of sections
- * and their order is a product decision, and a silently dropped one would otherwise only
- * be noticed by someone looking for it.
+ * Exported so a test can assert the list rather than the rendering: the set of sections and
+ * their order is a product decision, and a silently dropped or reordered one would
+ * otherwise only be noticed by somebody looking for it.
  *
- * **Schools** is new in Stage 0C and comes first, because which institution the rest of
- * the workflow is about is the first thing to settle.
+ * ## Stage A reordered this, and the order now means something different
  *
- * **Resources** returns, also in Stage 0C. It was removed when configuring a resource had
- * no effect on anything the user could see; `V13` gave resources cross-school sharing
- * ([ADR 0022](../../../../../docs/adr/0022-resources-shared-across-campuses.md)) and the
- * section is now where a school lends a minibus to another school's campus, which is a
- * decision with a visible consequence. Scheduling against resources is still Phase 4's.
+ * It used to be a *dependency* order, and people came last because nothing about them
+ * depends on the grid. That reading was defensible and it produced a workflow nobody
+ * follows: a school setting itself up knows who it teaches long before it has decided what
+ * its rotation looks like, and being asked for a six-day cycle before being asked for a
+ * year level is being asked the abstract question first.
+ *
+ * So the order is now **what a school knows, then when it happens**:
+ *
+ * | | Sections | |
+ * | --- | --- | --- |
+ * | 1–2 | Schools, School details | which institution |
+ * | 3–5 | Campuses, Rooms, Resources | where, and with what |
+ * | 6–7 | Academic years, Year levels | the shape of a school year |
+ * | 8 | Lessons | *Stage C* — what is taught |
+ * | 9–11 | Teachers, Students, Student groups | who |
+ * | 12–15 | Cycles, Bell schedules, Calendar, Grid preview | when |
+ *
+ * **The one genuine dependency this inverts is availability**, which is set against a
+ * cycle's days and a bell schedule's periods and therefore appears on the Teachers, Rooms
+ * and Student groups screens before the time model exists. It degrades correctly rather
+ * than silently: the grid says "No cycle yet", names the section, and now offers a button
+ * that opens it. A school can enter its staff, come back, and fill the grid in afterwards —
+ * which is the order it was going to work in anyway.
+ *
+ * Year levels left Students and became section 7 in the same change, because a year level
+ * is part of the structure of a school year rather than an attribute of the children in it,
+ * and because Lessons and the Excel imports of Stage D both reference year levels directly.
  */
 export const SECTIONS: readonly Section[] = [
   {
@@ -125,6 +170,7 @@ export const SECTIONS: readonly Section[] = [
     needsSchool: false,
     render: () => null, // Rendered specially; see `SchoolSetup`.
   },
+  // Where the school is, and what is in it.
   {
     id: "campuses",
     label: "Campuses and buildings",
@@ -150,6 +196,7 @@ export const SECTIONS: readonly Section[] = [
       <ResourcesAndSharing school={school} context={context} />
     ),
   },
+  // The shape of a school year: how long it runs, and what stages it has.
   {
     id: "years",
     label: "Academic years and terms",
@@ -157,6 +204,47 @@ export const SECTIONS: readonly Section[] = [
     needsSchool: true,
     render: (school) => <AcademicYearsAndTerms school={school} />,
   },
+  {
+    id: "yearLevels",
+    label: "Year levels",
+    blurb: "The stages this school teaches",
+    needsSchool: true,
+    render: (school) => <YearLevels school={school} />,
+  },
+  // What is taught. Stage C; see `Section.comingLater`.
+  {
+    id: "lessons",
+    label: "Lessons",
+    blurb: "What is taught, and how often",
+    needsSchool: true,
+    comingLater:
+      "Lessons arrive in Stage C, after Subjects and Departments. The order is shown now so the rest of the workflow reads correctly.",
+  },
+  // Who. After the year levels they are placed in, and before the rotation they are
+  // timetabled into.
+  {
+    id: "teachers",
+    label: "Teachers",
+    blurb: "The staff a timetable is built around",
+    needsSchool: true,
+    render: (school, context) => <Teachers school={school} context={context} />,
+  },
+  {
+    id: "students",
+    label: "Students",
+    blurb: "Optional — a timetable can be built without them",
+    needsSchool: true,
+    render: (school, context) => <Students school={school} context={context} />,
+  },
+  {
+    id: "groups",
+    label: "Student groups",
+    blurb: "Whoever a lesson is taught to",
+    needsSchool: true,
+    render: (school, context) => <StudentGroups school={school} context={context} />,
+  },
+  // When. The time model last, because it is the part a school verifies against the grid
+  // rather than the part it already knows.
   {
     id: "cycles",
     label: "Cycles and cycle days",
@@ -184,32 +272,6 @@ export const SECTIONS: readonly Section[] = [
     blurb: "Every slot a lesson could occupy",
     needsSchool: true,
     render: (school) => <GridPreviewSection school={school} />,
-  },
-  // People come after the grid because nothing about them depends on it, and because the
-  // grid is the first point at which a school can see that the structure it described is
-  // the one it meant. Entering staff before that is work done on an unverified foundation.
-  {
-    id: "teachers",
-    label: "Teachers",
-    blurb: "The staff a timetable is built around",
-    needsSchool: true,
-    render: (school, context) => <Teachers school={school} context={context} />,
-  },
-  {
-    id: "students",
-    label: "Students and year levels",
-    blurb: "Optional — a timetable can be built without them",
-    needsSchool: true,
-    render: (school, context) => (
-      <StudentsAndYearLevels school={school} context={context} />
-    ),
-  },
-  {
-    id: "groups",
-    label: "Student groups",
-    blurb: "Whoever a lesson is taught to",
-    needsSchool: true,
-    render: (school) => <StudentGroups school={school} />,
   },
 ];
 
@@ -274,9 +336,23 @@ export function SchoolSetup() {
   }, [schools, activeSchoolId]);
 
   const school = schools?.find((candidate) => candidate.id === activeSchoolId) ?? null;
-  const active = SECTIONS.find((section) => section.id === activeId) ?? SECTIONS[0];
   const ready = school !== null;
   const many = (schools?.length ?? 0) > 1;
+
+  /**
+   * The section on screen.
+   *
+   * Resolved by identifier, and a request for one that cannot be shown falls back to the
+   * first rather than rendering nothing. An unknown identifier is a caller's mistake; a
+   * {@link Section.comingLater} one is reachable only by a disabled button, so neither
+   * should happen — but "neither should happen" is not the same as "cannot", and a blank
+   * body would be the worst way to find out.
+   */
+  const requested = SECTIONS.find((section) => section.id === activeId);
+  const active =
+    requested !== undefined && requested.comingLater === undefined
+      ? requested
+      : SECTIONS[0];
 
   const context: SetupContext = {
     schools: schools ?? [],
@@ -298,15 +374,25 @@ export function SchoolSetup() {
         )}
         <ol>
           {SECTIONS.map((section, index) => {
-            const locked = section.needsSchool && !ready;
+            // Two different reasons a step cannot be opened, and they must not be
+            // conflated: one is temporary and about this campus file, the other is about
+            // the product and will not change by adding a school.
+            const later = section.comingLater ?? null;
+            const locked = later === null && section.needsSchool && !ready;
             return (
               <li key={section.id}>
                 <button
                   type="button"
-                  className={section.id === activeId ? "navItem navItem--on" : "navItem"}
+                  className={
+                    section.id === activeId
+                      ? "navItem navItem--on"
+                      : later !== null
+                        ? "navItem navItem--later"
+                        : "navItem"
+                  }
                   aria-current={section.id === activeId ? "page" : undefined}
-                  disabled={locked}
-                  title={locked ? "Add a school first" : undefined}
+                  disabled={locked || later !== null}
+                  title={locked ? "Add a school first" : (later ?? undefined)}
                   onClick={() => setActiveId(section.id)}
                 >
                   <span className="navIndex" aria-hidden="true">
@@ -315,7 +401,11 @@ export function SchoolSetup() {
                   <span className="navText">
                     <span className="navLabel">{section.label}</span>
                     <span className="navBlurb">
-                      {locked ? "Needs a school" : section.blurb}
+                      {later !== null
+                        ? "Coming later"
+                        : locked
+                          ? "Needs a school"
+                          : section.blurb}
                     </span>
                   </span>
                 </button>
@@ -362,7 +452,7 @@ export function SchoolSetup() {
         ) : (
           // Keyed by school, so switching discards every form, dialogue and selection the
           // previous school's screen was holding. See this module's header.
-          <div key={school.id}>{active?.render(school, context) ?? null}</div>
+          <div key={school.id}>{active?.render?.(school, context) ?? null}</div>
         )}
       </div>
     </div>

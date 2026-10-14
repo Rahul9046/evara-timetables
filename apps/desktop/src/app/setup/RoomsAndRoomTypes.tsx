@@ -564,6 +564,7 @@ export function RoomsAndRoomTypes(props: { school: School; context?: SetupContex
           school={school}
           entityKind="ROOM"
           noun="room"
+          onOpenSection={props.context?.openSection}
           options={(rooms.items ?? []).map((room) => ({
             id: room.id,
             name: `${room.name} (${room.code})`,

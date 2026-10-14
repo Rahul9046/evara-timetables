@@ -5,10 +5,11 @@
  * the rendering", and this is that test: the set of steps is a product decision, and a
  * dropped or reordered one would otherwise only be noticed by someone looking for it.
  *
- * Stage 0C changes the list twice. **Schools** is new and comes first, because which
- * institution the rest of the workflow is about is the first thing to settle. **Resources**
- * returns, because `V13` gave resources cross-school sharing and the section is now where
- * a school lends a minibus to another school's campus.
+ * Stage 0C added **Schools** and restored **Resources**. Stage A then reordered the whole
+ * list — people before the time model, year levels out of Students and into the structure
+ * of the school year — and added a disabled **Lessons** entry so the order reads correctly
+ * before Stage C fills it in. Both changes are product decisions, which is exactly why they
+ * are asserted as data here.
  *
  * So this covers the list as data *and* what the user actually sees, because the two can
  * disagree: the sidebar numbers steps from their array position, so an insertion has to
@@ -91,8 +92,11 @@ vi.mock("./GridPreviewSection", () => ({
 vi.mock("./Teachers", () => ({
   Teachers: () => <div>stub:teachers</div>,
 }));
-vi.mock("./StudentsAndYearLevels", () => ({
-  StudentsAndYearLevels: () => <div>stub:students</div>,
+vi.mock("./Students", () => ({
+  Students: () => <div>stub:students</div>,
+}));
+vi.mock("./YearLevels", () => ({
+  YearLevels: () => <div>stub:yearLevels</div>,
 }));
 vi.mock("./StudentGroups", () => ({
   StudentGroups: () => <div>stub:groups</div>,
@@ -139,33 +143,63 @@ function steps(): string[] {
 }
 
 describe("the section list", () => {
-  it("is the thirteen steps of setup, in dependency order", () => {
+  it("is the fifteen steps of setup, in configuration order", () => {
     expect(SECTIONS.map((s) => s.id)).toEqual([
-      // Which institution first: everything after this is about one of them.
+      // Which institution. Everything after this is about one of them.
       "schools",
       "school",
+      // Where it is, and what is in it.
       "campuses",
       "rooms",
-      // Resources sit with the other physical things, before the time model.
       "resources",
+      // The shape of a school year, then the stages within it.
       "years",
+      "yearLevels",
+      // What is taught. Stage C.
+      "lessons",
+      // Who.
+      "teachers",
+      "students",
+      "groups",
+      // When. Last, because it is the part a school verifies against the grid rather
+      // than the part it already knows.
       "cycles",
       "periods",
       "calendar",
       "grid",
-      // People follow the grid: nothing about them depends on it, and the grid is where a
-      // school first sees that the structure it described is the one it meant.
-      "teachers",
-      "students",
-      "groups",
     ]);
   });
 
-  it("has a Resources section again", () => {
+  it("has a Resources section", () => {
     // Removed when configuring a resource had no visible effect; back because V13 gave
     // resources cross-school sharing, which is a decision with a consequence.
     expect(SECTIONS.some((s) => s.id === "resources")).toBe(true);
     expect(SECTIONS.find((s) => s.id === "resources")?.label).toMatch(/resource/i);
+  });
+
+  it("separates Year levels from Students", () => {
+    const yearLevels = SECTIONS.findIndex((s) => s.id === "yearLevels");
+    const students = SECTIONS.findIndex((s) => s.id === "students");
+
+    expect(yearLevels).toBeGreaterThan(-1);
+    expect(students).toBeGreaterThan(-1);
+    expect(yearLevels).not.toBe(students);
+    // Year levels are part of the structure of a school year, so they sit with the
+    // academic year rather than with the children placed in them.
+    expect(yearLevels).toBe(SECTIONS.findIndex((s) => s.id === "years") + 1);
+    expect(SECTIONS.find((s) => s.id === "students")?.label).toBe("Students");
+  });
+
+  it("puts the people before the time model", () => {
+    const of = (id: string) => SECTIONS.findIndex((s) => s.id === id);
+
+    // The Stage A reorder, asserted as the relationship rather than as two numbers, so
+    // inserting a section cannot quietly invert it.
+    for (const who of ["teachers", "students", "groups"]) {
+      for (const when of ["cycles", "periods", "calendar", "grid"]) {
+        expect(of(who)).toBeLessThan(of(when));
+      }
+    }
   });
 
   it("needs a school for everything except Schools and School details", () => {
@@ -176,25 +210,77 @@ describe("the section list", () => {
   });
 });
 
-describe("the sidebar", () => {
-  it("offers every section, Resources included", async () => {
-    await open();
-
-    expect(steps()).toHaveLength(13);
-    expect(within(nav()).getByRole("button", { name: /Resources/i })).toBeTruthy();
-    expect(within(nav()).getByRole("button", { name: /Schools/i })).toBeTruthy();
+/**
+ * Lessons is announced, not built.
+ *
+ * The brief's order has it at step 8; Stage C implements it. An empty functional screen
+ * would invite somebody to look for a feature that does not exist, so the entry carries a
+ * reason, has no `render`, and cannot be opened.
+ */
+describe("the Lessons entry", () => {
+  it("is in the list, between year levels and teachers", () => {
+    const of = (id: string) => SECTIONS.findIndex((s) => s.id === id);
+    expect(of("lessons")).toBe(of("yearLevels") + 1);
+    expect(of("lessons")).toBe(of("teachers") - 1);
   });
 
-  it("numbers the steps 1-13 with no gap", async () => {
+  it("is the only section that is not built, and says when it arrives", () => {
+    const later = SECTIONS.filter((s) => s.comingLater !== undefined);
+    expect(later.map((s) => s.id)).toEqual(["lessons"]);
+    expect(later[0]?.comingLater).toMatch(/Stage C/);
+  });
+
+  it("has nothing to render, so it cannot be opened by accident", () => {
+    expect(SECTIONS.find((s) => s.id === "lessons")?.render).toBeUndefined();
+  });
+
+  it("is offered as disabled, labelled, and distinct from a locked section", async () => {
     await open();
 
-    // The numbers come from array position, so this is what proves the two insertions
-    // renumbered rather than leaving a hole.
+    const lessons = within(nav()).getByRole("button", { name: /^Lessons/ });
+    expect(lessons.hasAttribute("disabled")).toBe(true);
+    expect(lessons.textContent).toContain("Coming later");
+    expect(lessons.getAttribute("title")).toMatch(/Stage C/);
+    // Not "Needs a school": adding a school would not make it appear, and conflating the
+    // two reasons would promise something untrue.
+    expect(lessons.textContent).not.toContain("Needs a school");
+  });
+
+  it("renders no screen when clicked", async () => {
+    await open();
+
+    // A disabled button does not fire, so the body is unchanged — and the fallback in
+    // `SchoolSetup` means even a programmatic request could not blank it.
+    await userEvent.click(within(nav()).getByRole("button", { name: /^Lessons/ }));
+
+    expect(screen.getByText(/^stub:schools:/)).toBeTruthy();
+    // Nothing about lessons in the body — only the sidebar entry that announces them.
+    const body = document.querySelector(".setupBody") as HTMLElement;
+    expect(within(body).queryByText(/lesson/i)).toBeNull();
+  });
+});
+
+describe("the sidebar", () => {
+  it("offers every section, Resources and Year levels included", async () => {
+    await open();
+
+    expect(steps()).toHaveLength(15);
+    expect(within(nav()).getByRole("button", { name: /Resources/i })).toBeTruthy();
+    expect(within(nav()).getByRole("button", { name: /^Schools/ })).toBeTruthy();
+    expect(within(nav()).getByRole("button", { name: /^Year levels/ })).toBeTruthy();
+  });
+
+  it("numbers the steps 1-15 with no gap", async () => {
+    await open();
+
+    // The numbers come from array position, so this is what proves the reorder and the two
+    // insertions renumbered rather than leaving a hole.
     const indices = within(nav())
       .getAllByRole("button")
       .map((b) => b.querySelector(".navIndex")?.textContent);
     expect(indices).toEqual([
-      "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13",
+      "1", "2", "3", "4", "5", "6", "7", "8",
+      "9", "10", "11", "12", "13", "14", "15",
     ]);
   });
 
@@ -222,13 +308,14 @@ describe("navigating between the sections", () => {
     ["Rooms and room types", /^stub:rooms$/],
     ["Resources", /^stub:resources$/],
     ["Academic years and terms", /^stub:years$/],
+    ["Year levels", /^stub:yearLevels$/],
+    ["Teachers", /^stub:teachers$/],
+    ["Students", /^stub:students$/],
+    ["Student groups", /^stub:groups$/],
     ["Cycles and cycle days", /^stub:cycles$/],
     ["Bell schedules and periods", /^stub:periods$/],
     ["Calendar mapping", /^stub:calendar$/],
     ["Timetable grid preview", /^stub:grid$/],
-    ["Teachers", /^stub:teachers$/],
-    ["Students and year levels", /^stub:students$/],
-    ["Student groups", /^stub:groups$/],
   ])("opens %s", async (label, marker) => {
     await open();
     await userEvent.click(
@@ -253,16 +340,21 @@ describe("navigating between the sections", () => {
     expect(current[0]?.textContent).toContain("Rooms and room types");
   });
 
-  it("walks the whole workflow end to end, Resources included", async () => {
+  it("walks the whole workflow end to end, in the configuration order", async () => {
     await open();
 
     const visited: string[] = ["stub:schools"];
+    // Every step but Lessons, which has no screen, in the order the sidebar offers them.
     for (const label of [
       "School details",
       "Campuses and buildings",
       "Rooms and room types",
       "Resources",
       "Academic years and terms",
+      "Year levels",
+      "Teachers",
+      "Students",
+      "Student groups",
       "Cycles and cycle days",
       "Bell schedules and periods",
       "Calendar mapping",
@@ -283,6 +375,10 @@ describe("navigating between the sections", () => {
       "stub:rooms",
       "stub:resources",
       "stub:years",
+      "stub:yearLevels",
+      "stub:teachers",
+      "stub:students",
+      "stub:groups",
       "stub:cycles",
       "stub:periods",
       "stub:calendar",
@@ -300,11 +396,15 @@ describe("before any school exists", () => {
     render(<SchoolSetup />);
     await screen.findByText(/^stub:schools:/);
 
+    // Thirteen school-owned sections, of which Lessons is disabled for its own reason.
     const locked = within(nav())
       .getAllByRole("button")
       .filter((b) => b.hasAttribute("disabled"));
-    expect(locked).toHaveLength(11);
-    expect(locked.every((b) => b.textContent?.includes("Needs a school"))).toBe(true);
+    expect(locked).toHaveLength(13);
+    expect(
+      locked.filter((b) => b.textContent?.includes("Needs a school")),
+    ).toHaveLength(12);
+    expect(locked.filter((b) => b.textContent?.includes("Coming later"))).toHaveLength(1);
   });
 
   it("opens on Schools, which is where the first school is added", async () => {

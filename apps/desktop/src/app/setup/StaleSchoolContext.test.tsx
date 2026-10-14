@@ -97,7 +97,7 @@ vi.mock("../../ipc/setup", () => ({
 }));
 
 const { Teachers } = await import("./Teachers");
-const { StudentsAndYearLevels } = await import("./StudentsAndYearLevels");
+const { Students } = await import("./Students");
 type SetupContext = import("./SchoolSetup").SetupContext;
 
 const STAMP = {
@@ -269,13 +269,13 @@ describe("a teacher form open when the school changes", () => {
 describe("a student form open when the school changes", () => {
   it("is closed, and the roll is the new school's", async () => {
     const user = userEvent.setup();
-    const view = render(<StudentsAndYearLevels school={NORTH} context={context()} />);
+    const view = render(<Students school={NORTH} context={context()} />);
     await screen.findByText("Northman");
 
     await user.click(screen.getByRole("button", { name: /^Edit Cass Northman/ }));
     expect(screen.getByRole("button", { name: "Save changes" })).toBeTruthy();
 
-    view.rerender(<StudentsAndYearLevels school={SOUTH} context={context()} />);
+    view.rerender(<Students school={SOUTH} context={context()} />);
 
     await screen.findByText("Southey");
     await waitFor(() =>
@@ -289,13 +289,13 @@ describe("a student form open when the school changes", () => {
 describe("an enrolment panel open when the school changes", () => {
   it("stops being about the student who is no longer on the roll", async () => {
     const user = userEvent.setup();
-    const view = render(<StudentsAndYearLevels school={NORTH} context={context()} />);
+    const view = render(<Students school={NORTH} context={context()} />);
     await screen.findByText("Northman");
 
     await user.click(screen.getByRole("button", { name: /^Enrolment Cass Northman/ }));
     expect(await screen.findByText(/Enrolment — Cass Northman/)).toBeTruthy();
 
-    view.rerender(<StudentsAndYearLevels school={SOUTH} context={context()} />);
+    view.rerender(<Students school={SOUTH} context={context()} />);
     await screen.findByText("Southey");
 
     // The panel is keyed off the roll, so a student the new school does not have cannot
