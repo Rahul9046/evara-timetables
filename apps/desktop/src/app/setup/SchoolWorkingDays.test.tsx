@@ -4,8 +4,7 @@
  * `weekdays.test.ts` owns the conversion and `evara_core::calendar` owns the rule. This
  * file owns what only the screen can get wrong:
  *
- * - a new school starts on Monday to Friday, and an existing one shows what it was saved
- *   with rather than that default
+ * - an existing school shows the week it was saved with, never a default standing in for it
  * - any combination saves, including Sunday to Thursday and a six-day week
  * - an empty week is refused with a message, not sent and not quietly filled in
  * - the week reaching the backend is a list of ISO weekday numbers
@@ -13,6 +12,11 @@
  *
  * The backend is mocked. `working_days BETWEEN 1 AND 127` in migration V7 is still the
  * authority on what a legal week is; nothing asserted here is a backend rule.
+ *
+ * **Where the new-school default is covered.** Stage 0C moved school *creation* to the
+ * Schools section, so "a new school starts on Monday to Friday" is asserted in
+ * `Schools.test.tsx`, against the screen that actually creates one. This file is about
+ * editing the selected school's week, which is what School Details now does.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -22,7 +26,6 @@ import type { School } from "@evara/domain";
 
 import { weekdayName } from "./weekdays";
 
-const createSchool = vi.fn();
 const updateSchool = vi.fn();
 
 const getSchoolLogo = vi.fn();
@@ -35,7 +38,6 @@ vi.mock("../../ipc/setup", () => ({
   getSchoolLogoLimits: () => getSchoolLogoLimits(),
   setSchoolLogo: (id: string, data: string) => setSchoolLogo(id, data),
   clearSchoolLogo: () => clearSchoolLogo(),
-  createSchool: (input: unknown) => createSchool(input),
   updateSchool: (id: string, input: unknown) => updateSchool(id, input),
   describeSetupError: (error: unknown) => String(error),
 }));
@@ -45,11 +47,12 @@ const { SchoolDetails } = await import("./SchoolDetails");
 /**
  * The school the screen is being shown for.
  *
- * Stands in for what `getSchool()` used to return. Since V12 the active school is
- * chosen by the setup shell and passed in as a prop, so "given this stored school"
- * is expressed by setting this rather than by mocking a read.
+ * Since V12 the active school is chosen by the setup shell and passed in as a prop, so
+ * "given this stored school" is expressed by setting this rather than by mocking a read.
+ * It is never `null` here: a campus file with no school opens on Schools, and School
+ * Details has nothing to edit.
  */
-let active: School | null = null;
+let active: School = {} as School;
 
 function school(overrides: Partial<School> = {}): School {
   return {
@@ -79,16 +82,13 @@ beforeEach(() => {
   });
   setSchoolLogo.mockResolvedValue(null);
   clearSchoolLogo.mockResolvedValue(undefined);
-  active = null;
-  createSchool.mockResolvedValue(school());
+  active = school();
   updateSchool.mockResolvedValue(school());
 });
 
 async function openForm() {
   render(<SchoolDetails school={active} onChanged={vi.fn()} />);
-  await userEvent.click(
-    await screen.findByRole("button", { name: /Describe the school|Edit details/ }),
-  );
+  await userEvent.click(await screen.findByRole("button", { name: /Edit details/ }));
 }
 
 /** One weekday toggle, by its full name — which is what a screen reader announces. */
@@ -109,13 +109,13 @@ function selected(): string[] {
 }
 
 /** The week the last save sent. */
-function savedWeek(mock: typeof createSchool): number[] {
+function savedWeek(mock: typeof updateSchool): number[] {
   const input = mock.mock.calls.at(-1)?.at(-1) as { workingDays: number[] };
   return input.workingDays;
 }
 
-describe("the default for a new school", () => {
-  it("is Monday to Friday", async () => {
+describe("an existing school", () => {
+  it("shows Monday to Friday where that is what it holds", async () => {
     await openForm();
 
     expect(day("Monday").checked).toBe(true);
@@ -127,17 +127,14 @@ describe("the default for a new school", () => {
     expect(day("Sunday").checked).toBe(false);
   });
 
-  it("is what gets saved if the user does not touch it", async () => {
+  it("sends the week back untouched when nothing about it was changed", async () => {
     await openForm();
-    await userEvent.type(screen.getByLabelText(/School name/), "Northgate Secondary");
-    await userEvent.click(screen.getByRole("button", { name: "Create school" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
-    await waitFor(() => expect(createSchool).toHaveBeenCalled());
-    expect(savedWeek(createSchool)).toEqual([1, 2, 3, 4, 5]);
+    await waitFor(() => expect(updateSchool).toHaveBeenCalled());
+    expect(savedWeek(updateSchool)).toEqual([1, 2, 3, 4, 5]);
   });
-});
 
-describe("an existing school", () => {
   it("shows the week it was saved with, not the default", async () => {
     active = school({ workingDays: [7, 1, 2, 3, 4] });
     await openForm();

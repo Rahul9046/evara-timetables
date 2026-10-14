@@ -124,12 +124,18 @@ campuses and buildings, rooms and room types, resources, academic years and term
 and cycle days, bell schedules and periods, calendar mapping, and the timetable grid
 preview.
 
-> **Amended later: the workflow is now eight sections.** The Resources step was removed
-> from School Setup. Nothing schedules against a resource until constraints arrive, so it
-> was configuration with no effect on anything the user could see, sitting among eight
-> steps that each feed the grid. Only the screen went: the `resource` table, its
-> repository, its Tauri commands and its generated types are untouched, and Phase 2 below
-> still owns resource scheduling.
+> **Amended twice.** The Resources step was first *removed* from School Setup: nothing
+> schedules against a resource until constraints arrive, so it was configuration with no
+> effect on anything the user could see, sitting among eight steps that each feed the grid.
+> Only the screen went — the table, its repository, its commands and its generated types
+> were untouched throughout.
+>
+> It **returns in Stage 0C**, because `V13` changed the answer: ADR 0022 gave resources the
+> campus associations buildings and rooms already had, so lending equipment to another
+> school's campus is now a decision with a visible consequence, and it is unreachable
+> without a screen. Scheduling *against* resources is still Phase 4's. Stage 0C also adds
+> a Schools section, so the workflow is **thirteen** sections — see
+> [adr/0023](adr/0023-the-interface-scopes-to-one-school.md).
 
 Three things in it are more than CRUD:
 
@@ -190,12 +196,69 @@ People screens show this school's status and placement rather than the project-l
 See [adr/0021](adr/0021-project-level-people-and-school-membership.md) and
 [adr/0022](adr/0022-resources-shared-across-campuses.md).
 
-> Deliberately **not** in Stage 0A or 0B, and not implied by either: the school-management
-> interface (Stage 0C), a project-wide teacher code (ADR 0021 records the blocker and the
-> better alternative), `department` and `teacher_qualification` (Stage B), project-level
-> availability — a rule still names exactly one school — and cross-school scheduling.
-> Detecting a shared teacher double-booked across two schools needs dated occurrences
-> rather than cycle positions, and nothing here claims it works.
+**Multi-school management interface (Stage 0C) ✅ complete.** The interface half of `V12`
+and `V13`, and no migration: every command it calls already existed. School Setup is now
+thirteen sections, with **Schools** first and **Resources** restored. See
+[adr/0023](adr/0023-the-interface-scopes-to-one-school.md).
+
+What it delivers, screen by screen:
+
+- **Schools** — the project-level screen. List, create, rename, set or clear the optional
+  `code`, change time zone, locale and working days, select which school the rest of setup
+  is about, and delete an empty one. A school with anything in it is *explained*, naming
+  each dependent kind from `setup_school_dependents` — and explaining a borrowed person
+  separately, because that remedy lives in another screen. A new school is created empty:
+  nothing is copied from a school that already exists.
+- **School details** — the selected school's record and logo. Creation moved to Schools, so
+  there is one way to add a school rather than two; the form is one definition shared with
+  Schools (`setup/schoolForm.ts`), which is what keeps the newly exposed `code` from
+  drifting between them.
+- **Teachers** — the list reads `teacher_school`, so one person employed by two schools
+  appears in both as the same record. "Add an existing teacher" searches the whole project
+  and writes a membership, so **no screen can produce a second record for one real
+  person**. A per-teacher panel edits the schools they belong to and the campuses they may
+  be based at, keeping *deactivate*, *remove* and *delete* three distinct actions
+  (ADR 0021 §8); the home school's membership offers no removal, with the remedy named on
+  the control. A visiting teacher's identity is not editable here — the edit is disabled
+  and the panel offers to switch to the school that holds it.
+- **Students and year levels** — the list reads `student_school_enrolment`, so the
+  admission number, year level, campus and status are *this* school's. "Enrol an existing
+  student" writes a spell rather than a student. A per-student panel edits this school's
+  placement, records a departure (with an optional date, never an invented one),
+  re-enrols, and shows the whole history across every school, read-only.
+- **Transfer** — its own workflow, with a destination school, that school's own year levels
+  and campuses, a confirmation summary, and one call to `transfer_student` naming both
+  schools. Never a leave followed by an enrol. Distinguished from concurrent enrolment in
+  both directions, each pointing at the other.
+- **Resources** — restored, with sharing. A resource may be school-wide or based at a
+  campus, and may be made available to any campus in the file, including another school's.
+  Deletion is refused while another school shares it, and refused outright to a school that
+  only borrows it; both are explained before the action.
+- **Buildings and rooms** — the share pickers now offer every campus in the file, each
+  labelled with the school that owns it, which makes ADR 0013/0014's cross-school sharing
+  reachable for the first time. Ownership and access are shown as different things, the
+  home campus cannot be withdrawn through unsharing, and deleting a facility another school
+  shares stays blocked and explained.
+
+Stale-state protection is four layers deep and documented in ADR 0023 §2: the shell
+remounts a section when the school changes, `CrudPanel` closes its form when its
+`reloadKey` changes, every read drops a reply that lands after its effect was torn down,
+and the backend refuses a cross-school write regardless. 134 frontend tests added across
+seven files; 832 frontend and 517 Rust tests pass.
+
+> Deliberately **not** in Stage 0A, 0B or 0C, and not implied by any of them: a
+> project-wide teacher code (ADR 0021 records the blocker and the better alternative),
+> `department` and `teacher_qualification` (Stage B), project-level availability — a rule
+> still names exactly one school, so a shared teacher's rules are recorded per school — a
+> `program` or `division` entity below the school (ADR 0023 §7 settles it as the audit
+> recommended), and cross-school scheduling. Detecting a shared teacher double-booked
+> across two schools needs dated occurrences rather than cycle positions, and nothing here
+> claims it works.
+>
+> **`rev` is still not checked on any write.** Stage 0C preserves and displays it and never
+> sends it as a precondition, so two windows can still overwrite each other. A
+> frontend-only guarantee would be worse than none, because it would be believed. This is
+> the last item between Phase 2 and done, and the audit places it in Stage B.
 
 Remaining in this phase:
 

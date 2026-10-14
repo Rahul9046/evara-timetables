@@ -405,3 +405,170 @@ describe("rejections", () => {
     });
   });
 });
+
+/**
+ * The shared-identity surface: membership, campus eligibility, enrolment and transfer.
+ *
+ * Stage 0B added these wrappers and Stage 0C is their first caller, which makes this the
+ * gap worth closing now: every component test mocks `ipc/setup`, so a wrong command name
+ * or a `snake_case` payload key would pass the whole frontend suite and fail on the first
+ * real click. ADR 0009 named that as the price of generated types; these are the payment.
+ *
+ * Two things are asserted beyond the name. **Every mutation carries the school it acts
+ * for** — which stopped being optional when a project gained a second school, and which
+ * no Rust test can see the interface omitting. And **`transferStudent` names both
+ * schools**, in the right order, because it is the one operation whose authority spans two
+ * institutions (ADR 0021 §7) and sending them the wrong way round would move a student
+ * backwards.
+ */
+describe("shared identities across the boundary", () => {
+  /** Every relationship read: the identifier the Rust parameter is named after. */
+  it.each([
+    [
+      "setup_teacher_membership_list",
+      () => setup.listTeacherMemberships(ID),
+      { teacherId: ID },
+    ],
+    ["setup_school_teacher_list", () => setup.listSchoolTeachers(ID), { schoolId: ID }],
+    ["setup_teacher_campus_list", () => setup.listTeacherCampuses(ID), { teacherId: ID }],
+    ["setup_school_student_list", () => setup.listSchoolStudents(ID), { schoolId: ID }],
+    ["setup_enrolment_history", () => setup.listEnrolmentHistory(ID), { studentId: ID }],
+    [
+      "setup_enrolment_current",
+      () => setup.currentEnrolment(SCHOOL, ID),
+      { schoolId: SCHOOL, studentId: ID },
+    ],
+    [
+      "setup_resource_campus_list",
+      () => setup.listResourceCampuses(ID),
+      { resourceId: ID },
+    ],
+  ])("%s sends the right payload", async (command, call, payload) => {
+    await call();
+    expect(invoke).toHaveBeenCalledWith(command, payload);
+  });
+
+  it("wraps a membership input under `input`, matching the Rust parameter", async () => {
+    await setup.addTeacherToSchool({ teacherId: ID, schoolId: SCHOOL, isActive: true });
+    expect(invoke).toHaveBeenCalledWith("setup_teacher_membership_add", {
+      input: { teacherId: ID, schoolId: SCHOOL, isActive: true },
+    });
+  });
+
+  it("names the school when it activates or deactivates a membership", async () => {
+    await setup.setTeacherMembershipActive(SCHOOL, ID, false);
+    expect(invoke).toHaveBeenCalledWith("setup_teacher_membership_set_active", {
+      schoolId: SCHOOL,
+      teacherId: ID,
+      isActive: false,
+    });
+  });
+
+  it("names the school when it withdraws a membership", async () => {
+    await setup.removeTeacherFromSchool(SCHOOL, ID);
+    expect(invoke).toHaveBeenCalledWith("setup_teacher_membership_remove", {
+      schoolId: SCHOOL,
+      teacherId: ID,
+    });
+  });
+
+  it("names the school on both campus-eligibility writes", async () => {
+    await setup.assignTeacherCampus(SCHOOL, ID, OTHER);
+    expect(invoke).toHaveBeenCalledWith("setup_teacher_campus_assign", {
+      schoolId: SCHOOL,
+      teacherId: ID,
+      campusId: OTHER,
+    });
+
+    invoke.mockClear();
+    await setup.removeTeacherCampus(SCHOOL, ID, OTHER);
+    expect(invoke).toHaveBeenCalledWith("setup_teacher_campus_remove", {
+      schoolId: SCHOOL,
+      teacherId: ID,
+      campusId: OTHER,
+    });
+  });
+
+  /** One spell, as the enrolment commands expect it. */
+  const spell = {
+    studentId: ID,
+    schoolId: SCHOOL,
+    admissionNo: "NG-1001",
+    yearLevelId: null,
+    campusId: null,
+    status: "ENROLLED" as const,
+    enrolledOn: null,
+    leftOn: null,
+  };
+
+  it("wraps an enrolment input under `input`", async () => {
+    await setup.enrolStudent(spell);
+    expect(invoke).toHaveBeenCalledWith("setup_enrolment_create", { input: spell });
+  });
+
+  it("sends nulls for an unset placement rather than omitting the keys", async () => {
+    // Omitting them would make serde fail on a non-optional field, and would be
+    // indistinguishable from "leave it alone" — which these commands never mean. A school
+    // that records no year level and no campus is the ordinary case, not an incomplete one.
+    await setup.enrolStudent(spell);
+    const payload = invoke.mock.calls[0]?.[1] as { input: Record<string, unknown> };
+    expect(Object.keys(payload.input)).toContain("yearLevelId");
+    expect(payload.input["yearLevelId"]).toBeNull();
+    expect(payload.input["campusId"]).toBeNull();
+    expect(payload.input["enrolledOn"]).toBeNull();
+  });
+
+  it("names the school and the spell on an enrolment update", async () => {
+    await setup.updateEnrolment(SCHOOL, OTHER, spell);
+    expect(invoke).toHaveBeenCalledWith("setup_enrolment_update", {
+      schoolId: SCHOOL,
+      id: OTHER,
+      input: spell,
+    });
+  });
+
+  it("sends a leaving date, and sends null when there is none", async () => {
+    await setup.leaveSchool(SCHOOL, ID, "2027-07-20");
+    expect(invoke).toHaveBeenCalledWith("setup_enrolment_leave", {
+      schoolId: SCHOOL,
+      studentId: ID,
+      leftOn: "2027-07-20",
+    });
+
+    invoke.mockClear();
+    await setup.leaveSchool(SCHOOL, ID, null);
+    // `null`, not an omitted key and not today: `left_on` is optional because plenty of
+    // schools do not record the day somebody left.
+    const payload = invoke.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(Object.keys(payload)).toContain("leftOn");
+    expect(payload["leftOn"]).toBeNull();
+  });
+
+  it("names both schools on a transfer, in the order the command expects", async () => {
+    const arriving = { ...spell, schoolId: OTHER };
+    await setup.transferStudent(SCHOOL, OTHER, ID, arriving);
+    expect(invoke).toHaveBeenCalledWith("setup_student_transfer", {
+      fromSchoolId: SCHOOL,
+      toSchoolId: OTHER,
+      studentId: ID,
+      arriving,
+    });
+  });
+
+  it("names the acting school on both resource-sharing writes", async () => {
+    await setup.shareResource(SCHOOL, ID, OTHER);
+    expect(invoke).toHaveBeenCalledWith("setup_resource_share", {
+      schoolId: SCHOOL,
+      resourceId: ID,
+      campusId: OTHER,
+    });
+
+    invoke.mockClear();
+    await setup.unshareResource(SCHOOL, ID, OTHER);
+    expect(invoke).toHaveBeenCalledWith("setup_resource_unshare", {
+      schoolId: SCHOOL,
+      resourceId: ID,
+      campusId: OTHER,
+    });
+  });
+});

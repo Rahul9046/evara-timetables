@@ -48,12 +48,59 @@ vi.mock("../../ipc/setup", () => ({
   updateYearLevel: vi.fn(() => Promise.resolve({})),
   deleteYearLevel: vi.fn(() => Promise.resolve()),
   listTeachers: () => listTeachers(),
-  // Stage 0B: the per-school employment and enrolment views the two screens read for
-  // their Status and Year columns. Empty here -- these tests are about the forms and the
-  // disclosures, and `Teachers`/`StudentsAndYearLevels` fall back to the project-level
-  // flag when a school's own record is absent.
-  listSchoolTeachers: () => Promise.resolve([]),
-  listSchoolStudents: () => Promise.resolve([]),
+  // Stage 0B made these the authority on who a school employs and enrols, and Stage 0C
+  // builds the two lists from them rather than from the project-level tables. So they are
+  // derived from the same fixtures here: one person, one record, with this school's own
+  // view of them beside it. Returning `[]` would now mean an empty roll, not a roll
+  // without per-school detail.
+  listSchoolTeachers: () =>
+    listTeachers().then((rows) =>
+      rows.map((teacher) => ({
+        teacher,
+        membership: {
+          id: `ts-${teacher.id}`,
+          teacherId: teacher.id,
+          schoolId: SCHOOL.id,
+          isActive: teacher.isActive,
+          ...STAMP,
+        },
+      })),
+    ),
+  listSchoolStudents: () =>
+    listStudents().then((rows) =>
+      rows
+        .filter((student) => student.isActive)
+        .map((student) => ({
+          student,
+          enrolment: {
+            id: `e-${student.id}`,
+            studentId: student.id,
+            schoolId: SCHOOL.id,
+            admissionNo: student.code,
+            yearLevelId: student.yearLevelId,
+            campusId: student.campusId,
+            status: "ENROLLED",
+            enrolledOn: null,
+            leftOn: null,
+            ...STAMP,
+          },
+        })),
+    ),
+  // The Stage 0C relationship surface. These screens reach for it only once a person is
+  // chosen or a second school exists, neither of which these tests do, so stubs are
+  // enough — but the module surface has to be complete or the import fails.
+  addTeacherToSchool: vi.fn(() => Promise.resolve({})),
+  listTeacherMemberships: vi.fn(() => Promise.resolve([])),
+  setTeacherMembershipActive: vi.fn(() => Promise.resolve({})),
+  removeTeacherFromSchool: vi.fn(() => Promise.resolve()),
+  listTeacherCampuses: vi.fn(() => Promise.resolve([])),
+  assignTeacherCampus: vi.fn(() => Promise.resolve({})),
+  removeTeacherCampus: vi.fn(() => Promise.resolve()),
+  enrolStudent: vi.fn(() => Promise.resolve({})),
+  listEnrolmentHistory: vi.fn(() => Promise.resolve([])),
+  updateEnrolment: vi.fn(() => Promise.resolve({})),
+  leaveSchool: vi.fn(() => Promise.resolve({})),
+  transferStudent: vi.fn(() => Promise.resolve({})),
   createTeacher: (input: unknown) => createTeacher(input),
   updateTeacher: (id: string, input: unknown) => updateTeacher(id, input),
   deleteTeacher: (id: string) => deleteTeacher(id),
@@ -237,7 +284,10 @@ describe("Teachers", () => {
     await screen.findByText("Okafor");
 
     await user.click(screen.getByRole("button", { name: /edit/i }));
-    await user.click(screen.getByLabelText(/currently teaching/i));
+    // Stage 0C renames this flag to what ADR 0021 says it means: "in the project at all",
+    // an archive flag. Whether *this school* employs them is the membership, and is
+    // changed under Schools and campuses rather than by this checkbox.
+    await user.click(screen.getByLabelText(/in this campus file/i));
     await submitForm(user, /save changes/i);
 
     await waitFor(() => expect(updateTeacher).toHaveBeenCalled());
@@ -275,7 +325,13 @@ describe("Students", () => {
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(/8A Homeroom/)).toBeTruthy();
     expect(within(dialog).getByText(/French elective/)).toBeTruthy();
-    expect(within(dialog).getByText(/currently enrolled/i)).toBeTruthy();
+    // And the thing they almost certainly meant is offered.
+    expect(within(dialog).getByText(/records it and keeps everything/i)).toBeTruthy();
+    // Stage 0C goes one step further than explaining: the destructive button is not
+    // offered at all, because the answer is already known and asking a user to agree to a
+    // refusal explains nothing. See `CrudSpec.deleteBlockedBy`.
+    expect(within(dialog).queryByRole("button", { name: /^Delete student$/ })).toBeNull();
+    expect(within(dialog).getByRole("button", { name: /^Close$/ })).toBeTruthy();
   });
 });
 

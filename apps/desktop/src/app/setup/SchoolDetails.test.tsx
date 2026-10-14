@@ -9,6 +9,12 @@
  * The backend is mocked because none of what is asserted here is a backend rule. The
  * `CHECK (length(trim(timezone)) > 0)` in migration V3 is still the authority on what a
  * valid value is, and it is untouched by this change.
+ *
+ * **Stage 0C moved creation out.** A school is created in the Schools section, which is
+ * about the project; this screen edits the one that is selected. `Schools.test.tsx` covers
+ * the create path against the screen that performs it, and the form itself is one
+ * definition in `schoolForm.ts`, so the fields asserted here are the fields asserted
+ * there.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -16,7 +22,6 @@ import userEvent from "@testing-library/user-event";
 
 import type { School } from "@evara/domain";
 
-const createSchool = vi.fn();
 const updateSchool = vi.fn();
 
 const getSchoolLogo = vi.fn();
@@ -29,9 +34,15 @@ vi.mock("../../ipc/setup", () => ({
   getSchoolLogoLimits: () => getSchoolLogoLimits(),
   setSchoolLogo: (id: string, data: string) => setSchoolLogo(id, data),
   clearSchoolLogo: () => clearSchoolLogo(),
-  createSchool: (input: unknown) => createSchool(input),
   updateSchool: (id: string, input: unknown) => updateSchool(id, input),
-  describeSetupError: (error: unknown) => String(error),
+  describeSetupError: (error: unknown) =>
+    typeof error === "object" && error !== null && "message" in error
+      ? String((error as { message: unknown }).message)
+      : String(error),
+  offendingField: (error: unknown) =>
+    typeof error === "object" && error !== null && (error as { kind?: string }).kind === "duplicate"
+      ? ((error as { field: string }).field ?? null)
+      : null,
 }));
 
 const { SchoolDetails } = await import("./SchoolDetails");
@@ -39,11 +50,10 @@ const { SchoolDetails } = await import("./SchoolDetails");
 /**
  * The school the screen is being shown for.
  *
- * Stands in for what `getSchool()` used to return. Since V12 the active school is
- * chosen by the setup shell and passed in as a prop, so "given this stored school"
- * is expressed by setting this rather than by mocking a read.
+ * Since V12 the active school is chosen by the setup shell and passed in as a prop, so
+ * "given this stored school" is expressed by setting this rather than by mocking a read.
  */
-let active: School | null = null;
+let active: School = {} as School;
 
 function school(overrides: Partial<School> = {}): School {
   return {
@@ -73,22 +83,16 @@ beforeEach(() => {
   });
   setSchoolLogo.mockResolvedValue(null);
   clearSchoolLogo.mockResolvedValue(undefined);
-  active = null;
-  createSchool.mockImplementation((input: Record<string, string>) =>
-    Promise.resolve(school(input)),
-  );
+  active = school();
   updateSchool.mockImplementation((_id: string, input: Record<string, string>) =>
     Promise.resolve(school(input)),
   );
 });
 
-/** Opens the edit form on whatever the backend returned. */
+/** Opens the edit form on the selected school. */
 async function openForm() {
   render(<SchoolDetails school={active} onChanged={vi.fn()} />);
-  const button = await screen.findByRole("button", {
-    name: /Describe the school|Edit details/,
-  });
-  await userEvent.click(button);
+  await userEvent.click(await screen.findByRole("button", { name: /Edit details/ }));
 }
 
 const timezoneBox = () => screen.getByRole("combobox", { name: /Time zone/ });
@@ -103,11 +107,10 @@ describe("selecting a timezone", () => {
     await userEvent.type(box, "kolkata");
     await userEvent.click(screen.getByText("India Standard Time — Asia/Kolkata"));
 
-    await userEvent.type(screen.getByLabelText(/School name/), "Northgate");
-    await userEvent.click(screen.getByRole("button", { name: "Create school" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
-    await waitFor(() => expect(createSchool).toHaveBeenCalled());
-    expect(createSchool.mock.calls[0]?.[0]).toMatchObject({
+    await waitFor(() => expect(updateSchool).toHaveBeenCalled());
+    expect(updateSchool.mock.calls[0]?.[1]).toMatchObject({
       timezone: "Asia/Kolkata",
     });
   });
@@ -125,12 +128,11 @@ describe("selecting a timezone", () => {
     // The box shows a label...
     expect((box as HTMLInputElement).value).toBe("India Standard Time — Asia/Kolkata");
 
-    await userEvent.type(screen.getByLabelText(/School name/), "Northgate");
-    await userEvent.click(screen.getByRole("button", { name: "Create school" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     // ...and the backend is sent an identifier.
-    await waitFor(() => expect(createSchool).toHaveBeenCalled());
-    const input = createSchool.mock.calls[0]?.[0] as Record<string, string>;
+    await waitFor(() => expect(updateSchool).toHaveBeenCalled());
+    const input = updateSchool.mock.calls[0]?.[1] as Record<string, string>;
     expect(input.timezone).toBe("Asia/Kolkata");
     expect(input.timezone).not.toContain("—");
   });
@@ -157,11 +159,10 @@ describe("selecting a locale", () => {
 
     expect((box as HTMLInputElement).value).toBe("English (India) — en-IN");
 
-    await userEvent.type(screen.getByLabelText(/School name/), "Northgate");
-    await userEvent.click(screen.getByRole("button", { name: "Create school" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
-    await waitFor(() => expect(createSchool).toHaveBeenCalled());
-    expect(createSchool.mock.calls[0]?.[0]).toMatchObject({ locale: "en-IN" });
+    await waitFor(() => expect(updateSchool).toHaveBeenCalled());
+    expect(updateSchool.mock.calls[0]?.[1]).toMatchObject({ locale: "en-IN" });
   });
 
   it("is not inferred from the timezone", async () => {
@@ -201,8 +202,8 @@ describe("reopening an existing project", () => {
     await waitFor(() => expect(updateSchool).toHaveBeenCalled());
     expect(updateSchool).toHaveBeenCalledWith("school-1", {
       name: "Northgate Secondary",
-      // Carried through untouched. The form does not collect a code yet, and a save that
-      // cleared one it had never shown would be a silent edit.
+      // A school with no code saves none. `code` is nullable and unique only when given,
+      // so an empty box must reach the column as NULL rather than as "".
       code: null,
       timezone: "Europe/London",
       locale: "en-GB",
@@ -218,6 +219,93 @@ describe("reopening an existing project", () => {
       await screen.findByText("United Kingdom Time — Europe/London"),
     ).toBeTruthy();
     expect(screen.getByText("English (United Kingdom) — en-GB")).toBeTruthy();
+  });
+});
+
+/**
+ * The school code, exposed by Stage 0C.
+ *
+ * `V12` added it and nothing collected it, so `SchoolDetails` carried the stored value
+ * through by hand to stop a save clearing one it had never shown. The field replaces that
+ * workaround, and the thing worth testing is that it replaced it *without* reintroducing
+ * the bug from the other side: editing the time zone must not clear a code, and clearing
+ * the box must mean no code rather than an empty string, because the column is unique only
+ * when given and `""` would collide between two un-coded schools.
+ */
+describe("the school code", () => {
+  it("shows the stored code in the summary", async () => {
+    active = school({ code: "NGS" });
+    render(<SchoolDetails school={active} onChanged={vi.fn()} />);
+
+    expect(await screen.findByText("NGS")).toBeTruthy();
+  });
+
+  it("says so plainly when there is no code", async () => {
+    active = school({ code: null });
+    render(<SchoolDetails school={active} onChanged={vi.fn()} />);
+
+    expect(await screen.findByText("Not set")).toBeTruthy();
+  });
+
+  it("is editable, and reaches the backend as typed", async () => {
+    active = school({ code: null });
+    await openForm();
+
+    await userEvent.type(screen.getByLabelText(/School code/), "NGS");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(updateSchool).toHaveBeenCalled());
+    expect(updateSchool.mock.calls[0]?.[1]).toMatchObject({ code: "NGS" });
+  });
+
+  it("is preserved when another field is edited", async () => {
+    // The regression this field exists to make impossible, from the direction that used to
+    // be handled by carrying the value through by hand.
+    active = school({ code: "NGS" });
+    await openForm();
+
+    const box = screen.getByRole("combobox", { name: /Time zone/ });
+    await userEvent.clear(box);
+    await userEvent.type(box, "kolkata{Enter}");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(updateSchool).toHaveBeenCalled());
+    expect(updateSchool.mock.calls[0]?.[1]).toMatchObject({
+      code: "NGS",
+      timezone: "Asia/Kolkata",
+    });
+  });
+
+  it("sends null, never an empty string, when the box is cleared", async () => {
+    active = school({ code: "NGS" });
+    await openForm();
+
+    await userEvent.clear(screen.getByLabelText(/School code/));
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(updateSchool).toHaveBeenCalled());
+    // `code` is unique when given through a partial index, so two schools saved with ""
+    // would collide on a value neither of them has.
+    expect(updateSchool.mock.calls[0]?.[1]).toMatchObject({ code: null });
+  });
+
+  it("marks the code field when the backend reports a duplicate", async () => {
+    active = school({ code: null });
+    updateSchool.mockRejectedValue({
+      kind: "duplicate",
+      entity: "school",
+      field: "code",
+      message: "another school already uses that code",
+    });
+    await openForm();
+
+    await userEvent.type(screen.getByLabelText(/School code/), "SMC");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    // The form stays open with the typed values intact, which is the point: retyping a
+    // whole record to fix one box is not a reasonable ask.
+    expect(await screen.findByText(/already uses that code/i)).toBeTruthy();
+    expect((screen.getByLabelText(/School code/) as HTMLInputElement).value).toBe("SMC");
   });
 });
 
@@ -304,13 +392,14 @@ describe("a stored value the list does not offer", () => {
 });
 
 describe("required fields", () => {
-  it("refuses to create a school with no name", async () => {
+  it("refuses to save a school with its name cleared", async () => {
     await openForm();
 
-    await userEvent.click(screen.getByRole("button", { name: "Create school" }));
+    await userEvent.clear(screen.getByLabelText(/School name/));
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     expect(await screen.findByText("School name is required.")).toBeTruthy();
-    expect(createSchool).not.toHaveBeenCalled();
+    expect(updateSchool).not.toHaveBeenCalled();
   });
 
   it("refuses to save a cleared timezone", async () => {

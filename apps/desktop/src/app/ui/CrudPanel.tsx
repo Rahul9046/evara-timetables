@@ -27,7 +27,15 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { describeSetupError, offendingField } from "../../ipc/setup";
 import { isValid, type Draft, type Problems } from "../validation";
 import { EntityForm, type FieldSpec } from "./Field";
-import { Banner, ConfirmDialog, DataTable, EmptyState, Loading, type Column } from "./Shell";
+import {
+  Banner,
+  ConfirmDialog,
+  DataTable,
+  EmptyState,
+  Loading,
+  type Column,
+  type RowAction,
+} from "./Shell";
 
 /** Everything one editable collection needs to describe itself. */
 export interface CrudSpec<T extends { id: string }, I> {
@@ -101,6 +109,34 @@ export interface CrudSpec<T extends { id: string }, I> {
    * `evara_core::time` computed.
    */
   readonly addBlockedBy?: string | null;
+  /**
+   * Why this row cannot be deleted, when the answer is already known.
+   *
+   * Returns the explanation, or `null` to offer the delete. The confirmation then
+   * *explains* rather than asking: no destructive button, and Cancel reads "Close".
+   *
+   * For the refusals Stage 0C made ordinary — a school that still owns a campus, a
+   * resource another school is still using, a person another school still holds — where
+   * the answer is read from the backend before the action is offered rather than
+   * discovered by pressing Delete. The backend still refuses; this only means the user is
+   * not asked to agree to something that was never going to happen.
+   *
+   * Deliberately a dialogue rather than a disabled Delete button. A disabled button
+   * cannot be focused, so its `title` is unreachable by keyboard and by touch, and the
+   * reason is the whole value of the interaction.
+   */
+  readonly deleteBlockedBy?: (row: T) => ReactNode | null;
+  /**
+   * Why this row cannot be edited in this panel, when it cannot.
+   *
+   * Disables Edit and becomes its `title`. Unlike {@link deleteBlockedBy} this one *is* a
+   * disabled control, because the explanation always has a visible home beside it — the
+   * row's own "Belongs to" column says whose record it is — and because an edit form that
+   * opened only to refuse every save would be worse.
+   */
+  readonly editBlockedBy?: (row: T) => string | null;
+  /** Extra per-row buttons, before Edit. See {@link RowAction}. */
+  readonly rowActions?: readonly RowAction<T>[];
 }
 
 /** Renders an editable collection. */
@@ -283,6 +319,10 @@ export function CrudPanel<T extends { id: string }, I>(props: {
   }
 
   const addBlocked = spec.addBlockedBy ?? null;
+  // Resolved once, so the dialogue's title, its body and whether it offers a destructive
+  // button cannot disagree about the same row.
+  const deleteBlocked =
+    pendingDelete === null ? null : (spec.deleteBlockedBy?.(pendingDelete) ?? null);
 
   return (
     <div className="crudPanel">
@@ -346,6 +386,8 @@ export function CrudPanel<T extends { id: string }, I>(props: {
           activeId={editing?.row?.id ?? null}
           onEdit={openForm}
           onDelete={setPendingDelete}
+          rowActions={spec.rowActions}
+          editBlockedBy={spec.editBlockedBy}
         />
       )}
 
@@ -363,22 +405,35 @@ export function CrudPanel<T extends { id: string }, I>(props: {
 
       <ConfirmDialog
         open={pendingDelete !== null}
-        title={`Delete this ${spec.noun}?`}
+        title={
+          deleteBlocked !== null
+            ? `This ${spec.noun} cannot be deleted`
+            : `Delete this ${spec.noun}?`
+        }
         confirmLabel={`Delete ${spec.noun}`}
         tone="danger"
         busy={busy}
+        blocked={deleteBlocked !== null}
         onConfirm={() => void confirmDelete()}
         onCancel={() => setPendingDelete(null)}
       >
-        {pendingDelete && (
-          <>
-            <p>
-              <strong>{spec.describe(pendingDelete)}</strong> will be removed from this
-              campus file. This cannot be undone.
-            </p>
-            {spec.deleteNote?.(pendingDelete)}
-          </>
-        )}
+        {pendingDelete &&
+          (deleteBlocked !== null ? (
+            <>
+              <p>
+                <strong>{spec.describe(pendingDelete)}</strong> is still in use.
+              </p>
+              {deleteBlocked}
+            </>
+          ) : (
+            <>
+              <p>
+                <strong>{spec.describe(pendingDelete)}</strong> will be removed from this
+                campus file. This cannot be undone.
+              </p>
+              {spec.deleteNote?.(pendingDelete)}
+            </>
+          ))}
       </ConfirmDialog>
     </div>
   );

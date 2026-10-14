@@ -1,18 +1,27 @@
 /**
  * The School Setup shell: which sections exist, in what order, and how they gate.
  *
- * `SchoolSetup.tsx` has always said `SECTIONS` was "exported so a test can assert the
- * list rather than the rendering" — there was no such test. Removing the Resources
- * section is the case that comment was describing: the set of steps is a product
- * decision, and a dropped or reordered one would otherwise only be noticed by someone
- * looking for it.
+ * `SchoolSetup.tsx` says `SECTIONS` is "exported so a test can assert the list rather than
+ * the rendering", and this is that test: the set of steps is a product decision, and a
+ * dropped or reordered one would otherwise only be noticed by someone looking for it.
+ *
+ * Stage 0C changes the list twice. **Schools** is new and comes first, because which
+ * institution the rest of the workflow is about is the first thing to settle. **Resources**
+ * returns, because `V13` gave resources cross-school sharing and the section is now where
+ * a school lends a minibus to another school's campus.
  *
  * So this covers the list as data *and* what the user actually sees, because the two can
- * disagree: the sidebar numbers steps from their array position, so a removal has to
+ * disagree: the sidebar numbers steps from their array position, so an insertion has to
  * renumber the rest with no separate counter to keep in step.
  *
+ * It also covers the thing only the shell can get wrong, and the one Stage 0C's brief
+ * singles out: **switching schools must not leave the previous school's screen standing.**
+ * The sections are keyed by school identifier, so a switch remounts them; the test asserts
+ * the remount rather than the key, because the key is the mechanism and the remount is the
+ * guarantee.
+ *
  * Each section's own screen is tested in its own file. This file deliberately stubs them
- * all out and asserts only navigation, numbering and gating.
+ * all out and asserts only navigation, numbering, gating and school context.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -31,15 +40,38 @@ vi.mock("../../ipc/setup", () => ({
  *
  * The shell's job is to render exactly one of them; which one is the only thing under
  * test here, so the real screens — each of which would fetch its own data — are replaced.
+ *
+ * The stubs print the school they were given, which is what lets the remount assertions
+ * below see that a switch reached the section rather than only the sidebar.
  */
+vi.mock("./Schools", () => ({
+  // The button stands in for a create, rename or delete finishing: the real screen calls
+  // `onChanged` and the shell re-reads. That is the only way a test can exercise what the
+  // shell does when the project's schools change under it.
+  Schools: (props: { activeSchoolId: string | null; onChanged: () => void }) => (
+    <div>
+      stub:schools:{props.activeSchoolId}
+      <button type="button" onClick={props.onChanged}>
+        stub:changed
+      </button>
+    </div>
+  ),
+}));
 vi.mock("./SchoolDetails", () => ({
-  SchoolDetails: () => <div>stub:school-details</div>,
+  SchoolDetails: (props: { school: School | null }) => (
+    <div>stub:school-details:{props.school?.id ?? "none"}</div>
+  ),
 }));
 vi.mock("./CampusesAndBuildings", () => ({
-  CampusesAndBuildings: () => <div>stub:campuses</div>,
+  CampusesAndBuildings: (props: { school: School }) => (
+    <div>stub:campuses:{props.school.id}</div>
+  ),
 }));
 vi.mock("./RoomsAndRoomTypes", () => ({
   RoomsAndRoomTypes: () => <div>stub:rooms</div>,
+}));
+vi.mock("./ResourcesAndSharing", () => ({
+  ResourcesAndSharing: () => <div>stub:resources</div>,
 }));
 vi.mock("./AcademicYearsAndTerms", () => ({
   AcademicYearsAndTerms: () => <div>stub:years</div>,
@@ -71,12 +103,16 @@ const { SchoolSetup, SECTIONS } = await import("./SchoolSetup");
 const SCHOOL = {
   id: "school-1",
   name: "Northgate Secondary",
+  code: "NGS",
   timezone: "Europe/London",
   locale: "en-GB",
+  workingDays: [1, 2, 3, 4, 5],
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
   rev: 1,
 } as School;
+
+const SECOND = { ...SCHOOL, id: "school-2", name: "Southmoor College", code: "SMC" } as School;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -87,8 +123,8 @@ beforeEach(() => {
 async function open() {
   render(<SchoolSetup />);
   await waitFor(() => expect(listSchools).toHaveBeenCalled());
-  // The first section renders once the school is known.
-  await screen.findByText("stub:school-details");
+  // The first section renders once the project's schools are known.
+  await screen.findByText(/^stub:schools:/);
 }
 
 function nav(): HTMLElement {
@@ -103,11 +139,15 @@ function steps(): string[] {
 }
 
 describe("the section list", () => {
-  it("is the eleven steps of setup, in dependency order", () => {
+  it("is the thirteen steps of setup, in dependency order", () => {
     expect(SECTIONS.map((s) => s.id)).toEqual([
+      // Which institution first: everything after this is about one of them.
+      "schools",
       "school",
       "campuses",
       "rooms",
+      // Resources sit with the other physical things, before the time model.
+      "resources",
       "years",
       "cycles",
       "periods",
@@ -121,69 +161,79 @@ describe("the section list", () => {
     ]);
   });
 
-  it("has no Resources section", () => {
-    // Nothing schedules against a resource until constraints arrive, so the step was
-    // configuration with no visible effect. The table and its commands remain.
-    expect(SECTIONS.some((s) => s.id === "resources")).toBe(false);
-    expect(SECTIONS.some((s) => /resource/i.test(s.label))).toBe(false);
+  it("has a Resources section again", () => {
+    // Removed when configuring a resource had no visible effect; back because V13 gave
+    // resources cross-school sharing, which is a decision with a consequence.
+    expect(SECTIONS.some((s) => s.id === "resources")).toBe(true);
+    expect(SECTIONS.find((s) => s.id === "resources")?.label).toMatch(/resource/i);
   });
 
-  it("needs a school for everything except School details", () => {
-    expect(SECTIONS.filter((s) => !s.needsSchool).map((s) => s.id)).toEqual(["school"]);
+  it("needs a school for everything except Schools and School details", () => {
+    expect(SECTIONS.filter((s) => !s.needsSchool).map((s) => s.id)).toEqual([
+      "schools",
+      "school",
+    ]);
   });
 });
 
 describe("the sidebar", () => {
-  it("offers every section and no Resources entry", async () => {
+  it("offers every section, Resources included", async () => {
     await open();
 
-    expect(steps()).toHaveLength(11);
-    expect(within(nav()).queryByRole("button", { name: /Resources/i })).toBeNull();
-    expect(within(nav()).queryByText(/Shared equipment/i)).toBeNull();
+    expect(steps()).toHaveLength(13);
+    expect(within(nav()).getByRole("button", { name: /Resources/i })).toBeTruthy();
+    expect(within(nav()).getByRole("button", { name: /Schools/i })).toBeTruthy();
   });
 
-  it("numbers the steps 1-11 with no gap where Resources was", async () => {
+  it("numbers the steps 1-13 with no gap", async () => {
     await open();
 
-    // The numbers come from array position, so this is what proves the removal
-    // renumbered rather than leaving a hole at 4.
+    // The numbers come from array position, so this is what proves the two insertions
+    // renumbered rather than leaving a hole.
     const indices = within(nav())
       .getAllByRole("button")
       .map((b) => b.querySelector(".navIndex")?.textContent);
     expect(indices).toEqual([
-      "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11",
+      "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13",
     ]);
   });
 
-  it("gives step 4 to academic years, which followed Resources", async () => {
+  it("gives step 1 to Schools and step 2 to School details", async () => {
     await open();
 
-    const fourth = within(nav()).getAllByRole("button")[3];
-    expect(fourth?.querySelector(".navIndex")?.textContent).toBe("4");
-    expect(fourth?.textContent).toContain("Academic years and terms");
+    const buttons = within(nav()).getAllByRole("button");
+    expect(buttons[0]?.textContent).toContain("Schools");
+    expect(buttons[1]?.textContent).toContain("School details");
   });
 });
 
-describe("navigating between the remaining sections", () => {
-  it("opens School details first", async () => {
+describe("navigating between the sections", () => {
+  it("opens Schools first", async () => {
     await open();
 
-    expect(screen.getByText("stub:school-details")).toBeTruthy();
+    expect(screen.getByText(/^stub:schools:/)).toBeTruthy();
     const first = within(nav()).getAllByRole("button")[0];
     expect(first?.getAttribute("aria-current")).toBe("page");
   });
 
   it.each([
-    ["Campuses and buildings", "stub:campuses"],
-    ["Rooms and room types", "stub:rooms"],
-    ["Academic years and terms", "stub:years"],
-    ["Cycles and cycle days", "stub:cycles"],
-    ["Bell schedules and periods", "stub:periods"],
-    ["Calendar mapping", "stub:calendar"],
-    ["Timetable grid preview", "stub:grid"],
+    ["School details", /^stub:school-details:/],
+    ["Campuses and buildings", /^stub:campuses:/],
+    ["Rooms and room types", /^stub:rooms$/],
+    ["Resources", /^stub:resources$/],
+    ["Academic years and terms", /^stub:years$/],
+    ["Cycles and cycle days", /^stub:cycles$/],
+    ["Bell schedules and periods", /^stub:periods$/],
+    ["Calendar mapping", /^stub:calendar$/],
+    ["Timetable grid preview", /^stub:grid$/],
+    ["Teachers", /^stub:teachers$/],
+    ["Students and year levels", /^stub:students$/],
+    ["Student groups", /^stub:groups$/],
   ])("opens %s", async (label, marker) => {
     await open();
-    await userEvent.click(within(nav()).getByRole("button", { name: new RegExp(label, "i") }));
+    await userEvent.click(
+      within(nav()).getByRole("button", { name: new RegExp(`^${label}`, "i") }),
+    );
 
     expect(await screen.findByText(marker)).toBeTruthy();
   });
@@ -193,8 +243,8 @@ describe("navigating between the remaining sections", () => {
     await userEvent.click(within(nav()).getByRole("button", { name: /Rooms and room types/i }));
 
     expect(await screen.findByText("stub:rooms")).toBeTruthy();
-    expect(screen.queryByText("stub:school-details")).toBeNull();
-    expect(screen.queryByText("stub:campuses")).toBeNull();
+    expect(screen.queryByText(/^stub:schools:/)).toBeNull();
+    expect(screen.queryByText(/^stub:campuses:/)).toBeNull();
 
     const current = within(nav())
       .getAllByRole("button")
@@ -203,15 +253,15 @@ describe("navigating between the remaining sections", () => {
     expect(current[0]?.textContent).toContain("Rooms and room types");
   });
 
-  it("walks the whole workflow end to end without a Resources step", async () => {
-    // "Setup can be completed without configuring resources": every step is reachable and
-    // renders, and the walk never passes through a resources section.
+  it("walks the whole workflow end to end, Resources included", async () => {
     await open();
 
-    const visited: string[] = ["stub:school-details"];
+    const visited: string[] = ["stub:schools"];
     for (const label of [
+      "School details",
       "Campuses and buildings",
       "Rooms and room types",
+      "Resources",
       "Academic years and terms",
       "Cycles and cycle days",
       "Bell schedules and periods",
@@ -219,50 +269,61 @@ describe("navigating between the remaining sections", () => {
       "Timetable grid preview",
     ]) {
       await userEvent.click(
-        within(nav()).getByRole("button", { name: new RegExp(label, "i") }),
+        within(nav()).getByRole("button", { name: new RegExp(`^${label}`, "i") }),
       );
       const body = document.querySelector(".setupBody");
-      visited.push(within(body as HTMLElement).getByText(/^stub:/).textContent ?? "");
+      const marker = within(body as HTMLElement).getByText(/^stub:/).textContent ?? "";
+      visited.push(marker.split(":").slice(0, 2).join(":"));
     }
 
     expect(visited).toEqual([
+      "stub:schools",
       "stub:school-details",
       "stub:campuses",
       "stub:rooms",
+      "stub:resources",
       "stub:years",
       "stub:cycles",
       "stub:periods",
       "stub:calendar",
       "stub:grid",
     ]);
-    expect(visited.some((m) => /resource/i.test(m))).toBe(false);
   });
 });
 
-describe("before the school record exists", () => {
+describe("before any school exists", () => {
   beforeEach(() => {
     listSchools.mockResolvedValue([]);
   });
 
-  it("locks every section but School details", async () => {
+  it("locks every section but Schools and School details", async () => {
     render(<SchoolSetup />);
-    await screen.findByText("stub:school-details");
+    await screen.findByText(/^stub:schools:/);
 
     const locked = within(nav())
       .getAllByRole("button")
       .filter((b) => b.hasAttribute("disabled"));
-    expect(locked).toHaveLength(10);
-    expect(locked.every((b) => b.textContent?.includes("Needs the school record"))).toBe(
-      true,
-    );
+    expect(locked).toHaveLength(11);
+    expect(locked.every((b) => b.textContent?.includes("Needs a school"))).toBe(true);
   });
 
-  it("still lets School details be used, so the first run has somewhere to start", async () => {
+  it("opens on Schools, which is where the first school is added", async () => {
     render(<SchoolSetup />);
 
-    expect(await screen.findByText("stub:school-details")).toBeTruthy();
+    expect(await screen.findByText("stub:schools:")).toBeTruthy();
     const first = within(nav()).getAllByRole("button")[0];
     expect(first?.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("sends School details to Schools rather than offering a second way to create one", async () => {
+    render(<SchoolSetup />);
+    await screen.findByText(/^stub:schools:/);
+
+    await userEvent.click(within(nav()).getByRole("button", { name: /School details/i }));
+
+    // The stub prints "none", which is the shell having passed a null school rather than
+    // having picked an arbitrary one.
+    expect(await screen.findByText("stub:school-details:none")).toBeTruthy();
   });
 });
 
@@ -272,16 +333,93 @@ describe("choosing which school", () => {
     expect(screen.queryByLabelText("School")).toBeNull();
   });
 
-  it("offers a picker when the project holds several, and switches the sections", async () => {
-    const second = { ...SCHOOL, id: "school-2", name: "Southmoor College" } as School;
-    listSchools.mockResolvedValue([SCHOOL, second]);
+  it("does not label the body with a school when there is only one", async () => {
+    await open();
+    await userEvent.click(within(nav()).getByRole("button", { name: /Campuses/i }));
+
+    // Nothing to tell apart, so the scope line would be furniture on every screen.
+    expect(document.querySelector(".setupScope")).toBeNull();
+  });
+
+  it("offers a picker when the project holds several, keyed by identifier", async () => {
+    listSchools.mockResolvedValue([SCHOOL, SECOND]);
     render(<SchoolSetup />);
-    await screen.findByText("stub:school-details");
+    await screen.findByText(/^stub:schools:/);
 
     const picker = screen.getByLabelText("School");
-    expect(picker).toBeTruthy();
-    await userEvent.selectOptions(picker, "school-2");
-    expect((picker as HTMLSelectElement).value).toBe("school-2");
+    expect((picker as HTMLSelectElement).value).toBe(SCHOOL.id);
+    await userEvent.selectOptions(picker, SECOND.id);
+    expect((picker as HTMLSelectElement).value).toBe(SECOND.id);
+  });
+
+  it("names the school the body is about once there is a choice", async () => {
+    listSchools.mockResolvedValue([SCHOOL, SECOND]);
+    render(<SchoolSetup />);
+    await screen.findByText(/^stub:schools:/);
+    await userEvent.click(within(nav()).getByRole("button", { name: /Campuses/i }));
+
+    const scope = document.querySelector(".setupScope");
+    expect(scope?.textContent).toContain("Northgate Secondary (NGS)");
+  });
+
+  it("switches every school-specific section, not only the sidebar", async () => {
+    listSchools.mockResolvedValue([SCHOOL, SECOND]);
+    render(<SchoolSetup />);
+    await screen.findByText(/^stub:schools:/);
+    await userEvent.click(within(nav()).getByRole("button", { name: /Campuses/i }));
+    expect(await screen.findByText(`stub:campuses:${SCHOOL.id}`)).toBeTruthy();
+
+    await userEvent.selectOptions(screen.getByLabelText("School"), SECOND.id);
+
+    // The section is now about the other school, and shows no trace of the one left
+    // behind — "data from School A under School B's heading" is the failure this guards.
+    expect(await screen.findByText(`stub:campuses:${SECOND.id}`)).toBeTruthy();
+    expect(screen.queryByText(`stub:campuses:${SCHOOL.id}`)).toBeNull();
+    expect(document.querySelector(".setupScope")?.textContent).toContain(
+      "Southmoor College",
+    );
+  });
+
+  /**
+   * The stale-state guarantee, asserted as a remount rather than as a key.
+   *
+   * A section holds state that is *about* a school — an open form, a pending delete, a
+   * selected campus. Re-rendering with a new `school` prop re-reads the lists and leaves
+   * that state standing; remounting discards it. The stub counts its own mounts, so this
+   * sees the difference.
+   */
+  it("remounts a section on a switch, discarding what it was holding", async () => {
+    listSchools.mockResolvedValue([SCHOOL, SECOND]);
+    render(<SchoolSetup />);
+    await screen.findByText(/^stub:schools:/);
+    await userEvent.click(within(nav()).getByRole("button", { name: /Campuses/i }));
+    const first = await screen.findByText(`stub:campuses:${SCHOOL.id}`);
+
+    await userEvent.selectOptions(screen.getByLabelText("School"), SECOND.id);
+    const second = await screen.findByText(`stub:campuses:${SECOND.id}`);
+
+    // A different DOM node, not the same one re-rendered: React only reuses the element
+    // when the key matches, and the key is the school.
+    expect(second).not.toBe(first);
+    expect(document.body.contains(first)).toBe(false);
+  });
+
+  it("hands the selection to another school when the selected one is deleted", async () => {
+    listSchools.mockResolvedValue([SCHOOL, SECOND]);
+    render(<SchoolSetup />);
+    await screen.findByText(/^stub:schools:/);
+    await userEvent.selectOptions(screen.getByLabelText("School"), SECOND.id);
+    expect(await screen.findByText(`stub:schools:${SECOND.id}`)).toBeTruthy();
+
+    // A successful delete: the project now holds one school, and the section tells the
+    // shell to re-read. The selection cannot stay pointed at a row that is gone.
+    listSchools.mockResolvedValue([SCHOOL]);
+    await userEvent.click(screen.getByRole("button", { name: "stub:changed" }));
+
+    expect(await screen.findByText(`stub:schools:${SCHOOL.id}`)).toBeTruthy();
+    expect(screen.queryByText(`stub:schools:${SECOND.id}`)).toBeNull();
+    // And with one school left, the picker goes: there is no choice to make again.
+    await waitFor(() => expect(screen.queryByLabelText("School")).toBeNull());
   });
 });
 
@@ -291,8 +429,8 @@ describe("existing project data", () => {
     await userEvent.click(within(nav()).getByRole("button", { name: /Campuses/i }));
     await userEvent.click(within(nav()).getByRole("button", { name: /Rooms/i }));
 
-    // The shell holds the record; a project opened with resources already in it is
-    // untouched by this change, because nothing here writes.
+    // The shell holds the record; a project opened before Stage 0C is untouched by this
+    // change, because nothing here writes.
     expect(listSchools).toHaveBeenCalledTimes(1);
   });
 });

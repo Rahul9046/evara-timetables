@@ -284,6 +284,40 @@ export function validateTeacher(draft: Draft): Problems {
   ]);
 }
 
+/**
+ * One student's spell at one school.
+ *
+ * Everything is optional, and that is the model rather than a lenient form. An admission
+ * number is the school's own and plenty of schools do not issue one; a year level and a
+ * campus are classifications a school may not track; and a joining date is a fact some
+ * schools simply do not record — `V13` made `enrolled_on` nullable for that reason, and a
+ * form that insisted would be answered with invented dates.
+ *
+ * So the only checks are shape: a date that was typed must be a date, and it must not end
+ * before it began. Which year levels and campuses are *this school's* is a cross-school
+ * rule the repository owns and refuses by name; nothing here guesses at it.
+ */
+export function validateEnrolment(draft: Draft): Problems {
+  const found = problems([
+    [
+      "enrolledOn",
+      optional(text(draft, "enrolledOn"), (value, label) => isoDate(value, label), "Joining date"),
+    ],
+    [
+      "leftOn",
+      optional(text(draft, "leftOn"), (value, label) => isoDate(value, label), "Leaving date"),
+    ],
+  ]);
+
+  if (found["enrolledOn"] !== undefined || found["leftOn"] !== undefined) return found;
+  const joined = text(draft, "enrolledOn");
+  const left = text(draft, "leftOn");
+  if (joined.length > 0 && left.length > 0 && left < joined) {
+    return { ...found, leftOn: "A student cannot leave before the date they joined." };
+  }
+  return found;
+}
+
 /** A student. Only the two names are required, for the same reasons as a teacher. */
 export function validateStudent(draft: Draft): Problems {
   return problems([

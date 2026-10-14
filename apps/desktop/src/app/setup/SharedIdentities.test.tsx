@@ -40,6 +40,7 @@ const listStudents = vi.fn<(schoolId: string) => Promise<Student[]>>();
 const listSchoolStudents = vi.fn<(schoolId: string) => Promise<StudentInSchool[]>>();
 const listYearLevels = vi.fn<(schoolId: string) => Promise<YearLevel[]>>();
 const updateTeacher = vi.fn<(id: string, input: unknown) => Promise<Teacher>>();
+const listEnrolmentHistory = vi.fn<(studentId: string) => Promise<StudentEnrolment[]>>();
 
 vi.mock("../../ipc/setup", () => ({
   listTeachers: (schoolId: string) => listTeachers(schoolId),
@@ -58,6 +59,21 @@ vi.mock("../../ipc/setup", () => ({
   deleteYearLevel: vi.fn(() => Promise.resolve()),
   listGroupsForStudent: vi.fn(() => Promise.resolve([])),
   listCampuses: vi.fn<(schoolId: string) => Promise<Campus[]>>(() => Promise.resolve([])),
+  // The Stage 0C relationship surface. The assertions here are about what the two lists
+  // *show* and what they refuse, so these are stubs — `MultiSchoolManagement.test.tsx`
+  // covers the writes.
+  addTeacherToSchool: vi.fn(() => Promise.resolve({})),
+  listTeacherMemberships: vi.fn(() => Promise.resolve([])),
+  setTeacherMembershipActive: vi.fn(() => Promise.resolve({})),
+  removeTeacherFromSchool: vi.fn(() => Promise.resolve()),
+  listTeacherCampuses: vi.fn(() => Promise.resolve([])),
+  assignTeacherCampus: vi.fn(() => Promise.resolve({})),
+  removeTeacherCampus: vi.fn(() => Promise.resolve()),
+  enrolStudent: vi.fn(() => Promise.resolve({})),
+  listEnrolmentHistory: (studentId: string) => listEnrolmentHistory(studentId),
+  updateEnrolment: vi.fn(() => Promise.resolve({})),
+  leaveSchool: vi.fn(() => Promise.resolve({})),
+  transferStudent: vi.fn(() => Promise.resolve({})),
   listAvailability: vi.fn(() => Promise.resolve([])),
   countAvailability: vi.fn(() => Promise.resolve(0)),
   setAvailability: vi.fn(() => Promise.resolve({})),
@@ -74,9 +90,28 @@ vi.mock("../../ipc/setup", () => ({
 
 const { Teachers } = await import("./Teachers");
 const { StudentsAndYearLevels } = await import("./StudentsAndYearLevels");
+type SetupContext = import("./SchoolSetup").SetupContext;
 
 const NORTH = { id: "school-north", name: "Northgate Secondary" } as School;
 const SOUTH = { id: "school-south", name: "Southmoor College" } as School;
+
+/**
+ * What the setup shell hands a section.
+ *
+ * Both screens take it as optional, so a single-school project needs none — but a
+ * *visiting* person can only be described properly with it: naming the school that holds
+ * their identity needs the project's list of schools, and offering to go there needs
+ * `selectSchool`.
+ */
+function context(overrides: Partial<SetupContext> = {}): SetupContext {
+  return {
+    schools: [NORTH, SOUTH],
+    selectSchool: vi.fn(),
+    openSection: vi.fn(),
+    reloadSchools: vi.fn(),
+    ...overrides,
+  };
+}
 
 const STAMP = {
   createdAt: "2026-01-01T00:00:00.000Z",
@@ -154,6 +189,9 @@ function yearLevel(id: string, name: string, schoolId: string): YearLevel {
 beforeEach(() => {
   vi.clearAllMocks();
   updateTeacher.mockResolvedValue(ADA);
+  listEnrolmentHistory.mockImplementation((studentId) =>
+    Promise.resolve(studentId === CASS.id ? [enrolment(SOUTH.id, "year-south").enrolment] : []),
+  );
 
   // Both schools list the same person, because both have a membership for her. This is
   // the shape the backend actually returns: `listTeachers` reads `teacher_school`.
@@ -197,31 +235,79 @@ describe("a teacher shared between two schools", () => {
     expect(screen.queryByText("Active")).toBeNull();
   });
 
-  it("marks a visiting teacher, whose details another school holds", async () => {
+  it("marks a visiting teacher, and names the school that holds their identity", async () => {
     listSchoolTeachers.mockResolvedValue([membership(SOUTH.id, true)]);
 
-    render(<Teachers school={SOUTH} />);
+    render(<Teachers school={SOUTH} context={context()} />);
 
     expect(await screen.findByText("Okafor")).toBeTruthy();
-    expect(screen.getByText("Another school (visiting)")).toBeTruthy();
+    // Stage 0C names the school rather than saying "another": "visiting" alone does not
+    // tell the user where to go to change anything.
+    expect(screen.getByText(/Visiting from Northgate Secondary/)).toBeTruthy();
   });
 
-  it("discloses that editing a visiting teacher will be refused, before sending it", async () => {
+  /**
+   * Stage 0B *disclosed* that editing a visiting teacher would be refused, and let the
+   * user send it anyway. Stage 0C does not offer the edit at all, and offers the thing
+   * that works instead — which is the difference between a screen that warns and a screen
+   * that is correct.
+   */
+  it("does not offer to edit a visiting teacher's identity here", async () => {
+    listSchoolTeachers.mockResolvedValue([membership(SOUTH.id, true)]);
+
+    render(<Teachers school={SOUTH} context={context()} />);
+    expect(await screen.findByText("Okafor")).toBeTruthy();
+
+    const edit = screen.getByRole("button", { name: "Edit Ada Okafor" });
+    expect(edit.hasAttribute("disabled")).toBe(true);
+    expect(edit.getAttribute("title")).toMatch(/Northgate Secondary/);
+    expect(edit.getAttribute("title")).toMatch(/workload settings/);
+    expect(updateTeacher).not.toHaveBeenCalled();
+  });
+
+  it("offers the school where that edit is allowed, and switches to it", async () => {
+    const user = userEvent.setup();
+    const selectSchool = vi.fn();
+    listSchoolTeachers.mockResolvedValue([membership(SOUTH.id, true)]);
+
+    render(<Teachers school={SOUTH} context={context({ selectSchool })} />);
+    expect(await screen.findByText("Okafor")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: /^Go to home school/ }));
+
+    expect(selectSchool).toHaveBeenCalledWith(NORTH.id);
+  });
+
+  it("does not offer to delete a visiting teacher, and says why", async () => {
     const user = userEvent.setup();
     listSchoolTeachers.mockResolvedValue([membership(SOUTH.id, true)]);
 
-    render(<Teachers school={SOUTH} />);
+    render(<Teachers school={SOUTH} context={context()} />);
     expect(await screen.findByText("Okafor")).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: /Edit/ }));
-    await user.clear(screen.getByLabelText(/first name/i));
-    await user.type(screen.getByLabelText(/first name/i), "Adaeze");
-    await user.click(screen.getByRole("button", { name: /^Save/ }));
+    await user.click(screen.getByRole("button", { name: /^Delete Ada Okafor/ }));
 
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/belongs to another school/i)).toBeTruthy();
-    // Told first, and nothing sent until the user decides.
-    expect(updateTeacher).not.toHaveBeenCalled();
+    expect(within(dialog).getByText(/only the school that created somebody/i)).toBeTruthy();
+    // No destructive button: the refusal is certain, so the dialogue explains instead.
+    expect(within(dialog).queryByRole("button", { name: /^Delete teacher$/ })).toBeNull();
+    expect(within(dialog).getByRole("button", { name: /^Close$/ })).toBeTruthy();
+  });
+
+  it("shows this school's own employment on the row, not the project-level flag", async () => {
+    // Already covered above for the inactive case; this is the shared-identity version:
+    // the same person, two schools, two different answers to "do you employ her?".
+    listSchoolTeachers.mockImplementation((schoolId: string) =>
+      Promise.resolve([membership(schoolId, schoolId === NORTH.id)]),
+    );
+
+    const view = render(<Teachers school={NORTH} context={context()} />);
+    expect(await screen.findByText("Active")).toBeTruthy();
+
+    view.rerender(<Teachers school={SOUTH} context={context()} />);
+
+    expect(await screen.findByText("Not teaching here")).toBeTruthy();
+    expect(screen.queryByText("Active")).toBeNull();
   });
 });
 
@@ -269,13 +355,44 @@ describe("a student enrolled in two schools", () => {
     expect(screen.getByText("Left this school")).toBeTruthy();
   });
 
-  it("marks a visiting student, whose details another school holds", async () => {
+  it("marks a visiting student, and names the school that holds their identity", async () => {
     listSchoolStudents.mockResolvedValue([enrolment(SOUTH.id, "year-south")]);
 
-    render(<StudentsAndYearLevels school={SOUTH} />);
+    render(<StudentsAndYearLevels school={SOUTH} context={context()} />);
 
     expect(await screen.findByText("Pupilsen")).toBeTruthy();
-    expect(screen.getByText("Another school (visiting)")).toBeTruthy();
+    expect(screen.getByText(/Visiting from Northgate Secondary/)).toBeTruthy();
+  });
+
+  it("does not offer to edit a visiting student's identity here", async () => {
+    listSchoolStudents.mockResolvedValue([enrolment(SOUTH.id, "year-south")]);
+
+    render(<StudentsAndYearLevels school={SOUTH} context={context()} />);
+    expect(await screen.findByText("Pupilsen")).toBeTruthy();
+
+    const edit = screen.getByRole("button", { name: "Edit Cass Pupilsen" });
+    expect(edit.hasAttribute("disabled")).toBe(true);
+    // And the thing this school *can* change is named in the same breath.
+    expect(edit.getAttribute("title")).toMatch(/Northgate Secondary/);
+    expect(edit.getAttribute("title")).toMatch(/Enrolment/);
+  });
+
+  it("offers this school's enrolment of them as the thing it can change", async () => {
+    const user = userEvent.setup();
+    listSchoolStudents.mockResolvedValue([enrolment(SOUTH.id, "year-south")]);
+
+    render(<StudentsAndYearLevels school={SOUTH} context={context()} />);
+    expect(await screen.findByText("Pupilsen")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: /^Enrolment Cass Pupilsen/ }));
+
+    // Southmoor's own spell, with Southmoor's own admission number — never Northgate's.
+    const panel = (await screen.findByText(/Enrolment — Cass Pupilsen/)).closest(
+      ".subPanel",
+    ) as HTMLElement;
+    // Twice: the current spell's summary, and the same spell in the history below it.
+    expect(within(panel).getAllByText("SM-77")).toHaveLength(2);
+    expect(within(panel).queryByText("NG-1001")).toBeNull();
   });
 });
 

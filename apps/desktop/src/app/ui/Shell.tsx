@@ -65,6 +65,28 @@ export interface Column<T> {
 }
 
 /**
+ * An extra per-row button, beside Edit and Delete.
+ *
+ * Exists for the row actions that are neither: making a school the active one, opening one
+ * student's enrolment, jumping to the school that holds a visiting teacher's identity. All
+ * of those are navigation or scoping rather than editing, so a form field would be the
+ * wrong place for them — and writing a second table to get them would make Stage 0C's
+ * screens look unlike the eleven that came before.
+ *
+ * `blockedBy` disables the button and becomes its `title`. It must say *why*: a disabled
+ * button is not focusable, so an explanation only in a tooltip is unreachable by keyboard
+ * and by touch. Same rule as `CrudSpec.addBlockedBy`.
+ */
+export interface RowAction<T> {
+  readonly label: string;
+  readonly onClick: (row: T) => void;
+  /** Why it is unavailable for this row, or `null` when it is available. */
+  readonly blockedBy?: (row: T) => string | null;
+  /** Renders as a danger-toned link, for an action that takes something away. */
+  readonly tone?: "danger";
+}
+
+/**
  * A table with per-row edit and delete.
  *
  * Wrapped in its own scroll container so a wide table scrolls instead of pushing the
@@ -80,8 +102,23 @@ export function DataTable<T extends { id: string }>(props: {
   onDelete: (row: T) => void;
   /** Marks the row currently being edited. */
   activeId?: string | null;
+  /** Extra buttons, rendered before Edit. See {@link RowAction}. */
+  rowActions?: readonly RowAction<T>[];
+  /** Why this row cannot be edited from here, when it cannot. */
+  editBlockedBy?: (row: T) => string | null;
 }) {
-  const { caption, columns, rows, busy, describe, onEdit, onDelete, activeId } = props;
+  const {
+    caption,
+    columns,
+    rows,
+    busy,
+    describe,
+    onEdit,
+    onDelete,
+    activeId,
+    rowActions,
+    editBlockedBy,
+  } = props;
 
   return (
     <div className="tableScroll">
@@ -108,6 +145,22 @@ export function DataTable<T extends { id: string }>(props: {
                 </td>
               ))}
               <td className="rowActions">
+                {(rowActions ?? []).map((action) => {
+                  const blocked = action.blockedBy?.(row) ?? null;
+                  return (
+                    <button
+                      key={action.label}
+                      type="button"
+                      className={action.tone === "danger" ? "linkish danger" : "linkish"}
+                      aria-label={`${action.label} ${describe(row)}`}
+                      disabled={busy || blocked !== null}
+                      title={blocked ?? undefined}
+                      onClick={() => action.onClick(row)}
+                    >
+                      {action.label}
+                    </button>
+                  );
+                })}
                 {/* `aria-label` rather than a visually-hidden span: a table of twenty
                     rows otherwise has twenty buttons all announced as "Edit", and the
                     label gives each one an unambiguous name without duplicating the
@@ -116,7 +169,8 @@ export function DataTable<T extends { id: string }>(props: {
                   type="button"
                   className="linkish"
                   aria-label={`Edit ${describe(row)}`}
-                  disabled={busy}
+                  disabled={busy || (editBlockedBy?.(row) ?? null) !== null}
+                  title={editBlockedBy?.(row) ?? undefined}
                   onClick={() => onEdit(row)}
                 >
                   Edit
@@ -156,6 +210,27 @@ export function ConfirmDialog(props: {
   confirmLabel: string;
   tone?: "danger" | "normal";
   busy?: boolean;
+  /**
+   * Explains the action instead of offering it.
+   *
+   * The confirm button goes and Cancel becomes "Close". For an action the backend is
+   * certain to refuse — deleting a resource another school is still using, deleting a
+   * school that still owns a campus — where the honest interface is an explanation rather
+   * than a button that fails. Deliberately a dialogue rather than a disabled button: a
+   * disabled button cannot be focused, so its reason is unreachable by keyboard, and the
+   * reason is the whole point.
+   */
+  blocked?: boolean;
+  /**
+   * Why the action cannot be confirmed *yet*.
+   *
+   * Disables the confirm button and becomes its `title`. Different from
+   * {@link blocked}, which is "this will never work": this is "not until you have chosen
+   * something", for a dialogue that asks a question as well as confirming — picking which
+   * existing person to add. A button that silently does nothing is worse than one that is
+   * visibly unavailable.
+   */
+  confirmBlockedBy?: string | null;
   children: ReactNode;
   onConfirm: () => void;
   onCancel: () => void;
@@ -205,16 +280,19 @@ export function ConfirmDialog(props: {
       <h3 id="confirmTitle">{props.title}</h3>
       <div className="confirmBody">{props.children}</div>
       <div className="actions">
-        <button
-          type="button"
-          className={props.tone === "danger" ? "danger" : undefined}
-          disabled={props.busy}
-          onClick={props.onConfirm}
-        >
-          {props.busy ? "Working…" : props.confirmLabel}
-        </button>
+        {props.blocked !== true && (
+          <button
+            type="button"
+            className={props.tone === "danger" ? "danger" : undefined}
+            disabled={props.busy || (props.confirmBlockedBy ?? null) !== null}
+            title={props.confirmBlockedBy ?? undefined}
+            onClick={props.onConfirm}
+          >
+            {props.busy ? "Working…" : props.confirmLabel}
+          </button>
+        )}
         <button type="button" className="secondary" disabled={props.busy} onClick={props.onCancel}>
-          Cancel
+          {props.blocked === true ? "Close" : "Cancel"}
         </button>
       </div>
     </dialog>

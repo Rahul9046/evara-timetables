@@ -1,136 +1,43 @@
 /**
- * Section 1 — School Details.
+ * Section 2 — School Details.
  *
- * The one record every other section hangs off. Not a `CrudPanel`: there is exactly one
- * school per project, it is created rather than added, and it is never deleted — the way
- * to discard a school is to discard the project file, which is why the repository offers
- * no `delete_school` and this screen offers no delete button.
+ * The record every section after it hangs off: the **selected** school's name, code, time
+ * zone, locale, working days and logo. Which school that is belongs to the setup shell,
+ * which owns the project's list of them; this screen never looks one up, because a
+ * `LIMIT 1` read would quietly edit an arbitrary institution.
+ *
+ * ## Why this is not the Schools section
+ *
+ * Stage 0C added **Schools**, which is about the project: how many institutions it
+ * describes, which one is selected, and creating or deleting one. This screen is about one
+ * institution, and it is where the logo lives — a thing that is uploaded and removed
+ * immediately rather than being part of a draft that is saved or cancelled. Two screens,
+ * two decisions; the *form* is one definition, in `schoolForm.ts`, so they cannot drift.
+ *
+ * The first-run path stays here. A campus file with no schools at all opens on Schools,
+ * which is where the first one is added, and this screen says so rather than offering a
+ * second way to do it.
  */
 import { useCallback, useMemo, useState } from "react";
 
-import type { School, SchoolInput } from "@evara/domain";
-import { createSchool, describeSetupError, updateSchool } from "../../ipc/setup";
-import { withExistingValue } from "../ui/Combobox";
-import { EntityForm, type FieldSpec } from "../ui/Field";
+import type { School } from "@evara/domain";
+import { describeSetupError, offendingField, updateSchool } from "../../ipc/setup";
+import { EntityForm } from "../ui/Field";
 import { Banner, EmptyState, Facts, Loading } from "../ui/Shell";
-import {
-  isValid,
-  list,
-  text,
-  validateSchool,
-  type Draft,
-  type Problems,
-} from "../validation";
-import { currentLocale, localeLabel, localeOptions } from "./locales";
-import {
-  canonicalTimezone,
-  currentTimezone,
-  isLegacyTimezone,
-  timezoneLabel,
-  timezoneName,
-  timezoneOptions,
-} from "./timezones";
+import { isValid, validateSchool, type Draft, type Problems } from "../validation";
+import { localeLabel } from "./locales";
+import { schoolDraft, schoolFields, schoolInput } from "./schoolForm";
 import { SchoolLogoPanel } from "./SchoolLogoPanel";
-import {
-  MONDAY_TO_FRIDAY,
-  describeWeek,
-  toWeekdayNumbers,
-  toWeekdayValues,
-} from "./weekdays";
+import { timezoneLabel } from "./timezones";
+import { describeWeek } from "./weekdays";
 
-/**
- * How a stored timezone that the list does not offer is described.
- *
- * Says what it is as well as that it is unlisted, and where the name has since been
- * retired, says what replaced it — which is the one piece of information that turns
- * "this looks wrong" into "this is fine, and here is the modern spelling if you want it".
- * Still does not change the value: see {@link isLegacyTimezone}.
- */
-function existingTimezone(value: string): string {
-  const name = timezoneName(value);
-  const named = name === value ? value : `${name} — ${value}`;
-  const renamed = isLegacyTimezone(value)
-    ? `; renamed to ${canonicalTimezone(value)}`
-    : "";
-  return `${named} (existing value, not in this list${renamed})`;
-}
-
-/** The same, for a locale tag. There is no rename table for these. */
-function existingLocale(value: string): string {
-  return `${value} (existing value, not in this list)`;
-}
-
-/**
- * The fields, given the school being edited.
- *
- * A function rather than a constant because the option lists have to include whatever
- * the project already holds. A school saved with a timezone this build does not offer —
- * an older IANA spelling, a zone added since, something typed by hand when these were
- * free-text boxes — must still show its own value, and show it as *its own value* rather
- * than as a blank field that quietly becomes something else on the next save.
- */
-function fieldsFor(school: School | null): readonly FieldSpec[] {
-  return [
-    {
-      kind: "text",
-      key: "name",
-      label: "School name",
-      required: true,
-      placeholder: "Northgate Secondary",
-    },
-    {
-      kind: "combobox",
-      key: "timezone",
-      label: "Time zone",
-      required: true,
-      placeholder: "Search by city or name",
-      emptyLabel: "No time zone matches that",
-      choices: withExistingValue(timezoneOptions(), school?.timezone, existingTimezone),
-      hint: "An IANA time zone. Period times are local wall clock, so this is what they are local to.",
-    },
-    {
-      kind: "combobox",
-      key: "locale",
-      label: "Locale",
-      required: true,
-      placeholder: "Search by language or region",
-      emptyLabel: "No locale matches that",
-      choices: withExistingValue(localeOptions(), school?.locale, existingLocale),
-      hint: "A BCP-47 tag, used for formatting dates and numbers in reports. Independent of the time zone.",
-    },
-    {
-      kind: "weekdays",
-      key: "workingDays",
-      label: "School working days",
-      required: true,
-      hint: "The weekdays this school normally teaches on. This is the school's calendar week — it does not set the cycle's length, and it does not decide which cycle day a date is. A six-day rotation across a five-day week is perfectly ordinary, and dates are still mapped one at a time in Calendar Mapping.",
-    },
-  ];
-}
-
-function draftOf(school: School | null): Draft {
-  return {
-    name: school?.name ?? "",
-    // The machine's own settings as a starting point for a *new* school only. An
-    // existing school keeps exactly what it was saved with; see fieldsFor.
-    timezone: school?.timezone ?? currentTimezone(),
-    locale: school?.locale ?? currentLocale(),
-    // Monday to Friday for a new school, and whatever is stored for an existing one. A
-    // project upgraded from a schema without the column already reads as Monday to
-    // Friday, so there is no second default to keep in step here — the migration's
-    // `DEFAULT 31` is the one that matters.
-    workingDays: toWeekdayValues(school?.workingDays ?? MONDAY_TO_FRIDAY),
-  };
-}
-
-export function SchoolDetails(props: { school: School | null; onChanged: () => void }) {
-  // The active school is chosen in the setup shell, which owns the project's list of them
-  // and the selector over it. This screen used to find "the" school itself with a
-  // `LIMIT 1` read; with several in a project that would have quietly edited an arbitrary
-  // one. `null` means the project has no schools yet, which is the first-run state.
-  const { school } = props;
-  const loadError: string | null = null;
-  const reload = props.onChanged;
+export function SchoolDetails(props: {
+  school: School | null;
+  onChanged: () => void;
+  /** Sends the user to the Schools section, where a school is created. */
+  onOpenSchools?: () => void;
+}) {
+  const { school, onChanged, onOpenSchools } = props;
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Draft>({});
@@ -140,50 +47,44 @@ export function SchoolDetails(props: { school: School | null; onChanged: () => v
 
   // Four hundred labels, each a formatter call. Built once per school rather than on
   // every keystroke in the form above them.
-  const fields = useMemo(() => fieldsFor(school ?? null), [school]);
+  const fields = useMemo(() => schoolFields(school ? [school] : []), [school]);
 
   const open = useCallback((current: School | null) => {
-    setDraft(draftOf(current));
+    setDraft(schoolDraft(current));
     setProblems({});
     setSaveError(null);
     setEditing(true);
   }, []);
 
   const submit = useCallback(async () => {
+    if (!school) return;
+
     const found = validateSchool(draft);
     setProblems(found);
     if (!isValid(found)) return;
 
-    const input: SchoolInput = {
-      name: text(draft, "name"),
-      // Optional, and not collected by this form yet: a code earns its place when a
-      // project holds enough schools for names to be inconvenient, which is Stage 0C's
-      // problem. Carried through unchanged so editing a school never clears one.
-      code: school?.code ?? null,
-      timezone: text(draft, "timezone"),
-      locale: text(draft, "locale"),
-      workingDays: toWeekdayNumbers(list(draft, "workingDays")),
-    };
-
     setBusy(true);
     setSaveError(null);
     try {
-      if (school) {
-        await updateSchool(school.id, input);
-      } else {
-        await createSchool(input);
-      }
-      reload();
-      props.onChanged();
+      await updateSchool(school.id, schoolInput(draft));
+      onChanged();
       setEditing(false);
     } catch (e: unknown) {
-      setSaveError(describeSetupError(e));
+      // The form stays open with the values intact: a duplicate name or code is the likely
+      // refusal and retyping everything to fix one box is not a reasonable ask. Where the
+      // backend named the offending field, the message goes on that field rather than in a
+      // banner above a form with five boxes in it — the same division `CrudPanel` makes.
+      const field = offendingField(e);
+      if (field === "name" || field === "code") {
+        setProblems({ [field]: describeSetupError(e) });
+      } else {
+        setSaveError(describeSetupError(e));
+      }
     } finally {
       setBusy(false);
     }
-  }, [draft, school, reload, props]);
+  }, [draft, school, onChanged]);
 
-  if (loadError) return <Banner tone="error">{loadError}</Banner>;
   if (school === undefined) return <Loading what="the school record" />;
 
   return (
@@ -191,22 +92,37 @@ export function SchoolDetails(props: { school: School | null; onChanged: () => v
       <header className="sectionIntro">
         <h2>School details</h2>
         <p>
-          A campus file describes one school. Everything else in setup — that school&rsquo;s
-          campuses, its rooms, years and timetable cycle — belongs to it.
+          One institution: its name, the time zone its bells ring in, the locale its reports
+          are formatted for, and the weekdays it normally teaches on. That school&rsquo;s
+          own campuses, rooms, years and timetable cycle belong to it and are set up in the
+          sections below.
         </p>
       </header>
 
       {saveError && <Banner tone="error">{saveError}</Banner>}
 
-      {editing ? (
+      {school === null ? (
+        <EmptyState
+          title="No school selected"
+          action={
+            onOpenSchools
+              ? { label: "Go to Schools", onClick: onOpenSchools }
+              : undefined
+          }
+        >
+          This campus file does not describe a school yet. Add one under{" "}
+          <strong>Schools</strong> — give it a name, a time zone, a locale and its working
+          days, and the rest of the setup sections open up.
+        </EmptyState>
+      ) : editing ? (
         <EntityForm
           idPrefix="form-school"
-          legend={school ? "Edit school details" : "Describe the school"}
+          legend={`Edit ${school.name}`}
           fields={fields}
           draft={draft}
           problems={problems}
           busy={busy}
-          submitLabel={school ? "Save changes" : "Create school"}
+          submitLabel="Save changes"
           onChange={(key, value) => {
             setDraft((d) => ({ ...d, [key]: value }));
             setProblems(({ [key]: _removed, ...rest }) => rest);
@@ -214,20 +130,14 @@ export function SchoolDetails(props: { school: School | null; onChanged: () => v
           onSubmit={() => void submit()}
           onCancel={() => setEditing(false)}
         />
-      ) : school === null ? (
-        <EmptyState
-          title="Start here"
-          action={{ label: "Describe the school", onClick: () => open(null) }}
-        >
-          Nothing has been set up in this campus file yet. Give the school a name, a time
-          zone, a locale and its working days, and the rest of the setup sections will open
-          up.
-        </EmptyState>
       ) : (
         <>
           <Facts
             items={[
               ["Name", school.name],
+              // The code is editable here now rather than carried silently through a save
+              // the form never showed. A school without one says so.
+              ["Code", school.code ?? "Not set"],
               // The label, so the summary reads as names; the identifier is inside it,
               // because the identifier is what is actually stored.
               ["Time zone", timezoneLabel(school.timezone)],
