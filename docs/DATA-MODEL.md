@@ -32,10 +32,17 @@ campuses, academic years, year levels, cycles and bell schedules, while building
 are shared between them through the campus associations of ADR 0013/0014.
 [adr/0019](adr/0019-multiple-schools-in-one-project.md) supersedes ADR 0003's "multiple
 schools means multiple files" and records what is school-owned, what is shared, and what
-deliberately stayed single-school: a `teacher`, a `student`, a `resource` and an
-`availability` rule each still belong to exactly one school. One file is still one project;
-it is no longer one school. The rebuild that made room for it is
+deliberately stayed single-school. One file is still one project; it is no longer one
+school. The rebuild that made room for it is
 [adr/0020](adr/0020-in-place-table-rebuild.md).
+
+`V13` closes two of the three things ADR 0019 deferred.
+[adr/0021](adr/0021-project-level-people-and-school-membership.md) makes a `teacher` and a
+`student` **project-level identities** with school membership, campus eligibility and
+enrolment history; [adr/0022](adr/0022-resources-shared-across-campuses.md) makes a
+`resource` shareable by campus the way a building and a room already were. An
+`availability` rule still names exactly one school, and project-level availability remains a
+later, additive change.
 
 ### Connection pragmas
 
@@ -158,8 +165,8 @@ extraction; references run downward in this table only.
 
 | Group | Owns | Depends on |
 | --- | --- | --- |
-| **Structure** | school, campus, building, building_campus, room, room_type, resource, academic_year, term, cycle, cycle_day, period_structure, period, timeslot, calendar_day | — |
-| **People** | teacher, department, teacher_qualification, year_level, student, student_group, student_group_member | Structure |
+| **Structure** | school, campus, building, building_campus, room, room_campus, room_type, resource, resource_campus, academic_year, term, cycle, cycle_day, period_structure, period, timeslot, calendar_day | — |
+| **People** | teacher, teacher_school, teacher_campus, department, teacher_qualification, year_level, student, student_school_enrolment, student_group, student_group_member | Structure |
 | **Curriculum** | subject, course, class_section, class_teacher, class_group, enrolment, course_request | Structure, People |
 | **Activities** | activity, activity_teacher, activity_group, activity_room_candidate, activity_resource, line, line_member, activity_link, activity_link_member, availability | Structure, People, Curriculum |
 | **Scheduling** | timetable, timetable_entry, constraint_instance, constraint_ref, solve_run, violation | all of the above |
@@ -181,7 +188,13 @@ The time model deliberately avoids assuming Monday–Friday.
 > `building_campus` arrived afterwards as migration `V5`, making a building shareable
 > across campuses — see [adr/0013](adr/0013-buildings-shared-across-campuses.md) — and
 > `room_campus` as migration `V6`, doing the same for rooms:
-> [adr/0014](adr/0014-rooms-shared-across-campuses.md).
+> [adr/0014](adr/0014-rooms-shared-across-campuses.md). `resource_campus` completes the set
+> as migration `V13`: [adr/0022](adr/0022-resources-shared-across-campuses.md).
+>
+> All three associate a facility with **campuses** and never with a school, which is what
+> makes cross-school sharing expressible without further schema work once campuses belong
+> to different schools. A shared facility is **one** facility: its `id` is its scheduling
+> identity, and occupancy is a property of that identifier, never of (facility, campus).
 
 ### Deletion semantics
 
@@ -309,7 +322,12 @@ room (id, campus_id -> campus, building_id -> building NULL, name, code,
 -- because two campuses can run different bell schedules and matching period ordinals do
 -- not imply overlapping real times.
 room_campus (id, room_id -> room, campus_id -> campus, UNIQUE(room_id, campus_id))
+-- school_id is the HOME school and campus_id the HOME campus, both narrowed by V13.
+-- resource_campus is the complete set of campuses it serves, and may be EMPTY: unlike a
+-- room, a resource may be school-wide. ADR 0022.
 resource (id, school_id, name, code, quantity INTEGER, campus_id NULL)
+resource_campus (id, resource_id -> resource, campus_id -> campus,
+                 UNIQUE(resource_id, campus_id))
 
 academic_year (id, school_id, name, starts_on DATE, ends_on DATE)
 term (id, academic_year_id -> academic_year, name, ordinal, starts_on, ends_on)
@@ -518,6 +536,77 @@ sketch above:
 `delete_student_group` removes its own membership rows and refuses while child groups
 remain; `delete_student` refuses while the student is in any group, because a membership is
 the only record that they ever were.
+
+### Project-level people, and where belonging lives — V13
+
+**As implemented in V13.** A teacher and a student are each one row, for one real person,
+for the life of the project. Where they belong is a relationship, so that a trust sharing
+staff does not have to model one human being twice — which would give them two identities,
+two availability records and two independent timetables.
+
+```sql
+-- Which schools employ this person. THE AUTHORITY on "which schools?".
+teacher_school (id, teacher_id, school_id, is_active,
+                UNIQUE(teacher_id, school_id))
+
+-- Which campuses they may be based at. A NARROWING of membership, never an independent
+-- claim: a trigger pair refuses a campus of a school they do not belong to.
+teacher_campus (id, teacher_id, campus_id, UNIQUE(teacher_id, campus_id))
+
+-- One row per SPELL at one school. A transfer writes a LEFT row and an ENROLLED row; it
+-- never edits one in place, so history survives.
+student_school_enrolment (id, student_id, school_id, admission_no NULL,
+                          year_level_id NULL, campus_id NULL,
+                          status TEXT CHECK (status IN ('ENROLLED','LEFT','PROSPECTIVE')),
+                          enrolled_on NULL, left_on NULL,
+                          UNIQUE(student_id, school_id) WHERE status <> 'LEFT',
+                          UNIQUE(school_id, admission_no)
+                              WHERE admission_no IS NOT NULL AND status <> 'LEFT')
+```
+
+What each of those says, and the reasoning is in
+[adr/0021](adr/0021-project-level-people-and-school-membership.md):
+
+- **Home school versus membership.** `teacher.school_id` and `student.school_id` are the
+  **home** school — the one the person was created under. Immutable, always has a matching
+  relationship row, its relationship cannot be withdrawn. **Nothing reads them to answer
+  "which schools?"**: `People::teachers` reads `teacher_school` and `People::students`
+  reads `student_school_enrolment`, so a shared person appears in both schools' lists as
+  one record with one identifier.
+- **School-specific teacher status.** `teacher.is_active` says whether they are in the
+  project at all; `teacher_school.is_active` says whether *this* school employs them.
+  Effective eligibility is the **conjunction**, computed in one place. Nothing may read the
+  project-level flag alone and conclude a teacher is available to a school.
+- **Enrolment history.** Teacher membership is deactivated rather than duplicated;
+  enrolment is history, because a spell is what a school is asked about. One current spell
+  per (student, school) — `ENROLLED` or `PROSPECTIVE` — and any number of `LEFT` ones, so a
+  student may leave and rejoin, and may be enrolled at two schools at once.
+- **School-specific admission numbers.** An admission number is a *school's* identifier for
+  a student, so it lives on the enrolment, never project-wide: two schools may legitimately
+  number the same person differently. The index is partial twice over — unique when given,
+  and scoped to current spells, so a retired number may be reissued and a past spell keeps
+  the number it had. `COALESCE(enrolled_on, '')` was rejected for the uniqueness rule: it
+  would fold every undated spell onto one key and stop a school that does not record dates
+  from re-enrolling anybody.
+- **One placement, kept in step.** `student.code`, `student.year_level_id` and
+  `student.campus_id` remain as the **home-school** values, the treatment `room.campus_id`
+  got. They are not independently writable: an edit through either `update_student` or
+  `update_enrolment` writes both sides in one transaction, through `repo::update`, so no
+  revision and no change-log entry lies. Only the home school's current spell participates.
+- **A group's members must be enrolled in the group's school.** A trigger pair, stated
+  against enrolment rather than `student.school_id`, which is what makes it right under
+  sharing. Any spell counts, past ones included, because a membership is the only record
+  that a student was ever in 9-MAT-A. ADR 0006 is untouched: a school timetabling from
+  `student_group.size` writes no rows here.
+- **Deleting a person is a third operation**, distinct from deactivating and from removing
+  a relationship. Only the home school may, and only while nobody else employs or enrols
+  them — `DbError::StillReferenced` otherwise, checked before anything is cleared.
+  `Structure::school_dependents` gained `shared_teachers` and `shared_students` so a
+  confirmation can say what is in the way.
+
+**Not in V13**, and not implied by it: a project-wide teacher code (the blocker and the
+better alternative are in ADR 0021's *Known limitation*), `teacher_qualification`,
+`department`, project-level availability, and cross-school scheduling.
 
 ---
 

@@ -48,6 +48,12 @@ vi.mock("../../ipc/setup", () => ({
   updateYearLevel: vi.fn(() => Promise.resolve({})),
   deleteYearLevel: vi.fn(() => Promise.resolve()),
   listTeachers: () => listTeachers(),
+  // Stage 0B: the per-school employment and enrolment views the two screens read for
+  // their Status and Year columns. Empty here -- these tests are about the forms and the
+  // disclosures, and `Teachers`/`StudentsAndYearLevels` fall back to the project-level
+  // flag when a school's own record is absent.
+  listSchoolTeachers: () => Promise.resolve([]),
+  listSchoolStudents: () => Promise.resolve([]),
   createTeacher: (input: unknown) => createTeacher(input),
   updateTeacher: (id: string, input: unknown) => updateTeacher(id, input),
   deleteTeacher: (id: string) => deleteTeacher(id),
@@ -168,6 +174,10 @@ describe("Teachers", () => {
   it("lists an inactive teacher rather than hiding them", async () => {
     // A teacher who left mid-year is still named by last term's timetable. Filtering them
     // out of this list would make that timetable look like it referenced a ghost.
+    //
+    // Since Stage 0B the label is "Archived": `teacher.isActive` is the project-level flag
+    // and the per-school one lives on the membership, so the column has to say which of
+    // the two it is reporting. See the next test for the other.
     listTeachers.mockResolvedValue([
       teacher({ id: "t-1", familyName: "Raman", givenName: "Priya", isActive: false }),
     ]);
@@ -175,7 +185,7 @@ describe("Teachers", () => {
     render(<Teachers school={SCHOOL} />);
 
     expect(await screen.findByText("Raman")).toBeTruthy();
-    expect(screen.getByText("Inactive")).toBeTruthy();
+    expect(screen.getByText("Archived")).toBeTruthy();
   });
 
   it("creates a teacher as active without the user ticking anything", async () => {

@@ -125,8 +125,22 @@ macro_rules! entity {
         }
 
         impl $record {
-            fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
-                let mut index = 0usize;
+            pub(crate) fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+                Self::from_row_at(row, 0)
+            }
+
+            /// Reads the record from `offset`, for a join that returns two of them.
+            ///
+            /// Still positional and still in declaration order — `offset` only says where
+            /// this record's run of columns begins. A listing that pairs an entity with a
+            /// relationship (a teacher and this school's employment of them) selects both
+            /// column lists end to end and decodes each from its own start, rather than
+            /// issuing a second query per row.
+            pub(crate) fn from_row_at(
+                row: &rusqlite::Row<'_>,
+                offset: usize,
+            ) -> rusqlite::Result<Self> {
+                let mut index = offset;
                 let mut next = || { let i = index; index += 1; i };
                 Ok(Self {
                     id: $crate::repo::row::FromColumn::read(row, next())?,

@@ -1,12 +1,33 @@
 # Multi-school architecture audit and migration feasibility report
 
 - Date: 2026-10-13
-- Status: **Stage 0A implemented and approved; every later stage still a proposal.**
+- Status: **Stages 0A and 0B implemented and approved; every later stage still a proposal.**
   Stage 0A is §15's first stage: the migration, school CRUD, school-scoped reads and the
   cross-school integrity triggers, recorded as
   [adr/0019](adr/0019-multiple-schools-in-one-project.md) and
-  [adr/0020](adr/0020-in-place-table-rebuild.md). Stages 0B, 0C and A-D below, and the
-  decisions in §16 that they depend on, are **not** approved and **not** built.
+  [adr/0020](adr/0020-in-place-table-rebuild.md). **Stage 0B** is §15's second: `V13` with
+  `teacher_school`, `teacher_campus`, `student_school_enrolment` and `resource_campus`,
+  recorded as [adr/0021](adr/0021-project-level-people-and-school-membership.md) and
+  [adr/0022](adr/0022-resources-shared-across-campuses.md). Stages 0C and A-D below, and the
+  §16 decisions they depend on, are **not** approved and **not** built.
+- Where the implementation departed from this report, and why, in each case the ADR is the
+  authority rather than this document:
+  - **§7.1's enrolment uniqueness** — `UNIQUE (student_id, school_id, COALESCE(enrolled_on, ''))`
+    was rejected. `enrolled_on` is optional, so the `COALESCE` folds every undated spell onto
+    one key and permits exactly one of them, which would stop a school that does not record
+    joining dates from ever re-enrolling anybody. Replaced by a partial index on current
+    spells. ADR 0021 §5.
+  - **§16 decision 4** — a project-wide teacher code was **not** adopted. A migration cannot
+    tighten it conditionally, and an abort inside refinery's grouped transaction leaves the
+    project unopenable with no way for the user to fix the collision. Recorded as D23 in
+    OPEN-DECISIONS, with per-membership codes as the compatible alternative. ADR 0021
+    *Known limitation*.
+  - **§6's "this trigger goes"** — `V12`'s teacher trigger pair was **widened** to member
+    schools rather than dropped, because the guarantee it carries is still wanted and the
+    home-school disjunct is what lets `create_teacher` write a home campus at all. ADR 0021 §4.
+  - **A rule §2.5 did not list** — `student_group_member` has no columns that can disagree,
+    but its two *ends* can: nothing stopped one school's student joining another's cohort.
+    Closed by a trigger pair stated against enrolment. ADR 0021 §9.
 - Branch: `feat/school-setup-lessons-and-roster-import` (audit only; no commits)
 - Repository state audited: `origin/develop` at `3ce40f1`, schema `V11`, working tree clean
 

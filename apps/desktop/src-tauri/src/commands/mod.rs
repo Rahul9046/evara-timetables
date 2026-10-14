@@ -19,6 +19,7 @@
 pub mod availability;
 pub mod error;
 pub mod grid;
+pub mod membership;
 pub mod people;
 pub mod project;
 pub mod structure;

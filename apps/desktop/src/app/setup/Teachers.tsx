@@ -21,14 +21,41 @@
  * The load ceilings are the same bargain in the other direction: blank means *no ceiling*,
  * not zero, and the hints say so. They are carried now and read by the Phase 4 load
  * constraints; a school that does not cap its teachers simply leaves them empty.
+ *
+ * ## One teacher, possibly two schools
+ *
+ * Since Stage 0B a teacher is a project-level person with a membership per school, and the
+ * list below is built from membership rather than from `teacher.schoolId`. So a teacher
+ * shared with another school of a trust appears here *and* there, as one record with one
+ * identifier — which is what makes their availability a single fact rather than one per
+ * school.
+ *
+ * Two consequences the screen has to be honest about, because the backend enforces both:
+ *
+ * - **"Active" is two facts.** `teacher.isActive` says whether they are in the project at
+ *   all; the membership says whether *this* school employs them. The Status column shows
+ *   the conjunction, and distinguishes the two, because a teacher who has left Southmoor
+ *   and stayed at Northgate must not read as "Active" on Southmoor's screen.
+ * - **A visiting teacher is not this school's to edit or delete.** Their details belong to
+ *   the school that created them, and `updateTeacher` is refused with a wrong-school error
+ *   anywhere else. Rather than let the user find that out by pressing Save, such a row is
+ *   marked and the restriction is stated. The full school-assignment interface is Stage
+ *   0C; this screen does only what keeps it correct in the meantime.
  */
 import { useCallback, useMemo, useState } from "react";
 
-import type { Campus, School, Teacher, TeacherInput } from "@evara/domain";
+import type {
+  Campus,
+  School,
+  Teacher,
+  TeacherInSchool,
+  TeacherInput,
+} from "@evara/domain";
 import {
   createTeacher,
   deleteTeacher,
   listCampuses,
+  listSchoolTeachers,
   listTeachers,
   updateTeacher,
 } from "../../ipc/setup";
@@ -45,9 +72,20 @@ import {
 import { AvailabilityPanel } from "./AvailabilityGrid";
 import { useList } from "./useList";
 
-/** Shown in the Active column, so the two states read as states rather than as a blank. */
-function activeLabel(teacher: Teacher): string {
-  return teacher.isActive ? "Active" : "Inactive";
+/**
+ * Shown in the Status column, so the states read as states rather than as a blank.
+ *
+ * Three answers, not two, because there are two flags. "Archived" is the project-level
+ * one and outranks the membership: an archived person is offered to nobody, whatever any
+ * school's employment record says. "Not teaching here" is the per-school one, and is the
+ * ordinary state for somebody who has left one school of a trust and stayed at another.
+ */
+function statusLabel(teacher: Teacher, membership: TeacherInSchool | undefined): string {
+  if (!teacher.isActive) return "Archived";
+  // No membership row should be impossible -- the list is built from membership -- but
+  // saying "Active" on the strength of a missing record would be the one wrong answer.
+  if (membership && !membership.membership.isActive) return "Not teaching here";
+  return "Active";
 }
 
 export function Teachers(props: { school: School }) {
@@ -61,6 +99,16 @@ export function Teachers(props: { school: School }) {
 
   const loadCampuses = useCallback(() => listCampuses(school.id), [school.id]);
   const campuses = useList<Campus>(loadCampuses);
+
+  // This school's own view of each teacher's employment, which the plain teacher record
+  // cannot carry: `isActive` on it is the project-level flag.
+  const loadMemberships = useCallback(() => listSchoolTeachers(school.id), [school.id]);
+  const memberships = useList<TeacherInSchool>(loadMemberships);
+
+  const membershipById: ReadonlyMap<string, TeacherInSchool> = useMemo(
+    () => new Map((memberships.items ?? []).map((row) => [row.teacher.id, row])),
+    [memberships.items],
+  );
 
   const campusChoices: readonly Choice[] = useMemo(
     () => (campuses.items ?? []).map((campus) => ({ value: campus.id, label: campus.name })),
@@ -76,7 +124,15 @@ export function Teachers(props: { school: School }) {
       { header: "First name", render: (row) => row.givenName },
       { header: "Staff code", render: (row) => row.code ?? "—" },
       { header: "FTE", render: (row) => `${row.ftePercent}%`, numeric: true },
-      { header: "Status", render: activeLabel },
+      {
+        header: "Status",
+        render: (row) => statusLabel(row, membershipById.get(row.id)),
+      },
+      {
+        header: "Belongs to",
+        render: (row) =>
+          row.schoolId === school.id ? "This school" : "Another school (visiting)",
+      },
     ],
     fields: [
       { kind: "text", key: "givenName", label: "First name", required: true },
@@ -182,10 +238,18 @@ export function Teachers(props: { school: School }) {
     update: (id, input) => updateTeacher(id, input),
     remove: (id) => deleteTeacher(school.id, id),
     emptyHint: "No teachers yet. Add the staff who will appear on the timetable.",
-    deleteNote: (row) =>
-      row.isActive
-        ? "If this teacher has simply left, clearing “Currently teaching” keeps them and their history instead."
+    confirmSubmit: (_draft, row) =>
+      row !== null && row.schoolId !== school.id
+        ? "This teacher belongs to another school, which holds their details. Saving here will be refused. Stage 0C adds the screen for editing a shared teacher from the school that owns them."
         : null,
+    deleteNote: (row) => {
+      if (row.schoolId !== school.id) {
+        return "This teacher belongs to another school, so deleting them here will be refused. Removing them from this school is a Stage 0C action; it does not delete the person.";
+      }
+      return row.isActive
+        ? "If this teacher has simply left, clearing “Currently teaching” keeps them and their history instead. Deleting is also refused while another school still employs them."
+        : "Deleting is refused while another school still employs them.";
+    },
   };
 
   return (
@@ -196,11 +260,17 @@ export function Teachers(props: { school: School }) {
         names them.
       </p>
       {campuses.error && <p className="muted">Campuses could not be loaded: {campuses.error}</p>}
+      {memberships.error && (
+        <p className="muted">
+          This school’s employment records could not be loaded: {memberships.error}
+        </p>
+      )}
       <CrudPanel
         spec={spec}
-        reloadKey={school.id}
+        reloadKey={`${school.id}:${(memberships.items ?? []).length}`}
         onChanged={() => {
           teachers.reload();
+          memberships.reload();
           setListNonce((value) => value + 1);
         }}
       />

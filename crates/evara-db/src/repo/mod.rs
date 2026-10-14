@@ -28,6 +28,7 @@ use crate::error::{DbError, Result};
 use crate::meta::now_iso8601;
 
 pub mod availability;
+pub mod membership;
 pub mod people;
 pub(crate) mod row;
 pub mod structure;

@@ -63,4 +63,18 @@ studentGroups: number,
 /**
  * Availability rules recorded against the school.
  */
-availabilityRules: number, };
+availabilityRules: number, 
+/**
+ * Teachers another school created whom this one employs.
+ *
+ * Counted separately from [`SchoolDependents::teachers`] so the two never
+ * double-count the same person. A shared teacher blocks the delete through
+ * `teacher_school`, and the school has to withdraw its own membership first.
+ */
+sharedTeachers: number, 
+/**
+ * Students another school created whom this one has enrolled.
+ *
+ * The same separation, for the same reason, through `student_school_enrolment`.
+ */
+sharedStudents: number, };

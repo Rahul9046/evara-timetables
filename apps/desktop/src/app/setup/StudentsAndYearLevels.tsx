@@ -21,6 +21,22 @@
  * which is to mark them as having left. Membership is the only record that a student was
  * ever in 9-MAT-A, and deleting the person is the one action that destroys it.
  *
+ * ## Placement is the enrolment's, not the student's
+ *
+ * Since Stage 0B a student is a project-level person with an enrolment per school, and
+ * that enrolment is where the school-specific admission number, year level and campus
+ * live. The list below is built from enrolment, so a student shared with another school of
+ * a trust appears here *and* there, as one record with one identifier.
+ *
+ * The Year and Status columns therefore read **this school's** enrolment rather than the
+ * columns on the student record, which name only the school that created them. Showing the
+ * home school's year on another school's roll would be a confident wrong answer.
+ *
+ * Editing a visiting student's details is refused by the backend, because those details
+ * belong to the school that owns them. The row is marked and the restriction stated rather
+ * than discovered by pressing Save. Enrolment, transfer and the rest of the school
+ * controls are Stage 0C; this screen does only what keeps it correct in the meantime.
+ *
  * ## Year levels sit here rather than in their own section
  *
  * They are what a student is classified by, they are four rows in most schools, and the
@@ -36,6 +52,7 @@ import type {
   School,
   Student,
   StudentGroup,
+  StudentInSchool,
   StudentInput,
   YearLevel,
   YearLevelInput,
@@ -47,6 +64,7 @@ import {
   deleteYearLevel,
   listCampuses,
   listGroupsForStudent,
+  listSchoolStudents,
   listStudents,
   listYearLevels,
   updateStudent,
@@ -72,6 +90,16 @@ export function StudentsAndYearLevels(props: { school: School }) {
 
   const loadYearLevels = useCallback(() => listYearLevels(school.id), [school.id]);
   const yearLevels = useList<YearLevel>(loadYearLevels);
+
+  // This school's own enrolments, which carry the placement the student record cannot:
+  // its year level and campus name the school that created them.
+  const loadEnrolments = useCallback(() => listSchoolStudents(school.id), [school.id]);
+  const enrolments = useList<StudentInSchool>(loadEnrolments);
+
+  const enrolmentById: ReadonlyMap<string, StudentInSchool> = useMemo(
+    () => new Map((enrolments.items ?? []).map((row) => [row.student.id, row])),
+    [enrolments.items],
+  );
 
   /**
    * Which groups each student is in, filled in as rows are considered for deletion.
@@ -150,13 +178,33 @@ export function StudentsAndYearLevels(props: { school: School }) {
     columns: [
       { header: "Last name", render: (row) => row.familyName },
       { header: "First name", render: (row) => row.givenName },
-      { header: "Admission no.", render: (row) => row.code ?? "—" },
+      {
+        header: "Admission no.",
+        render: (row) => enrolmentById.get(row.id)?.enrolment.admissionNo ?? row.code ?? "—",
+      },
       {
         header: "Year",
-        render: (row) =>
-          (yearLevels.items ?? []).find((year) => year.id === row.yearLevelId)?.name ?? "—",
+        render: (row) => {
+          const placed = enrolmentById.get(row.id)?.enrolment.yearLevelId ?? null;
+          return (yearLevels.items ?? []).find((year) => year.id === placed)?.name ?? "—";
+        },
       },
-      { header: "Status", render: (row) => (row.isActive ? "Enrolled" : "Left") },
+      {
+        header: "Status",
+        render: (row) => {
+          if (!row.isActive) return "Archived";
+          const enrolment = enrolmentById.get(row.id)?.enrolment;
+          // No current enrolment here means every spell at this school is in the past,
+          // which is exactly what `listStudents` keeps returning them for.
+          if (!enrolment) return "Left this school";
+          return enrolment.status === "PROSPECTIVE" ? "Prospective" : "Enrolled";
+        },
+      },
+      {
+        header: "Belongs to",
+        render: (row) =>
+          row.schoolId === school.id ? "This school" : "Another school (visiting)",
+      },
     ],
     fields: [
       { kind: "text", key: "givenName", label: "First name", required: true },
@@ -228,9 +276,16 @@ export function StudentsAndYearLevels(props: { school: School }) {
     create: (input) => createStudent(input),
     update: (id, input) => updateStudent(id, input),
     remove: (id) => deleteStudent(school.id, id),
+    confirmSubmit: (_draft, row) =>
+      row !== null && row.schoolId !== school.id
+        ? "This student belongs to another school, which holds their details. Saving here will be refused. Stage 0C adds the screen for editing this school’s enrolment of a shared student."
+        : null,
     emptyHint:
       "No students yet — and a timetable does not need any. Add them when you want per-student timetables.",
     deleteNote: (row) => {
+      if (row.schoolId !== school.id) {
+        return "This student belongs to another school, so deleting them here will be refused. Ending this school’s enrolment is a Stage 0C action; it does not delete the person.";
+      }
       const groups = groupsByStudent[row.id] ?? [];
       if (groups.length === 0) {
         return row.isActive
@@ -249,10 +304,21 @@ export function StudentsAndYearLevels(props: { school: School }) {
         sizes alone, so enter students only when you want per-student timetables.
       </p>
       {campuses.error && <p className="muted">Campuses could not be loaded: {campuses.error}</p>}
-      <CrudPanel spec={yearSpec} reloadKey={school.id} onChanged={yearLevels.reload} />
+      {enrolments.error && (
+        <p className="muted">This school’s enrolments could not be loaded: {enrolments.error}</p>
+      )}
+      <CrudPanel
+        spec={yearSpec}
+        reloadKey={school.id}
+        onChanged={() => {
+          yearLevels.reload();
+          enrolments.reload();
+        }}
+      />
       <CrudPanel
         spec={studentSpec}
-        reloadKey={`${school.id}:${(yearLevels.items ?? []).length}`}
+        reloadKey={`${school.id}:${(yearLevels.items ?? []).length}:${(enrolments.items ?? []).length}`}
+        onChanged={enrolments.reload}
       />
     </section>
   );
