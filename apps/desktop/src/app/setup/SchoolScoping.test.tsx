@@ -56,10 +56,13 @@ const { Teachers } = await import("./Teachers");
 const NORTH = { id: "school-north", name: "Northgate Secondary" } as School;
 const SOUTH = { id: "school-south", name: "Southmoor College" } as School;
 
-function teacher(id: string, family: string): Teacher {
+function teacher(id: string, family: string, schoolId = "school-north"): Teacher {
   return {
     id,
-    schoolId: "school-north",
+    // Whose record it is matters since Stage 0C: a teacher whose identity another school
+    // holds cannot be edited or deleted from here, so each school's own fixture names
+    // itself. The visiting case has its own tests in SharedIdentities.test.tsx.
+    schoolId,
     code: null,
     givenName: "Ada",
     familyName: family,
@@ -87,7 +90,7 @@ beforeEach(() => {
     Promise.resolve(
       schoolId === NORTH.id
         ? [teacher("t-north", "Northwood")]
-        : [teacher("t-south", "Southwell")],
+        : [teacher("t-south", "Southwell", SOUTH.id)],
     ),
   );
   // Stage 0B: the screen also reads this school's own view of each teacher's employment,
@@ -96,7 +99,7 @@ beforeEach(() => {
     Promise.resolve(
       (schoolId === NORTH.id
         ? [teacher("t-north", "Northwood")]
-        : [teacher("t-south", "Southwell")]
+        : [teacher("t-south", "Southwell", SOUTH.id)]
       ).map((row) => membership(row, schoolId)),
     ),
   );

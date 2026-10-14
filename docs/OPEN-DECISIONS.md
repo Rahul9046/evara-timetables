@@ -341,6 +341,49 @@ operation at any other school succeeds. `V10`'s index is standalone, so a later 
 relax it to current students; Stage 0B does not, because changing a shipped uniqueness rule
 is its own decision.
 
+### D24 — Is a "school" the institution, or is there a division below it? ✅ RESOLVED 2026-10-14 (Stage 0C)
+
+**The institution. No `program` or `division` entity.**
+
+The pre-implementation audit raised this as its first open decision and recommended the
+institution; ADR 0019 rejected a sub-division as premature when it rebuilt `school`; Stage
+0C is the point at which the interface had to commit, because a division would have been a
+third level in every selector on every screen.
+
+One `school` row per institution. A school's own **campuses** express its physical sites,
+and `student_group` expresses the programmes inside it — a junior programme that shares
+staff and rooms with the senior school but runs its own year and its own rotation is a
+*second school* in the same campus file, which is exactly the arrangement
+[ADR 0019](adr/0019-multiple-schools-in-one-project.md) exists for.
+
+Adding a third level now would make every ownership question three-sided for something
+nothing has asked for. A school-level answer can gain one later without redesign; the
+reverse is not true. Recorded in [ADR 0023](adr/0023-the-interface-scopes-to-one-school.md)
+§7.
+
+### D25 — Which "active" does a school's screen show? ✅ RESOLVED 2026-10-14 (Stage 0C)
+
+**The conjunction, with the two flags distinguished by name.**
+
+Audit decision 3 settled the model half in Stage 0B — both flags, with distinct meanings
+(ADR 0021 §2) — and left the interface half open. Stage 0C answers it:
+
+- A teacher's Status column reads **"Archived"** when `teacher.is_active` is false,
+  **"Not teaching here"** when the membership is inactive, and **"Active"** only when both
+  hold. Three answers, not two, because there are two flags and the project-level one
+  outranks: somebody archived is offered to nobody, whatever any school's employment record
+  says.
+- The project-level flag's own checkbox is labelled **"In this campus file"**, not
+  "Currently teaching". It is an archive flag and the old wording claimed the per-school
+  answer, which is the mistake the split exists to prevent.
+- Whether *this* school employs them is changed under *Schools and campuses*, never by that
+  checkbox.
+
+The same shape applies to a student: the project-level flag archives the person, and the
+spell's status is this school's own answer. `TeacherInSchool::is_effectively_active` stays
+the single place the conjunction is computed for anything that has to *decide* rather than
+display.
+
 ## Technical risks
 
 ### R1 — Incremental scoring correctness (highest)
