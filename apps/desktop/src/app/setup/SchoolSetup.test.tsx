@@ -356,6 +356,10 @@ describe("navigating between the sections", () => {
     expect(current[0]?.textContent).toContain("Rooms and room types");
   });
 
+  // Fifteen clicks through a full render each, which is comfortably the slowest test in
+  // the suite and was already close to the 5s default before Stage B added two sections.
+  // Raised rather than trimmed: the value of this test is that it walks *every* step, and
+  // sampling some of them would not catch a section that renders the wrong screen.
   it("walks the whole workflow end to end, in the configuration order", async () => {
     await open();
 
@@ -368,6 +372,8 @@ describe("navigating between the sections", () => {
       "Resources",
       "Academic years and terms",
       "Year levels",
+      "Departments",
+      "Subjects",
       "Teachers",
       "Students",
       "Student groups",
@@ -392,6 +398,8 @@ describe("navigating between the sections", () => {
       "stub:resources",
       "stub:years",
       "stub:yearLevels",
+      "stub:departments",
+      "stub:subjects",
       "stub:teachers",
       "stub:students",
       "stub:groups",
@@ -400,7 +408,7 @@ describe("navigating between the sections", () => {
       "stub:calendar",
       "stub:grid",
     ]);
-  });
+  }, 20_000);
 });
 
 describe("before any school exists", () => {

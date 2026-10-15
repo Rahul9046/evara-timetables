@@ -550,16 +550,15 @@ impl Curriculum<'_> {
     ///
     /// [`DbError::WrongSchool`] if the subject belongs to another school.
     pub fn subject_teachers(
-        &mut self,
+        &self,
         school_id: Uuid,
         subject_id: Uuid,
     ) -> Result<Vec<QualifiedTeacher>> {
-        self.db.write(|tx| {
-            require_same_school(tx, "subject", "subject", subject_id, school_id)?;
-            Ok(())
-        })?;
-
         self.db.read(|conn| {
+            // The refusal belongs in the read, not in a write transaction opened to ask a
+            // question — `require_same_school` takes a connection for exactly this.
+            require_same_school(conn, "subject", "subject", subject_id, school_id)?;
+
             let mut stmt = conn.prepare(&format!(
                 "SELECT {}, {}
                  FROM teacher_qualification q
@@ -909,16 +908,13 @@ impl Curriculum<'_> {
     ///
     /// [`DbError::WrongSchool`] if the department belongs to another school.
     pub fn department_teachers(
-        &mut self,
+        &self,
         school_id: Uuid,
         department_id: Uuid,
     ) -> Result<Vec<Teacher>> {
-        self.db.write(|tx| {
-            require_same_school(tx, "department", "department", department_id, school_id)?;
-            Ok(())
-        })?;
-
         self.db.read(|conn| {
+            require_same_school(conn, "department", "department", department_id, school_id)?;
+
             let mut stmt = conn.prepare(&format!(
                 "SELECT {} FROM teacher_department td
                  JOIN teacher t ON t.id = td.teacher_id

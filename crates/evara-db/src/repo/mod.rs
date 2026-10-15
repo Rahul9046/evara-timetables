@@ -48,7 +48,7 @@
 //! and the change-log rows it produces share its fate. Nothing in this module opens or
 //! commits a transaction of its own.
 
-use rusqlite::{OptionalExtension, Transaction, types::ToSql};
+use rusqlite::{Connection, OptionalExtension, Transaction, types::ToSql};
 use uuid::Uuid;
 
 use crate::error::{DbError, Result};
@@ -293,12 +293,18 @@ fn why_nothing_matched(
 /// This form reads the column directly, for the tables that name their school. A child
 /// whose ownership is only reachable through a parent uses [`require_school_owner`].
 ///
+/// Takes a [`Connection`] rather than a [`Transaction`], which costs a write call site
+/// nothing — `&Transaction` coerces — and lets a *read* refuse a wrong-school identifier
+/// without opening a write transaction to ask a question. `Curriculum::subject_teachers`
+/// is why: another school may not read this school's qualifications, and making that true
+/// should not mean taking a write lock.
+///
 /// # Errors
 ///
 /// - [`DbError::NotFound`] if no row has that identifier.
 /// - [`DbError::WrongSchool`] if one does and another school owns it.
 pub(crate) fn require_same_school(
-    tx: &Transaction<'_>,
+    conn: &Connection,
     entity: &'static str,
     table: &str,
     id: Uuid,
@@ -306,7 +312,7 @@ pub(crate) fn require_same_school(
 ) -> Result<()> {
     let table = identifier(table)?;
     require_school_owner(
-        tx,
+        conn,
         entity,
         &format!("SELECT school_id FROM {table} WHERE id = ?"),
         id,
@@ -332,13 +338,13 @@ pub(crate) fn require_same_school(
 ///   parent chain is broken, and neither is a licence to delete anything.
 /// - [`DbError::WrongSchool`] if it returns a different school.
 pub(crate) fn require_school_owner(
-    tx: &Transaction<'_>,
+    conn: &Connection,
     entity: &'static str,
     owner_query: &str,
     id: Uuid,
     school_id: Uuid,
 ) -> Result<()> {
-    let owner: Option<String> = tx
+    let owner: Option<String> = conn
         .query_row(owner_query, [&id.to_string()], |row| row.get(0))
         .optional()?;
 
