@@ -25,6 +25,7 @@ use uuid::Uuid;
 
 use evara_core::calendar::WorkingDays;
 
+use crate::repo::Expected;
 use crate::repo::availability::{AvailabilityEntity, AvailabilityRuleInput, AvailabilityStatus};
 use crate::repo::people::{
     GroupKind, StudentGroupInput, StudentInput, TeacherInput, YearLevelInput,
@@ -420,7 +421,11 @@ fn the_rebuild_adds_nothing_to_the_change_feed() {
     // triggers are not merely present but working.
     let mut db = db;
     db.structure()
-        .update_school(ids.school, &school_input("Northgate Academy"))
+        .update_school(
+            ids.school,
+            Expected::Any,
+            &school_input("Northgate Academy"),
+        )
         .expect("rename the school");
     let after: i64 = db
         .read(|conn| {
@@ -964,10 +969,11 @@ fn an_update_naming_another_schools_record_is_refused() {
         .expect("create");
 
     // A screen scoped to Southmoor, handed Northgate's identifier.
-    let attempt = project
-        .db()
-        .people()
-        .update_year_level(northern.id, &year_level(south, "Renamed", 8));
+    let attempt = project.db().people().update_year_level(
+        northern.id,
+        Expected::Any,
+        &year_level(south, "Renamed", 8),
+    );
     assert!(
         matches!(attempt, Err(DbError::WrongSchool { .. })),
         "expected WrongSchool, got {attempt:?}"
@@ -995,6 +1001,7 @@ fn an_update_naming_another_schools_record_is_refused() {
         .expect("create");
     let moved = project.db().structure().update_campus(
         campus.id,
+        Expected::Any,
         &CampusInput {
             school_id: south,
             name: "Main".to_owned(),
@@ -1012,10 +1019,11 @@ fn an_update_naming_another_schools_record_is_refused() {
         .people()
         .create_teacher(&teacher(north, "Ada", "Okafor"))
         .expect("create");
-    let poached = project
-        .db()
-        .people()
-        .update_teacher(staff.id, &teacher(south, "Ada", "Okafor"));
+    let poached = project.db().people().update_teacher(
+        staff.id,
+        Expected::Any,
+        &teacher(south, "Ada", "Okafor"),
+    );
     assert!(
         matches!(poached, Err(DbError::WrongSchool { .. })),
         "a teacher belongs to one school in Stage 0A, and an update cannot move them: \
@@ -1175,7 +1183,7 @@ fn a_school_with_dependents_cannot_be_deleted_and_reports_why() {
     assert_eq!(dependents.year_levels, 1);
     assert_eq!(dependents.total, 2, "and the total is the sum");
 
-    let refused = project.db().structure().delete_school(north);
+    let refused = project.db().structure().delete_school(north, Expected::Any);
     assert!(
         matches!(refused, Err(DbError::StillReferenced { .. })),
         "expected StillReferenced, got {refused:?}"
@@ -1201,7 +1209,7 @@ fn an_empty_school_can_be_deleted() {
     project
         .db()
         .structure()
-        .delete_school(south)
+        .delete_school(south, Expected::Any)
         .expect("an empty school can go");
 
     let left = project.db().structure().schools().expect("read");
@@ -1219,7 +1227,7 @@ fn an_empty_school_can_be_deleted() {
 
     assert!(
         matches!(
-            project.db().structure().delete_school(south),
+            project.db().structure().delete_school(south, Expected::Any),
             Err(DbError::NotFound { .. })
         ),
         "deleting it twice is a NotFound, not a silent success"
@@ -1545,7 +1553,7 @@ fn no_deletion_reaches_into_another_school() {
             project
                 .db()
                 .structure()
-                .delete_campus(north, southern.campus)
+                .delete_campus(north, southern.campus, Expected::Any)
                 .expect_err("campus"),
         ),
         (
@@ -1553,7 +1561,7 @@ fn no_deletion_reaches_into_another_school() {
             project
                 .db()
                 .structure()
-                .delete_room_type(north, southern.room_type)
+                .delete_room_type(north, southern.room_type, Expected::Any)
                 .expect_err("room type"),
         ),
         (
@@ -1561,7 +1569,7 @@ fn no_deletion_reaches_into_another_school() {
             project
                 .db()
                 .structure()
-                .delete_academic_year(north, southern.academic_year)
+                .delete_academic_year(north, southern.academic_year, Expected::Any)
                 .expect_err("academic year"),
         ),
         (
@@ -1570,7 +1578,7 @@ fn no_deletion_reaches_into_another_school() {
             project
                 .db()
                 .structure()
-                .delete_term(north, southern.term)
+                .delete_term(north, southern.term, Expected::Any)
                 .expect_err("term"),
         ),
         (
@@ -1578,7 +1586,7 @@ fn no_deletion_reaches_into_another_school() {
             project
                 .db()
                 .time_model()
-                .delete_cycle(north, southern.cycle)
+                .delete_cycle(north, southern.cycle, Expected::Any)
                 .expect_err("cycle"),
         ),
         (
@@ -1587,7 +1595,7 @@ fn no_deletion_reaches_into_another_school() {
             project
                 .db()
                 .time_model()
-                .delete_cycle_day(north, southern.cycle_day)
+                .delete_cycle_day(north, southern.cycle_day, Expected::Any)
                 .expect_err("cycle day"),
         ),
         (
@@ -1595,7 +1603,7 @@ fn no_deletion_reaches_into_another_school() {
             project
                 .db()
                 .time_model()
-                .delete_period_structure(north, southern.bells)
+                .delete_period_structure(north, southern.bells, Expected::Any)
                 .expect_err("bell schedule"),
         ),
         (
@@ -1604,7 +1612,7 @@ fn no_deletion_reaches_into_another_school() {
             project
                 .db()
                 .time_model()
-                .delete_period(north, southern.period)
+                .delete_period(north, southern.period, Expected::Any)
                 .expect_err("period"),
         ),
         (
@@ -1612,7 +1620,7 @@ fn no_deletion_reaches_into_another_school() {
             project
                 .db()
                 .people()
-                .delete_year_level(north, southern.year_level)
+                .delete_year_level(north, southern.year_level, Expected::Any)
                 .expect_err("year level"),
         ),
         (
@@ -1620,7 +1628,7 @@ fn no_deletion_reaches_into_another_school() {
             project
                 .db()
                 .people()
-                .delete_teacher(north, southern.teacher)
+                .delete_teacher(north, southern.teacher, Expected::Any)
                 .expect_err("teacher"),
         ),
         (
@@ -1628,7 +1636,7 @@ fn no_deletion_reaches_into_another_school() {
             project
                 .db()
                 .people()
-                .delete_student(north, southern.student)
+                .delete_student(north, southern.student, Expected::Any)
                 .expect_err("student"),
         ),
         (
@@ -1636,7 +1644,7 @@ fn no_deletion_reaches_into_another_school() {
             project
                 .db()
                 .people()
-                .delete_student_group(north, southern.group)
+                .delete_student_group(north, southern.group, Expected::Any)
                 .expect_err("student group"),
         ),
         (
@@ -1677,17 +1685,17 @@ fn no_deletion_reaches_into_another_school() {
     project
         .db()
         .people()
-        .delete_student(south, southern.student)
+        .delete_student(south, southern.student, Expected::Any)
         .expect("Southmoor may delete its own student");
     project
         .db()
         .time_model()
-        .delete_period(south, southern.period)
+        .delete_period(south, southern.period, Expected::Any)
         .expect("Southmoor may delete its own period");
     project
         .db()
         .structure()
-        .delete_term(south, southern.term)
+        .delete_term(south, southern.term, Expected::Any)
         .expect("Southmoor may delete its own term");
 }
 
@@ -1818,7 +1826,7 @@ fn a_shared_facility_cannot_be_destroyed_from_one_schools_context() {
     let not_yours = project
         .db()
         .structure()
-        .delete_room(south, hall.id)
+        .delete_room(south, hall.id, Expected::Any)
         .expect_err("Southmoor does not own the hall");
     assert!(
         matches!(not_yours, DbError::WrongSchool { .. }),
@@ -1830,7 +1838,7 @@ fn a_shared_facility_cannot_be_destroyed_from_one_schools_context() {
     let still_used = project
         .db()
         .structure()
-        .delete_room(north, hall.id)
+        .delete_room(north, hall.id, Expected::Any)
         .expect_err("Southmoor still shares it");
     assert!(
         matches!(still_used, DbError::StillReferenced { .. }),
@@ -1878,7 +1886,7 @@ fn a_shared_facility_cannot_be_destroyed_from_one_schools_context() {
     project
         .db()
         .structure()
-        .delete_room(north, hall.id)
+        .delete_room(north, hall.id, Expected::Any)
         .expect("with the share withdrawn, the owner may delete it");
     assert_eq!(orphan_references_of(&mut project), 0);
 }
@@ -1937,12 +1945,12 @@ fn a_refused_deletion_is_not_recorded_as_a_deletion() {
     project
         .db()
         .people()
-        .delete_teacher(north, southern.teacher)
+        .delete_teacher(north, southern.teacher, Expected::Any)
         .expect_err("not Northgate's teacher");
     project
         .db()
         .structure()
-        .delete_campus(north, southern.campus)
+        .delete_campus(north, southern.campus, Expected::Any)
         .expect_err("not Northgate's campus");
 
     assert_eq!(
@@ -1958,7 +1966,7 @@ fn a_refused_deletion_is_not_recorded_as_a_deletion() {
     project
         .db()
         .people()
-        .delete_teacher(south, southern.teacher)
+        .delete_teacher(south, southern.teacher, Expected::Any)
         .expect("Southmoor's own teacher");
     assert_eq!(
         deletions_logged(&mut project),

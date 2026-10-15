@@ -29,6 +29,7 @@ use uuid::Uuid;
 
 use evara_core::calendar::WorkingDays;
 
+use crate::repo::Expected;
 use crate::repo::availability::{AvailabilityEntity, AvailabilityRuleInput, AvailabilityStatus};
 use crate::repo::membership::{EnrolmentStatus, StudentEnrolmentInput, TeacherSchoolInput};
 use crate::repo::people::{GroupKind, StudentGroupInput, StudentInput, TeacherInput};
@@ -342,7 +343,7 @@ fn a_membership_is_deactivated_without_touching_the_person_or_the_other_school()
     trust
         .db()
         .membership()
-        .set_teacher_membership_active(south, ada, false)
+        .set_teacher_membership_active(south, ada, Expected::Any, false)
         .expect("she has left Southmoor");
 
     assert!(
@@ -407,7 +408,7 @@ fn eligibility_needs_both_flags_not_either_one() {
     trust
         .db()
         .people()
-        .update_teacher(ada, &input)
+        .update_teacher(ada, Expected::Any, &input)
         .expect("archive her");
 
     for school in [north, south] {
@@ -667,7 +668,7 @@ fn sharing_a_teacher_preserves_the_availability_she_already_had() {
     trust
         .db()
         .membership()
-        .set_teacher_membership_active(south, ada, false)
+        .set_teacher_membership_active(south, ada, Expected::Any, false)
         .expect("and un-shared again, by deactivation");
     trust
         .db()
@@ -707,7 +708,7 @@ fn a_shared_teacher_cannot_be_deleted_by_the_school_that_created_her() {
     let refused = trust
         .db()
         .people()
-        .delete_teacher(north, ada)
+        .delete_teacher(north, ada, Expected::Any)
         .expect_err("Southmoor is timetabling around her");
     assert!(
         matches!(refused, DbError::StillReferenced { .. }),
@@ -727,7 +728,7 @@ fn a_shared_teacher_cannot_be_deleted_by_the_school_that_created_her() {
     trust
         .db()
         .people()
-        .delete_teacher(north, ada)
+        .delete_teacher(north, ada, Expected::Any)
         .expect("and now the home school may");
     assert!(trust.db().people().teacher(ada).expect("read").is_none());
 }
@@ -751,7 +752,7 @@ fn a_borrowing_school_cannot_delete_a_shared_teacher() {
     let refused = trust
         .db()
         .people()
-        .delete_teacher(south, ada)
+        .delete_teacher(south, ada, Expected::Any)
         .expect_err("not Southmoor's person to destroy");
     assert!(
         matches!(refused, DbError::WrongSchool { .. }),
@@ -772,7 +773,7 @@ fn a_home_campus_may_belong_to_any_member_school() {
     let refused = trust
         .db()
         .people()
-        .update_teacher(ada, &input)
+        .update_teacher(ada, Expected::Any, &input)
         .expect_err("she does not work there");
     assert!(
         matches!(refused, DbError::Invalid { .. } | DbError::Internal(_)),
@@ -791,7 +792,7 @@ fn a_home_campus_may_belong_to_any_member_school() {
     let updated = trust
         .db()
         .people()
-        .update_teacher(ada, &input)
+        .update_teacher(ada, Expected::Any, &input)
         .expect("and Southmoor's campus is a place she can be based");
     assert_eq!(updated.home_campus_id, Some(south_campus));
 }
@@ -898,6 +899,7 @@ fn a_transfer_preserves_the_identity_and_the_previous_spell() {
         .update_enrolment(
             north,
             northern.id,
+            Expected::Any,
             &StudentEnrolmentInput {
                 admission_no: Some("NG-1001".to_owned()),
                 year_level_id: Some(north_year),
@@ -915,7 +917,7 @@ fn a_transfer_preserves_the_identity_and_the_previous_spell() {
     trust
         .db()
         .membership()
-        .transfer_student(north, south, cass, &arriving)
+        .transfer_student(north, south, cass, Expected::Any, &arriving)
         .expect("she moves to Southmoor");
 
     assert!(
@@ -986,7 +988,7 @@ fn a_student_may_leave_and_rejoin_the_same_school() {
     trust
         .db()
         .membership()
-        .leave_school(north, cass, Some("2027-07-20"))
+        .leave_school(north, cass, Expected::Any, Some("2027-07-20"))
         .expect("she leaves");
     trust
         .db()
@@ -1022,7 +1024,7 @@ fn leaving_and_rejoining_works_without_any_dates_at_all() {
         trust
             .db()
             .membership()
-            .leave_school(north, cass, None)
+            .leave_school(north, cass, Expected::Any, None)
             .expect("leaves, no date recorded");
         trust
             .db()
@@ -1063,6 +1065,7 @@ fn admission_numbers_are_per_school_and_only_bind_current_spells() {
         .update_enrolment(
             north,
             cass_spell.id,
+            Expected::Any,
             &StudentEnrolmentInput {
                 admission_no: Some("1001".to_owned()),
                 ..enrolment(cass, north)
@@ -1093,6 +1096,7 @@ fn admission_numbers_are_per_school_and_only_bind_current_spells() {
         .update_enrolment(
             north,
             drew_spell.id,
+            Expected::Any,
             &StudentEnrolmentInput {
                 admission_no: Some("1001".to_owned()),
                 ..enrolment(drew, north)
@@ -1166,7 +1170,7 @@ fn an_admission_number_is_free_again_once_its_holder_has_left() {
     trust
         .db()
         .membership()
-        .leave_school(south, cass, Some("2027-07-20"))
+        .leave_school(south, cass, Expected::Any, Some("2027-07-20"))
         .expect("Cass leaves Southmoor");
     trust
         .db()
@@ -1223,6 +1227,7 @@ fn reissuing_a_number_at_the_home_school_is_still_bound_by_the_v10_index() {
         .update_enrolment(
             north,
             cass_spell.id,
+            Expected::Any,
             &StudentEnrolmentInput {
                 admission_no: Some("1001".to_owned()),
                 ..enrolment(cass, north)
@@ -1232,7 +1237,7 @@ fn reissuing_a_number_at_the_home_school_is_still_bound_by_the_v10_index() {
     trust
         .db()
         .membership()
-        .leave_school(north, cass, None)
+        .leave_school(north, cass, Expected::Any, None)
         .expect("Cass leaves");
 
     let drew_spell = trust
@@ -1247,6 +1252,7 @@ fn reissuing_a_number_at_the_home_school_is_still_bound_by_the_v10_index() {
         .update_enrolment(
             north,
             drew_spell.id,
+            Expected::Any,
             &StudentEnrolmentInput {
                 admission_no: Some("1001".to_owned()),
                 ..enrolment(drew, north)
@@ -1379,7 +1385,7 @@ fn group_history_survives_a_transfer() {
     trust
         .db()
         .membership()
-        .transfer_student(north, south, cass, &enrolment(cass, south))
+        .transfer_student(north, south, cass, Expected::Any, &enrolment(cass, south))
         .expect("transfer");
 
     let groups = trust.db().people().groups_for_student(cass).expect("read");
@@ -1441,7 +1447,7 @@ fn a_student_enrolled_elsewhere_cannot_be_deleted() {
     let refused = trust
         .db()
         .people()
-        .delete_student(north, cass)
+        .delete_student(north, cass, Expected::Any)
         .expect_err("Southmoor has her");
     assert!(
         matches!(refused, DbError::StillReferenced { .. }),
@@ -1451,7 +1457,7 @@ fn a_student_enrolled_elsewhere_cannot_be_deleted() {
     let not_yours = trust
         .db()
         .people()
-        .delete_student(south, cass)
+        .delete_student(south, cass, Expected::Any)
         .expect_err("and Southmoor may not destroy the person either");
     assert!(
         matches!(not_yours, DbError::WrongSchool { .. }),
@@ -1479,7 +1485,7 @@ fn editing_a_students_details_keeps_the_home_spell_in_step() {
     trust
         .db()
         .people()
-        .update_student(cass, &input)
+        .update_student(cass, Expected::Any, &input)
         .expect("edit through the student screen");
 
     let spell = trust
@@ -1499,6 +1505,7 @@ fn editing_a_students_details_keeps_the_home_spell_in_step() {
         .update_enrolment(
             north,
             spell.id,
+            Expected::Any,
             &StudentEnrolmentInput {
                 admission_no: Some("NG-43".to_owned()),
                 year_level_id: None,
@@ -1534,7 +1541,7 @@ fn a_school_cannot_edit_another_schools_enrolment() {
     let refused = trust
         .db()
         .membership()
-        .update_enrolment(north, southern.id, &enrolment(cass, south))
+        .update_enrolment(north, southern.id, Expected::Any, &enrolment(cass, south))
         .expect_err("not Northgate's spell");
     assert!(
         matches!(refused, DbError::WrongSchool { .. }),
@@ -1680,7 +1687,7 @@ fn a_shared_resource_is_protected_from_its_owner() {
     let destroy = trust
         .db()
         .structure()
-        .delete_resource(north, trolley)
+        .delete_resource(north, trolley, Expected::Any)
         .expect_err("Southmoor is timetabling into it");
     assert!(
         matches!(destroy, DbError::StillReferenced { .. }),
@@ -1695,7 +1702,7 @@ fn a_shared_resource_is_protected_from_its_owner() {
     trust
         .db()
         .structure()
-        .delete_resource(north, trolley)
+        .delete_resource(north, trolley, Expected::Any)
         .expect("and now the owner may");
 }
 
@@ -1718,6 +1725,7 @@ fn rebasing_a_resource_keeps_the_shares_it_was_lent_under() {
         .structure()
         .update_resource(
             trolley,
+            Expected::Any,
             &ResourceInput {
                 school_id: north,
                 campus_id: Some(annex),
@@ -1774,12 +1782,12 @@ fn school_dependents_counts_the_people_it_merely_borrows() {
     trust
         .db()
         .structure()
-        .delete_campus(south, south_campus)
+        .delete_campus(south, south_campus, Expected::Any)
         .expect("its own campus");
     trust
         .db()
         .people()
-        .delete_year_level(south, south_year)
+        .delete_year_level(south, south_year, Expected::Any)
         .expect("its own year level");
 
     let dependents = trust
@@ -1799,7 +1807,7 @@ fn school_dependents_counts_the_people_it_merely_borrows() {
     let refused = trust
         .db()
         .structure()
-        .delete_school(south)
+        .delete_school(south, Expected::Any)
         .expect_err("a borrowed person is still something in the way");
     assert!(
         matches!(refused, DbError::StillReferenced { .. }),
@@ -1835,7 +1843,7 @@ fn deleting_a_campus_clears_eligibility_and_loans_but_not_what_is_based_there() 
     trust
         .db()
         .structure()
-        .delete_campus(north, north_campus)
+        .delete_campus(north, north_campus, Expected::Any)
         .expect("the campus closes");
 
     assert_eq!(

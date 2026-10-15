@@ -49,6 +49,19 @@ calendarDays: number,
  */
 yearLevels: number, 
 /**
+ * Departments owned by the school.
+ */
+departments: number, 
+/**
+ * Subjects owned by the school.
+ *
+ * A subject blocks the delete through its own `school_id`, and so does every
+ * qualification recorded against it, through the subject. Counting the subjects is
+ * enough to explain the refusal — a school is told to remove its curriculum, not
+ * handed an arithmetic of what hangs off it.
+ */
+subjects: number, 
+/**
  * Teachers owned by the school.
  */
 teachers: number, 

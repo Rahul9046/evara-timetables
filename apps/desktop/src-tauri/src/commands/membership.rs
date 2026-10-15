@@ -28,8 +28,8 @@
 #![allow(clippy::needless_pass_by_value)]
 
 use evara_db::{
-    StudentEnrolment, StudentEnrolmentInput, StudentInSchool, TeacherCampus, TeacherInSchool,
-    TeacherSchool, TeacherSchoolInput,
+    Expected, StudentEnrolment, StudentEnrolmentInput, StudentInSchool, TeacherCampus,
+    TeacherInSchool, TeacherSchool, TeacherSchoolInput,
 };
 use tauri::State;
 use uuid::Uuid;
@@ -83,11 +83,13 @@ pub fn setup_teacher_membership_set_active(
     school_id: Uuid,
     teacher_id: Uuid,
     is_active: bool,
+    expected_rev: i64,
 ) -> SetupResult<TeacherSchool> {
     let mut ws = workspace(&state)?;
+    let expected = Expected::Rev(expected_rev);
     Ok(ws
         .membership()?
-        .set_teacher_membership_active(school_id, teacher_id, is_active)?)
+        .set_teacher_membership_active(school_id, teacher_id, expected, is_active)?)
 }
 
 /// Withdraws one school's employment of a teacher. The person is untouched.
@@ -195,9 +197,13 @@ pub fn setup_enrolment_update(
     school_id: Uuid,
     id: Uuid,
     input: StudentEnrolmentInput,
+    expected_rev: i64,
 ) -> SetupResult<StudentEnrolment> {
     let mut ws = workspace(&state)?;
-    Ok(ws.membership()?.update_enrolment(school_id, id, &input)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws
+        .membership()?
+        .update_enrolment(school_id, id, expected, &input)?)
 }
 
 /// Records that a student has left one school. The spell is kept, not deleted.
@@ -207,11 +213,13 @@ pub fn setup_enrolment_leave(
     school_id: Uuid,
     student_id: Uuid,
     left_on: Option<String>,
+    expected_rev: i64,
 ) -> SetupResult<StudentEnrolment> {
     let mut ws = workspace(&state)?;
+    let expected = Expected::Rev(expected_rev);
     Ok(ws
         .membership()?
-        .leave_school(school_id, student_id, left_on.as_deref())?)
+        .leave_school(school_id, student_id, expected, left_on.as_deref())?)
 }
 
 /// Moves a student between two schools, preserving the identity and both spells.
@@ -224,11 +232,17 @@ pub fn setup_student_transfer(
     to_school_id: Uuid,
     student_id: Uuid,
     arriving: StudentEnrolmentInput,
+    expected_rev: i64,
 ) -> SetupResult<StudentEnrolment> {
     let mut ws = workspace(&state)?;
-    Ok(ws
-        .membership()?
-        .transfer_student(from_school_id, to_school_id, student_id, &arriving)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.membership()?.transfer_student(
+        from_school_id,
+        to_school_id,
+        student_id,
+        expected,
+        &arriving,
+    )?)
 }
 
 // ----------------------------------------------------------------- resource sharing

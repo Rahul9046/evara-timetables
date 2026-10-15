@@ -34,7 +34,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use evara_core::branding::{LogoFormat, MAX_BYTES, MAX_EDGE, MIN_EDGE};
 use evara_db::{
     AcademicYear, AcademicYearInput, Building, BuildingInput, BuildingWithCampuses, Campus,
-    CampusInput, Resource, ResourceInput, Room, RoomInput, RoomType, RoomTypeInput,
+    CampusInput, Expected, Resource, ResourceInput, Room, RoomInput, RoomType, RoomTypeInput,
     RoomWithCampuses, School, SchoolDependents, SchoolInput, SchoolLogo, Term, TermInput,
 };
 use serde::{Deserialize, Serialize};
@@ -90,9 +90,14 @@ pub fn setup_school_dependents(
 /// Refused while it still owns anything at all. There is no "delete everything in it":
 /// see `Structure::delete_school`.
 #[tauri::command]
-pub fn setup_school_delete(state: State<'_, AppState>, id: Uuid) -> SetupResult<()> {
+pub fn setup_school_delete(
+    state: State<'_, AppState>,
+    id: Uuid,
+    expected_rev: i64,
+) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.delete_school(id)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.structure()?.delete_school(id, expected)?)
 }
 
 /// Replaces the school's details.
@@ -101,9 +106,11 @@ pub fn setup_school_update(
     state: State<'_, AppState>,
     id: Uuid,
     input: SchoolInput,
+    expected_rev: i64,
 ) -> SetupResult<School> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.update_school(id, &input)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.structure()?.update_school(id, expected, &input)?)
 }
 
 // ------------------------------------------------------------------------ school logo
@@ -289,9 +296,11 @@ pub fn setup_campus_update(
     state: State<'_, AppState>,
     id: Uuid,
     input: CampusInput,
+    expected_rev: i64,
 ) -> SetupResult<Campus> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.update_campus(id, &input)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.structure()?.update_campus(id, expected, &input)?)
 }
 
 /// Deletes a campus.
@@ -304,9 +313,11 @@ pub fn setup_campus_delete(
     state: State<'_, AppState>,
     school_id: Uuid,
     id: Uuid,
+    expected_rev: i64,
 ) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.delete_campus(school_id, id)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.structure()?.delete_campus(school_id, id, expected)?)
 }
 
 // -------------------------------------------------------------------------- building
@@ -364,9 +375,11 @@ pub fn setup_building_update(
     state: State<'_, AppState>,
     id: Uuid,
     input: BuildingInput,
+    expected_rev: i64,
 ) -> SetupResult<Building> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.update_building(id, &input)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.structure()?.update_building(id, expected, &input)?)
 }
 
 /// Shares an existing building with another campus.
@@ -412,9 +425,11 @@ pub fn setup_building_delete(
     state: State<'_, AppState>,
     school_id: Uuid,
     id: Uuid,
+    expected_rev: i64,
 ) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.delete_building(school_id, id)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.structure()?.delete_building(school_id, id, expected)?)
 }
 
 // ------------------------------------------------------------------------- room type
@@ -452,9 +467,11 @@ pub fn setup_room_type_update(
     state: State<'_, AppState>,
     id: Uuid,
     input: RoomTypeInput,
+    expected_rev: i64,
 ) -> SetupResult<RoomType> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.update_room_type(id, &input)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.structure()?.update_room_type(id, expected, &input)?)
 }
 
 /// Deletes a room type, unclassifying the rooms that used it.
@@ -466,9 +483,11 @@ pub fn setup_room_type_delete(
     state: State<'_, AppState>,
     school_id: Uuid,
     id: Uuid,
+    expected_rev: i64,
 ) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.delete_room_type(school_id, id)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.structure()?.delete_room_type(school_id, id, expected)?)
 }
 
 // ------------------------------------------------------------------------------ room
@@ -525,9 +544,11 @@ pub fn setup_room_update(
     state: State<'_, AppState>,
     id: Uuid,
     input: RoomInput,
+    expected_rev: i64,
 ) -> SetupResult<Room> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.update_room(id, &input)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.structure()?.update_room(id, expected, &input)?)
 }
 
 /// Shares an existing room with another campus.
@@ -564,9 +585,15 @@ pub fn setup_room_unshare(
 
 /// Deletes a room. Its campus associations go with it, one change-log entry each.
 #[tauri::command]
-pub fn setup_room_delete(state: State<'_, AppState>, school_id: Uuid, id: Uuid) -> SetupResult<()> {
+pub fn setup_room_delete(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+    id: Uuid,
+    expected_rev: i64,
+) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.delete_room(school_id, id)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.structure()?.delete_room(school_id, id, expected)?)
 }
 
 // -------------------------------------------------------------------------- resource
@@ -604,9 +631,11 @@ pub fn setup_resource_update(
     state: State<'_, AppState>,
     id: Uuid,
     input: ResourceInput,
+    expected_rev: i64,
 ) -> SetupResult<Resource> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.update_resource(id, &input)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.structure()?.update_resource(id, expected, &input)?)
 }
 
 /// Deletes a resource.
@@ -615,9 +644,11 @@ pub fn setup_resource_delete(
     state: State<'_, AppState>,
     school_id: Uuid,
     id: Uuid,
+    expected_rev: i64,
 ) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.delete_resource(school_id, id)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.structure()?.delete_resource(school_id, id, expected)?)
 }
 
 // --------------------------------------------------------------------- academic year
@@ -658,9 +689,11 @@ pub fn setup_academic_year_update(
     state: State<'_, AppState>,
     id: Uuid,
     input: AcademicYearInput,
+    expected_rev: i64,
 ) -> SetupResult<AcademicYear> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.update_academic_year(id, &input)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.structure()?.update_academic_year(id, expected, &input)?)
 }
 
 /// Deletes an academic year. Refused while it still has terms.
@@ -669,9 +702,13 @@ pub fn setup_academic_year_delete(
     state: State<'_, AppState>,
     school_id: Uuid,
     id: Uuid,
+    expected_rev: i64,
 ) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.delete_academic_year(school_id, id)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws
+        .structure()?
+        .delete_academic_year(school_id, id, expected)?)
 }
 
 // ------------------------------------------------------------------------------ term
@@ -706,14 +743,22 @@ pub fn setup_term_update(
     state: State<'_, AppState>,
     id: Uuid,
     input: TermInput,
+    expected_rev: i64,
 ) -> SetupResult<Term> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.update_term(id, &input)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.structure()?.update_term(id, expected, &input)?)
 }
 
 /// Deletes a term. Refused while a timeslot or calendar day still names it.
 #[tauri::command]
-pub fn setup_term_delete(state: State<'_, AppState>, school_id: Uuid, id: Uuid) -> SetupResult<()> {
+pub fn setup_term_delete(
+    state: State<'_, AppState>,
+    school_id: Uuid,
+    id: Uuid,
+    expected_rev: i64,
+) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.structure()?.delete_term(school_id, id)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.structure()?.delete_term(school_id, id, expected)?)
 }

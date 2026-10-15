@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 use crate::Database;
 use crate::error::Result;
+use crate::repo::Expected;
 use crate::repo::availability::{AvailabilityEntity, AvailabilityRule};
 use crate::repo::people::{Student, Teacher};
 use crate::repo::structure::{Campus, RoomType, School, SchoolLogo};
@@ -162,31 +163,32 @@ pub(crate) fn count_here(
 /// Deletes a campus of the project's one school.
 pub(crate) fn delete_campus_here(db: &mut Database, id: Uuid) -> Result<()> {
     let school = only_school_id(db);
-    db.structure().delete_campus(school, id)
+    db.structure().delete_campus(school, id, Expected::Any)
 }
 
 /// Deletes a room type of the project's one school.
 pub(crate) fn delete_room_type_here(db: &mut Database, id: Uuid) -> Result<()> {
     let school = only_school_id(db);
-    db.structure().delete_room_type(school, id)
+    db.structure().delete_room_type(school, id, Expected::Any)
 }
 
 /// Deletes a building of the project's one school.
 pub(crate) fn delete_building_here(db: &mut Database, id: Uuid) -> Result<()> {
     let school = only_school_id(db);
-    db.structure().delete_building(school, id)
+    db.structure().delete_building(school, id, Expected::Any)
 }
 
 /// Deletes a room of the project's one school.
 pub(crate) fn delete_room_here(db: &mut Database, id: Uuid) -> Result<()> {
     let school = only_school_id(db);
-    db.structure().delete_room(school, id)
+    db.structure().delete_room(school, id, Expected::Any)
 }
 
 /// Deletes an academic year of the project's one school.
 pub(crate) fn delete_academic_year_here(db: &mut Database, id: Uuid) -> Result<()> {
     let school = only_school_id(db);
-    db.structure().delete_academic_year(school, id)
+    db.structure()
+        .delete_academic_year(school, id, Expected::Any)
 }
 
 /// Withdraws a building share, acting as the project's one school.
@@ -209,13 +211,13 @@ pub(crate) fn unshare_room_here(db: &mut Database, room_id: Uuid, campus_id: Uui
 /// Deletes a cycle day of the project's one school.
 pub(crate) fn delete_cycle_day_here(db: &mut Database, id: Uuid) -> Result<()> {
     let school = only_school_id(db);
-    db.time_model().delete_cycle_day(school, id)
+    db.time_model().delete_cycle_day(school, id, Expected::Any)
 }
 
 /// Deletes a period of the project's one school.
 pub(crate) fn delete_period_here(db: &mut Database, id: Uuid) -> Result<()> {
     let school = only_school_id(db);
-    db.time_model().delete_period(school, id)
+    db.time_model().delete_period(school, id, Expected::Any)
 }
 
 /// Deletes timeslots of the project's one school.
@@ -237,25 +239,25 @@ pub(crate) fn release_orphans_here(
 /// Deletes a year level of the project's one school.
 pub(crate) fn delete_year_level_here(db: &mut Database, id: Uuid) -> Result<()> {
     let school = only_school_id(db);
-    db.people().delete_year_level(school, id)
+    db.people().delete_year_level(school, id, Expected::Any)
 }
 
 /// Deletes a teacher of the project's one school.
 pub(crate) fn delete_teacher_here(db: &mut Database, id: Uuid) -> Result<()> {
     let school = only_school_id(db);
-    db.people().delete_teacher(school, id)
+    db.people().delete_teacher(school, id, Expected::Any)
 }
 
 /// Deletes a student of the project's one school.
 pub(crate) fn delete_student_here(db: &mut Database, id: Uuid) -> Result<()> {
     let school = only_school_id(db);
-    db.people().delete_student(school, id)
+    db.people().delete_student(school, id, Expected::Any)
 }
 
 /// Deletes a student group of the project's one school.
 pub(crate) fn delete_student_group_here(db: &mut Database, id: Uuid) -> Result<()> {
     let school = only_school_id(db);
-    db.people().delete_student_group(school, id)
+    db.people().delete_student_group(school, id, Expected::Any)
 }
 
 /// Removes one group membership in the project's one school.

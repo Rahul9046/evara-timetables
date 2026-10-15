@@ -53,9 +53,10 @@
 use rusqlite::{OptionalExtension, Transaction, types::ToSql};
 use uuid::Uuid;
 
+use super::curriculum::associations_in_school;
 use super::people::{Student, Teacher};
 use super::row::{entity, opt_text, parse_id_text, text};
-use super::{Stamp, delete, require_same_school, translate, update};
+use super::{Expected, Stamp, delete, require_same_school, translate, update};
 use crate::Database;
 use crate::error::{DbError, Result};
 
@@ -276,6 +277,7 @@ impl Membership<'_> {
         &mut self,
         school_id: Uuid,
         teacher_id: Uuid,
+        expected: Expected,
         is_active: bool,
     ) -> Result<TeacherSchool> {
         let id = self.db.write(|tx| {
@@ -285,6 +287,7 @@ impl Membership<'_> {
                 "school membership",
                 "teacher_school",
                 id,
+                expected,
                 "is_active = ?",
                 &[&is_active as &dyn ToSql],
             )?;
@@ -325,10 +328,33 @@ impl Membership<'_> {
                 });
             }
 
-            for eligibility in eligibility_in_school(tx, teacher_id, school_id)? {
-                delete(tx, "campus eligibility", "teacher_campus", eligibility)?;
+            // Both narrowings of this membership, cleared in the same transaction and
+            // through `repo::delete`. The schema refuses the removal while either is left
+            // behind -- `teacher_school_delete_requires_no_campus_eligibility` from V13 and
+            // `..._no_department_association` from V14 -- so this is the path that makes
+            // the removal possible at all, rather than a convenience.
+            //
+            // A teacher's QUALIFICATIONS are deliberately not here. They are not about this
+            // school's organisation and they survive it: ADR 0025 §5, and a test asserts it.
+            for association in associations_in_school(tx, teacher_id, school_id)? {
+                delete(
+                    tx,
+                    "department association",
+                    "teacher_department",
+                    association,
+                    Expected::Any,
+                )?;
             }
-            delete(tx, "school membership", "teacher_school", id)
+            for eligibility in eligibility_in_school(tx, teacher_id, school_id)? {
+                delete(
+                    tx,
+                    "campus eligibility",
+                    "teacher_campus",
+                    eligibility,
+                    Expected::Any,
+                )?;
+            }
+            delete(tx, "school membership", "teacher_school", id, Expected::Any)
         })
     }
 }
@@ -467,7 +493,13 @@ impl Membership<'_> {
                     entity: "campus eligibility",
                 });
             };
-            delete(tx, "campus eligibility", "teacher_campus", id)
+            delete(
+                tx,
+                "campus eligibility",
+                "teacher_campus",
+                id,
+                Expected::Any,
+            )
         })
     }
 }
@@ -727,13 +759,14 @@ impl Membership<'_> {
         &mut self,
         school_id: Uuid,
         id: Uuid,
+        expected: Expected,
         input: &StudentEnrolmentInput,
     ) -> Result<StudentEnrolment> {
         self.db.write(|tx| {
             require_same_school(tx, "enrolment", "student_school_enrolment", id, school_id)?;
             require_enrolment_placement(tx, input)?;
             require_room_for_this_spell(tx, id, input)?;
-            write_enrolment(tx, id, input)?;
+            write_enrolment(tx, id, expected, input)?;
             mirror_enrolment_onto_student(tx, id)
         })?;
         self.enrolment(id)?.ok_or(DbError::NotFound {
@@ -756,11 +789,12 @@ impl Membership<'_> {
         &mut self,
         school_id: Uuid,
         student_id: Uuid,
+        expected: Expected,
         left_on: Option<&str>,
     ) -> Result<StudentEnrolment> {
         let id = self.db.write(|tx| {
             let id = require_current_enrolment(tx, student_id, school_id)?;
-            end_spell(tx, id, left_on)?;
+            end_spell(tx, id, expected, left_on)?;
             Ok(id)
         })?;
         self.enrolment(id)?.ok_or(DbError::NotFound {
@@ -808,6 +842,7 @@ impl Membership<'_> {
         from_school_id: Uuid,
         to_school_id: Uuid,
         student_id: Uuid,
+        expected: Expected,
         arriving: &StudentEnrolmentInput,
     ) -> Result<StudentEnrolment> {
         if from_school_id == to_school_id {
@@ -843,7 +878,7 @@ impl Membership<'_> {
             // The old spell is ended rather than repointed. Both halves are in this one
             // transaction, so the student is never enrolled twice and never enrolled
             // nowhere, whichever of them fails.
-            end_spell(tx, leaving, arriving.enrolled_on.as_deref())?;
+            end_spell(tx, leaving, expected, arriving.enrolled_on.as_deref())?;
             insert_enrolment(tx, &stamp, arriving)
         })?;
         self.enrolment(stamp.id)?.ok_or(DbError::NotFound {
@@ -1226,6 +1261,7 @@ fn require_room_for_this_spell(
 fn write_enrolment(
     tx: &Transaction<'_>,
     id: Uuid,
+    expected: Expected,
     input: &StudentEnrolmentInput,
 ) -> Result<(String, i64)> {
     let year_level = opt_text(input.year_level_id);
@@ -1235,6 +1271,7 @@ fn write_enrolment(
         "enrolment",
         "student_school_enrolment",
         id,
+        expected,
         ENROLMENT_ASSIGNMENTS,
         &[
             &input.admission_no as &dyn ToSql,
@@ -1248,7 +1285,12 @@ fn write_enrolment(
 }
 
 /// Ends one spell, keeping everything it recorded.
-fn end_spell(tx: &Transaction<'_>, id: Uuid, left_on: Option<&str>) -> Result<()> {
+fn end_spell(
+    tx: &Transaction<'_>,
+    id: Uuid,
+    expected: Expected,
+    left_on: Option<&str>,
+) -> Result<()> {
     if let Some(date) = left_on {
         let valid: Option<String> = tx.query_row("SELECT date(?)", [date], |row| row.get(0))?;
         if valid.is_none() {
@@ -1262,6 +1304,7 @@ fn end_spell(tx: &Transaction<'_>, id: Uuid, left_on: Option<&str>) -> Result<()
         "enrolment",
         "student_school_enrolment",
         id,
+        expected,
         "status = ?, left_on = ?",
         &[&EnrolmentStatus::Left.as_str() as &dyn ToSql, &left_on],
     )
@@ -1336,6 +1379,7 @@ fn mirror_enrolment_onto_student(tx: &Transaction<'_>, id: Uuid) -> Result<()> {
         "student",
         "student",
         student_id,
+        Expected::Any,
         "code = ?, year_level_id = ?, campus_id = ?",
         &[&admission_no as &dyn ToSql, &year_level, &campus],
     )?;
@@ -1371,6 +1415,7 @@ pub(crate) fn mirror_student_onto_enrolment(tx: &Transaction<'_>, student_id: Uu
         "enrolment",
         "student_school_enrolment",
         enrolment,
+        Expected::Any,
         "admission_no = ?, year_level_id = ?, campus_id = ?",
         &[&code as &dyn ToSql, &year_level, &campus],
     )

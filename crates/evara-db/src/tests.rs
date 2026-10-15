@@ -155,9 +155,10 @@ fn migration_is_idempotent_across_reopens() {
 /// Guards the phase boundary.
 ///
 /// Phase 1C added the static half of the Structure group, Phase 1D the time half, and
-/// Phase 2 the People group and availability. Everything past it — the rest of Phase 2's
-/// curriculum tables, activities, constraints, timetables, operations — belongs to a later
-/// phase and must not arrive by accident alongside something else.
+/// Phase 2 the People group, availability, shared identities and — in Stage B — the
+/// curriculum prerequisites. Everything past it — lessons, activities, constraints,
+/// timetables, operations — belongs to a later phase and must not arrive by accident
+/// alongside something else.
 #[test]
 fn the_schema_contains_exactly_the_phases_shipped_so_far() {
     let (_dir, path) = project();
@@ -192,6 +193,8 @@ fn the_schema_contains_exactly_the_phases_shipped_so_far() {
             "change_log".to_owned(),
             "cycle".to_owned(),
             "cycle_day".to_owned(),
+            // V14 — the Curriculum prerequisites.
+            "department".to_owned(),
             "period".to_owned(),
             "period_structure".to_owned(),
             "refinery_schema_history".to_owned(),
@@ -212,8 +215,12 @@ fn the_schema_contains_exactly_the_phases_shipped_so_far() {
             // V13 — project-level people: school membership, campus eligibility and
             // enrolment history.
             "student_school_enrolment".to_owned(),
+            "subject".to_owned(),
             "teacher".to_owned(),
             "teacher_campus".to_owned(),
+            // V14 — what a teacher is organised and qualified to teach.
+            "teacher_department".to_owned(),
+            "teacher_qualification".to_owned(),
             "teacher_school".to_owned(),
             "term".to_owned(),
             "timeslot".to_owned(),
@@ -225,12 +232,9 @@ fn the_schema_contains_exactly_the_phases_shipped_so_far() {
     // Named individually rather than inferred from the list above, so that a later
     // domain arriving early fails with the name of the table that jumped the queue.
     for not_yet in [
-        // Phase 2 — the curriculum tables documented alongside the People group, which
-        // arrive with Curriculum rather than with the people themselves.
-        "department",
-        "teacher_qualification",
-        "subject",
-        // Phase 3 — curriculum.
+        // Phase 3 — the lessons Stage B's departments and subjects exist to be referenced
+        // by. `department`, `subject`, `teacher_qualification` and `teacher_department`
+        // left this list in V14 and joined the manifest above.
         "course",
         "class_section",
         "class_teacher",

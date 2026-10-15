@@ -24,6 +24,7 @@ use crate::Database;
 use crate::cloud_sync::{self, SyncedFolder};
 use crate::error::{DbError, Result};
 use crate::repo::availability::Availability;
+use crate::repo::curriculum::Curriculum;
 use crate::repo::membership::Membership;
 use crate::repo::people::People;
 use crate::repo::structure::Structure;
@@ -268,6 +269,23 @@ impl Workspace {
             .as_mut()
             .ok_or(DbError::NoProjectOpen)?
             .membership())
+    }
+
+    /// The curriculum repository for the open project.
+    ///
+    /// Departments and subjects, and what a teacher is qualified and organised to teach --
+    /// the relationships `V14` added between a project-level person and a school's own
+    /// curriculum.
+    ///
+    /// # Errors
+    ///
+    /// [`DbError::NoProjectOpen`] if nothing is open.
+    pub fn curriculum(&mut self) -> Result<Curriculum<'_>> {
+        Ok(self
+            .open
+            .as_mut()
+            .ok_or(DbError::NoProjectOpen)?
+            .curriculum())
     }
 
     /// The availability repository for the open project.

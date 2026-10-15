@@ -49,7 +49,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::row::{FromColumn, entity, opt_text, text};
-use super::{Stamp, delete, require_same_school, require_school_owner, translate, update};
+use super::{
+    Expected, Stamp, delete, require_same_school, require_school_owner, translate, update,
+};
 use crate::Database;
 use crate::error::{DbError, Result};
 
@@ -521,7 +523,12 @@ impl TimeModel<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`], [`DbError::DuplicateValue`] or [`DbError::Invalid`].
-    pub fn update_cycle(&mut self, id: Uuid, input: &CycleInput) -> Result<Cycle> {
+    pub fn update_cycle(
+        &mut self,
+        id: Uuid,
+        expected: Expected,
+        input: &CycleInput,
+    ) -> Result<Cycle> {
         let stored = self
             .cycle(id)?
             .ok_or(DbError::NotFound { entity: "cycle" })?;
@@ -560,6 +567,7 @@ impl TimeModel<'_> {
                 "cycle",
                 "cycle",
                 id,
+                expected,
                 "name = ?, day_count = ?, week_count = ?, is_default = ?",
                 &[
                     &input.name,
@@ -589,10 +597,10 @@ impl TimeModel<'_> {
     ///
     /// [`DbError::StillReferenced`] if it still has cycle days or timeslots. Ownership is
     /// RESTRICT: the user removes those deliberately.
-    pub fn delete_cycle(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+    pub fn delete_cycle(&mut self, school_id: Uuid, id: Uuid, expected: Expected) -> Result<()> {
         self.db.write(|tx| {
             require_same_school(tx, "cycle", "cycle", id, school_id)?;
-            delete(tx, "cycle", "cycle", id)
+            delete(tx, "cycle", "cycle", id, expected)
         })
     }
 
@@ -879,7 +887,15 @@ fn clear_default_cycle(tx: &Transaction<'_>, school_id: Uuid) -> Result<()> {
         "SELECT id FROM cycle WHERE school_id = ? AND is_default = 1",
         &[&text(school_id)],
     )? {
-        update(tx, "cycle", "cycle", id, "is_default = ?", &[&false])?;
+        update(
+            tx,
+            "cycle",
+            "cycle",
+            id,
+            Expected::Any,
+            "is_default = ?",
+            &[&false],
+        )?;
     }
     Ok(())
 }
@@ -987,7 +1003,12 @@ impl TimeModel<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`], [`DbError::DuplicateValue`] or [`DbError::Invalid`].
-    pub fn update_cycle_day(&mut self, id: Uuid, input: &CycleDayInput) -> Result<CycleDay> {
+    pub fn update_cycle_day(
+        &mut self,
+        id: Uuid,
+        expected: Expected,
+        input: &CycleDayInput,
+    ) -> Result<CycleDay> {
         self.db.write(|tx| {
             check_ordinal_within_cycle(tx, input.cycle_id, input.ordinal)?;
             update(
@@ -995,6 +1016,7 @@ impl TimeModel<'_> {
                 "cycle day",
                 "cycle_day",
                 id,
+                expected,
                 "ordinal = ?, label = ?, weekday_hint = ?",
                 &[&input.ordinal, &input.label, &input.weekday_hint],
             )?;
@@ -1012,10 +1034,15 @@ impl TimeModel<'_> {
     /// [`DbError::StillReferenced`] if a timeslot or a calendar day still points at it.
     /// That is deliberate: see [`TimeModel::plan_materialisation`] for how to find out
     /// what is in the way before trying.
-    pub fn delete_cycle_day(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+    pub fn delete_cycle_day(
+        &mut self,
+        school_id: Uuid,
+        id: Uuid,
+        expected: Expected,
+    ) -> Result<()> {
         self.db.write(|tx| {
             require_school_owner(tx, "cycle day", CYCLE_DAY_OWNER, id, school_id)?;
-            delete(tx, "cycle day", "cycle_day", id)
+            delete(tx, "cycle day", "cycle_day", id, expected)
         })
     }
 }
@@ -1154,6 +1181,7 @@ impl TimeModel<'_> {
     pub fn update_period_structure(
         &mut self,
         id: Uuid,
+        expected: Expected,
         input: &PeriodStructureInput,
     ) -> Result<PeriodStructure> {
         self.db.write(|tx| {
@@ -1166,6 +1194,7 @@ impl TimeModel<'_> {
                 "period structure",
                 "period_structure",
                 id,
+                expected,
                 "campus_id = ?, name = ?, is_default = ?",
                 &[&opt_text(input.campus_id), &input.name, &input.is_default],
             )?;
@@ -1181,10 +1210,15 @@ impl TimeModel<'_> {
     /// # Errors
     ///
     /// [`DbError::StillReferenced`] if it still has periods.
-    pub fn delete_period_structure(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+    pub fn delete_period_structure(
+        &mut self,
+        school_id: Uuid,
+        id: Uuid,
+        expected: Expected,
+    ) -> Result<()> {
         self.db.write(|tx| {
             require_same_school(tx, "bell schedule", "period_structure", id, school_id)?;
-            delete(tx, "period structure", "period_structure", id)
+            delete(tx, "period structure", "period_structure", id, expected)
         })
     }
 }
@@ -1209,6 +1243,7 @@ fn clear_default_period_structure(
             "period structure",
             "period_structure",
             id,
+            Expected::Any,
             "is_default = ?",
             &[&false],
         )?;
@@ -1304,13 +1339,19 @@ impl TimeModel<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`], [`DbError::DuplicateValue`] or [`DbError::Invalid`].
-    pub fn update_period(&mut self, id: Uuid, input: &PeriodInput) -> Result<Period> {
+    pub fn update_period(
+        &mut self,
+        id: Uuid,
+        expected: Expected,
+        input: &PeriodInput,
+    ) -> Result<Period> {
         self.db.write(|tx| {
             update(
                 tx,
                 "period",
                 "period",
                 id,
+                expected,
                 "ordinal = ?, label = ?, starts_at = ?, ends_at = ?, kind = ?, \
                  counts_as_load = ?",
                 &[
@@ -1335,10 +1376,10 @@ impl TimeModel<'_> {
     /// [`DbError::StillReferenced`] if a timeslot was materialised from it. Use
     /// [`TimeModel::plan_materialisation`] with the period excluded to see exactly which
     /// slots stand in the way before removing anything.
-    pub fn delete_period(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+    pub fn delete_period(&mut self, school_id: Uuid, id: Uuid, expected: Expected) -> Result<()> {
         self.db.write(|tx| {
             require_school_owner(tx, "period", PERIOD_OWNER, id, school_id)?;
-            delete(tx, "period", "period", id)
+            delete(tx, "period", "period", id, expected)
         })
     }
 }
@@ -1546,6 +1587,7 @@ impl TimeModel<'_> {
     pub fn update_calendar_day(
         &mut self,
         id: Uuid,
+        expected: Expected,
         input: &CalendarDayInput,
     ) -> Result<CalendarDay> {
         self.db.write(|tx| {
@@ -1555,6 +1597,7 @@ impl TimeModel<'_> {
                 "calendar day",
                 "calendar_day",
                 id,
+                expected,
                 "date = ?, term_id = ?, campus_id = ?, cycle_day_id = ?, kind = ?, note = ?",
                 &[
                     &input.date,
@@ -1577,10 +1620,15 @@ impl TimeModel<'_> {
     /// # Errors
     ///
     /// Propagates any database failure.
-    pub fn delete_calendar_day(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+    pub fn delete_calendar_day(
+        &mut self,
+        school_id: Uuid,
+        id: Uuid,
+        expected: Expected,
+    ) -> Result<()> {
         self.db.write(|tx| {
             require_same_school(tx, "calendar day", "calendar_day", id, school_id)?;
-            delete(tx, "calendar day", "calendar_day", id)
+            delete(tx, "calendar day", "calendar_day", id, expected)
         })
     }
 }
@@ -2077,7 +2125,7 @@ impl TimeModel<'_> {
 
             let ids = plan.orphaned_ids();
             for id in &ids {
-                delete(tx, "timeslot", "timeslot", *id)?;
+                delete(tx, "timeslot", "timeslot", *id, Expected::Any)?;
             }
             Ok(ids)
         })
@@ -2144,7 +2192,7 @@ impl TimeModel<'_> {
                 require_same_school(tx, "timeslot", "timeslot", *id, school_id)?;
             }
             for id in ids {
-                delete(tx, "timeslot", "timeslot", *id)?;
+                delete(tx, "timeslot", "timeslot", *id, Expected::Any)?;
             }
             Ok(())
         })
@@ -2465,6 +2513,7 @@ fn refresh_preserved(
             "timeslot",
             "timeslot",
             id,
+            Expected::Any,
             "school_id = ?, cycle_id = ?, campus_id = ?, ordinal = ?, is_teaching = ?",
             &[
                 &text(context.school_id),

@@ -21,6 +21,7 @@
 use uuid::Uuid;
 
 use crate::DbError;
+use crate::repo::Expected;
 use crate::repo::structure::SchoolInput;
 use crate::repo::time_model::{
     CalendarDayInput, CalendarDayKind, CycleDay, CycleDayInput, CycleInput, CycleKind,
@@ -67,6 +68,7 @@ fn try_resize(project: &mut Project, cycle: Uuid, day_count: i64) -> Result<(), 
         .time_model()
         .update_cycle(
             cycle,
+            Expected::Any,
             &CycleInput {
                 school_id: school,
                 name: "Rotation".to_owned(),
@@ -248,6 +250,7 @@ fn an_edit_is_range_checked_too_not_only_a_create() {
     for ordinal in [0, -5, 6, 99] {
         let outcome = project.db().time_model().update_cycle_day(
             day,
+            Expected::Any,
             &CycleDayInput {
                 cycle_id: cycle,
                 ordinal,

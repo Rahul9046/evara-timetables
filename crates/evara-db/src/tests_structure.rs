@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use evara_core::calendar::WorkingDays;
 
+use crate::repo::Expected;
 use crate::repo::structure::{
     AcademicYearInput, BuildingInput, CampusInput, ResourceInput, RoomInput, RoomTypeInput,
     SchoolInput, TermInput,
@@ -224,7 +225,7 @@ fn an_update_increments_revision_exactly_once() {
     let updated = project
         .db()
         .structure()
-        .update_campus(campus_id, &input)
+        .update_campus(campus_id, Expected::Any, &input)
         .expect("update");
 
     assert_eq!(updated.rev, 2, "one update, one revision");
@@ -233,7 +234,7 @@ fn an_update_increments_revision_exactly_once() {
     let again = project
         .db()
         .structure()
-        .update_campus(campus_id, &input)
+        .update_campus(campus_id, Expected::Any, &input)
         .expect("update again");
     assert_eq!(again.rev, 3, "a second update advances by exactly one");
 }
@@ -250,6 +251,7 @@ fn an_update_replaces_updated_at_but_not_created_at() {
         .structure()
         .update_campus(
             campus_id,
+            Expected::Any,
             &CampusInput {
                 school_id: school,
                 name: "Renamed".to_owned(),
@@ -290,6 +292,7 @@ fn a_failed_update_does_not_consume_a_revision() {
     // Collide with the other campus's code.
     let clash = project.db().structure().update_campus(
         campus_id,
+        Expected::Any,
         &CampusInput {
             school_id: school,
             name: "Main".to_owned(),
@@ -317,6 +320,7 @@ fn updating_something_that_does_not_exist_reports_not_found() {
 
     let outcome = project.db().structure().update_campus(
         Uuid::now_v7(),
+        Expected::Any,
         &CampusInput {
             school_id: school,
             name: "Ghost".to_owned(),
@@ -600,7 +604,7 @@ fn a_school_with_dependent_structure_cannot_be_deleted() {
     // database rule directly: the school is the root and nothing may orphan it.
     let outcome = project
         .db()
-        .write(|tx| crate::repo::delete(tx, "school", "school", school));
+        .write(|tx| crate::repo::delete(tx, "school", "school", school, Expected::Any));
 
     assert!(
         matches!(outcome, Err(DbError::StillReferenced { .. })),
@@ -779,6 +783,7 @@ fn two_schools_cannot_share_a_name_or_a_given_code() {
         .structure()
         .update_school(
             first,
+            Expected::Any,
             &SchoolInput {
                 name: existing.name.clone(),
                 code: Some("NGS".to_owned()),
@@ -908,6 +913,7 @@ fn change_log_follows_a_row_through_update_and_delete() {
         .structure()
         .update_building(
             block.id,
+            Expected::Any,
             &BuildingInput {
                 campus_id: campus,
                 name: "Block B".to_owned(),

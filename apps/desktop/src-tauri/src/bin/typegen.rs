@@ -157,6 +157,11 @@ fn write_all() -> (Vec<Generated>, Vec<String>) {
         TeacherSchool, TeacherSchoolInput, Term, TermInput, Timeslot, TimeslotInput,
         WeeklyCycleDay, YearLevel, YearLevelInput,
     };
+    use evara_db::{
+        Department, DepartmentDependents, DepartmentInput, QualifiedSubject, QualifiedTeacher,
+        Subject, SubjectDependents, SubjectInput, TeacherDepartment, TeacherDepartmentInput,
+        TeacherDepartmentView, TeacherQualification, TeacherQualificationInput,
+    };
     use evara_desktop_lib::commands::AppInfo;
     use evara_desktop_lib::commands::error::SetupError;
     use evara_desktop_lib::commands::structure::{LogoLimits, SchoolLogoView};
@@ -204,6 +209,20 @@ fn write_all() -> (Vec<Generated>, Vec<String>) {
         StudentEnrolmentInput,
         StudentInSchool,
         EnrolmentStatus,
+        // Curriculum prerequisites — Stage B.
+        Department,
+        DepartmentInput,
+        DepartmentDependents,
+        Subject,
+        SubjectInput,
+        SubjectDependents,
+        TeacherQualification,
+        TeacherQualificationInput,
+        QualifiedSubject,
+        QualifiedTeacher,
+        TeacherDepartment,
+        TeacherDepartmentInput,
+        TeacherDepartmentView,
         // Availability.
         AvailabilityRule,
         AvailabilityRuleInput,

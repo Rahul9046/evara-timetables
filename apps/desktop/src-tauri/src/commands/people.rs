@@ -28,8 +28,8 @@
 #![allow(clippy::needless_pass_by_value)]
 
 use evara_db::{
-    Student, StudentGroup, StudentGroupInput, StudentGroupMember, StudentGroupMemberInput,
-    StudentInput, Teacher, TeacherInput, YearLevel, YearLevelInput,
+    Expected, Student, StudentGroup, StudentGroupInput, StudentGroupMember,
+    StudentGroupMemberInput, StudentInput, Teacher, TeacherInput, YearLevel, YearLevelInput,
 };
 use tauri::State;
 use uuid::Uuid;
@@ -76,9 +76,11 @@ pub fn setup_year_level_update(
     state: State<'_, AppState>,
     id: Uuid,
     input: YearLevelInput,
+    expected_rev: i64,
 ) -> SetupResult<YearLevel> {
     let mut ws = workspace(&state)?;
-    Ok(ws.people()?.update_year_level(id, &input)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.people()?.update_year_level(id, expected, &input)?)
 }
 
 /// Deletes a year level, detaching anything classified by it.
@@ -87,9 +89,11 @@ pub fn setup_year_level_delete(
     state: State<'_, AppState>,
     school_id: Uuid,
     id: Uuid,
+    expected_rev: i64,
 ) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.people()?.delete_year_level(school_id, id)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.people()?.delete_year_level(school_id, id, expected)?)
 }
 
 // --------------------------------------------------------------------------- teacher
@@ -130,9 +134,11 @@ pub fn setup_teacher_update(
     state: State<'_, AppState>,
     id: Uuid,
     input: TeacherInput,
+    expected_rev: i64,
 ) -> SetupResult<Teacher> {
     let mut ws = workspace(&state)?;
-    Ok(ws.people()?.update_teacher(id, &input)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.people()?.update_teacher(id, expected, &input)?)
 }
 
 /// Deletes a teacher.
@@ -141,9 +147,11 @@ pub fn setup_teacher_delete(
     state: State<'_, AppState>,
     school_id: Uuid,
     id: Uuid,
+    expected_rev: i64,
 ) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.people()?.delete_teacher(school_id, id)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.people()?.delete_teacher(school_id, id, expected)?)
 }
 
 // --------------------------------------------------------------------------- student
@@ -184,9 +192,11 @@ pub fn setup_student_update(
     state: State<'_, AppState>,
     id: Uuid,
     input: StudentInput,
+    expected_rev: i64,
 ) -> SetupResult<Student> {
     let mut ws = workspace(&state)?;
-    Ok(ws.people()?.update_student(id, &input)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.people()?.update_student(id, expected, &input)?)
 }
 
 /// Deletes a student who belongs to no group. Refused otherwise.
@@ -195,9 +205,11 @@ pub fn setup_student_delete(
     state: State<'_, AppState>,
     school_id: Uuid,
     id: Uuid,
+    expected_rev: i64,
 ) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.people()?.delete_student(school_id, id)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.people()?.delete_student(school_id, id, expected)?)
 }
 
 // --------------------------------------------------------------------- student group
@@ -238,9 +250,11 @@ pub fn setup_student_group_update(
     state: State<'_, AppState>,
     id: Uuid,
     input: StudentGroupInput,
+    expected_rev: i64,
 ) -> SetupResult<StudentGroup> {
     let mut ws = workspace(&state)?;
-    Ok(ws.people()?.update_student_group(id, &input)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.people()?.update_student_group(id, expected, &input)?)
 }
 
 /// Deletes a group and the memberships that only existed because of it.
@@ -249,9 +263,11 @@ pub fn setup_student_group_delete(
     state: State<'_, AppState>,
     school_id: Uuid,
     id: Uuid,
+    expected_rev: i64,
 ) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.people()?.delete_student_group(school_id, id)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.people()?.delete_student_group(school_id, id, expected)?)
 }
 
 // ------------------------------------------------------------------------ membership

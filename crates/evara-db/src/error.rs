@@ -248,6 +248,41 @@ pub enum DbError {
         field: &'static str,
     },
 
+    /// Somebody else changed the record between the caller reading it and writing it.
+    ///
+    /// Raised by [`repo::update`] and [`repo::delete`] when the revision predicate matched
+    /// no row but the row is there, which means exactly one thing: another window, another
+    /// installation or another command edited it first, and applying this write would have
+    /// discarded that edit without either person noticing. **Nothing was written** — no
+    /// column changed, no revision was consumed, and no change-log entry was appended.
+    ///
+    /// Deliberately distinct from [`DbError::NotFound`]. The record exists, so telling the
+    /// user it does not would send them looking for something that is there, and the next
+    /// step is to re-read it rather than to give up. Deliberately distinct from
+    /// [`DbError::ReviewRequired`] too, which is the same *shape* of problem for the
+    /// timetable grid — a plan recomputed inside the write transaction no longer matching
+    /// the one that was shown — but is about a computed projection rather than one row's
+    /// revision, and so cannot carry these numbers.
+    ///
+    /// The revisions are carried for the interface to show and for tests to assert.
+    /// Nothing should branch on the difference between them: one revision behind and
+    /// twelve behind need the same answer, which is to look at the current version.
+    ///
+    /// [`repo::update`]: crate::repo
+    /// [`repo::delete`]: crate::repo
+    #[error(
+        "this {entity} was changed by someone else after it was read, so nothing was \
+         written; reload it and try again"
+    )]
+    Conflict {
+        /// Entity kind, for the message.
+        entity: &'static str,
+        /// Revision the caller believed the row was at.
+        expected: i64,
+        /// Revision it is actually at.
+        actual: i64,
+    },
+
     /// A write named a record that belongs to a different school.
     ///
     /// Raised when an update addresses a row by identifier while naming a school that does

@@ -17,6 +17,7 @@
 //! Time Model groups.
 
 pub mod availability;
+pub mod curriculum;
 pub mod error;
 pub mod grid;
 pub mod membership;
@@ -69,7 +70,7 @@ pub fn app_info() -> Result<AppInfo, String> {
     Ok(AppInfo {
         version: env!("CARGO_PKG_VERSION"),
         debug: cfg!(debug_assertions),
-        phase: "1E — school setup",
+        phase: "2 — stage B, curriculum prerequisites",
     })
 }
 

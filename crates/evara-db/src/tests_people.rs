@@ -16,6 +16,7 @@ use uuid::Uuid;
 
 use evara_core::calendar::WorkingDays;
 
+use crate::repo::Expected;
 use crate::repo::people::{
     GroupKind, StudentGroupInput, StudentGroupMemberInput, StudentInput, TeacherInput,
     YearLevelInput,
@@ -172,6 +173,7 @@ fn a_teacher_can_be_created_edited_and_deactivated() {
         .people()
         .update_teacher(
             created.id,
+            Expected::Any,
             &TeacherInput {
                 code: Some("T-001".to_owned()),
                 family_name: "Okafor-Bell".to_owned(),
@@ -287,6 +289,7 @@ fn a_student_can_be_created_edited_and_deactivated() {
         .people()
         .update_student(
             created.id,
+            Expected::Any,
             &StudentInput {
                 code: Some("A-2301".to_owned()),
                 year_level_id: Some(year.id),
@@ -581,6 +584,7 @@ fn a_student_who_leaves_keeps_every_group_they_were_in() {
         .people()
         .update_student(
             pupil.id,
+            Expected::Any,
             &StudentInput {
                 is_active: false,
                 ..student(school_id, "Ines", "Varga")
@@ -885,6 +889,7 @@ fn a_group_cannot_become_its_own_ancestor() {
 
     let looped = project.db().people().update_student_group(
         top.id,
+        Expected::Any,
         &StudentGroupInput {
             parent_group_id: Some(middle.id),
             ..group(school_id, "Upper School", GroupKind::Cohort)

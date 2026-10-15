@@ -22,6 +22,7 @@ use evara_core::calendar::{WeeklyPosition, WorkingDays};
 use tempfile::TempDir;
 use uuid::Uuid;
 
+use crate::repo::Expected;
 use crate::repo::time_model::{
     CalendarDayInput, CalendarDayKind, CycleDay, CycleDayInput, CycleInput, CycleKind,
     MaterialisationRequest,
@@ -72,6 +73,7 @@ fn edit(project: &mut Project, cycle: Uuid, name: &str, day_count: i64) -> Resul
         .time_model()
         .update_cycle(
             cycle,
+            Expected::Any,
             &CycleInput {
                 school_id: school,
                 name: name.to_owned(),
@@ -276,6 +278,7 @@ fn the_schema_refuses_a_weekly_day_whose_weekday_disagrees_with_its_position() {
 
     let outcome = project.db().time_model().update_cycle_day(
         saturday,
+        Expected::Any,
         &CycleDayInput {
             cycle_id: cycle,
             ordinal: 6,
@@ -287,6 +290,7 @@ fn the_schema_refuses_a_weekly_day_whose_weekday_disagrees_with_its_position() {
 
     let outcome = project.db().time_model().update_cycle_day(
         saturday,
+        Expected::Any,
         &CycleDayInput {
             cycle_id: cycle,
             ordinal: 6,
@@ -503,6 +507,7 @@ fn a_cycles_kind_cannot_be_changed_after_it_is_created() {
         .time_model()
         .update_cycle(
             custom,
+            Expected::Any,
             &CycleInput {
                 school_id: school,
                 name: "Rotation".to_owned(),

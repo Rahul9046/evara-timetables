@@ -28,7 +28,8 @@ use evara_core::calendar::WorkingDays;
 use evara_core::time::CycleCoverage;
 use evara_db::{
     CalendarDay, CalendarDayInput, Cycle, CycleDay, CycleDayInput, CycleInput, CycleShape,
-    NonWorkingInstructionalDay, Period, PeriodInput, PeriodStructure, PeriodStructureInput,
+    Expected, NonWorkingInstructionalDay, Period, PeriodInput, PeriodStructure,
+    PeriodStructureInput,
 };
 use tauri::State;
 use uuid::Uuid;
@@ -82,9 +83,11 @@ pub fn setup_cycle_update(
     state: State<'_, AppState>,
     id: Uuid,
     input: CycleInput,
+    expected_rev: i64,
 ) -> SetupResult<Cycle> {
     let mut ws = workspace(&state)?;
-    Ok(ws.time_model()?.update_cycle(id, &input)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.time_model()?.update_cycle(id, expected, &input)?)
 }
 
 /// Deletes a cycle. Refused while it still has days or timeslots.
@@ -93,9 +96,11 @@ pub fn setup_cycle_delete(
     state: State<'_, AppState>,
     school_id: Uuid,
     id: Uuid,
+    expected_rev: i64,
 ) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.time_model()?.delete_cycle(school_id, id)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.time_model()?.delete_cycle(school_id, id, expected)?)
 }
 
 /// Which of a cycle's declared positions have a day, and which are missing.
@@ -171,9 +176,11 @@ pub fn setup_cycle_day_update(
     state: State<'_, AppState>,
     id: Uuid,
     input: CycleDayInput,
+    expected_rev: i64,
 ) -> SetupResult<CycleDay> {
     let mut ws = workspace(&state)?;
-    Ok(ws.time_model()?.update_cycle_day(id, &input)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.time_model()?.update_cycle_day(id, expected, &input)?)
 }
 
 /// Deletes a cycle day.
@@ -186,9 +193,11 @@ pub fn setup_cycle_day_delete(
     state: State<'_, AppState>,
     school_id: Uuid,
     id: Uuid,
+    expected_rev: i64,
 ) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.time_model()?.delete_cycle_day(school_id, id)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.time_model()?.delete_cycle_day(school_id, id, expected)?)
 }
 
 // -------------------------------------------------------------------- period structure
@@ -235,9 +244,13 @@ pub fn setup_period_structure_update(
     state: State<'_, AppState>,
     id: Uuid,
     input: PeriodStructureInput,
+    expected_rev: i64,
 ) -> SetupResult<PeriodStructure> {
     let mut ws = workspace(&state)?;
-    Ok(ws.time_model()?.update_period_structure(id, &input)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws
+        .time_model()?
+        .update_period_structure(id, expected, &input)?)
 }
 
 /// Deletes a bell schedule. Refused while it still has periods.
@@ -246,9 +259,13 @@ pub fn setup_period_structure_delete(
     state: State<'_, AppState>,
     school_id: Uuid,
     id: Uuid,
+    expected_rev: i64,
 ) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.time_model()?.delete_period_structure(school_id, id)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws
+        .time_model()?
+        .delete_period_structure(school_id, id, expected)?)
 }
 
 // ---------------------------------------------------------------------------- period
@@ -290,9 +307,11 @@ pub fn setup_period_update(
     state: State<'_, AppState>,
     id: Uuid,
     input: PeriodInput,
+    expected_rev: i64,
 ) -> SetupResult<Period> {
     let mut ws = workspace(&state)?;
-    Ok(ws.time_model()?.update_period(id, &input)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.time_model()?.update_period(id, expected, &input)?)
 }
 
 /// Deletes a period. Refused while a timeslot was materialised from it.
@@ -301,9 +320,11 @@ pub fn setup_period_delete(
     state: State<'_, AppState>,
     school_id: Uuid,
     id: Uuid,
+    expected_rev: i64,
 ) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.time_model()?.delete_period(school_id, id)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.time_model()?.delete_period(school_id, id, expected)?)
 }
 
 // ----------------------------------------------------------------------- calendar day
@@ -351,9 +372,11 @@ pub fn setup_calendar_day_update(
     state: State<'_, AppState>,
     id: Uuid,
     input: CalendarDayInput,
+    expected_rev: i64,
 ) -> SetupResult<CalendarDay> {
     let mut ws = workspace(&state)?;
-    Ok(ws.time_model()?.update_calendar_day(id, &input)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws.time_model()?.update_calendar_day(id, expected, &input)?)
 }
 
 /// Deletes a calendar day. The dates around it are untouched.
@@ -362,9 +385,13 @@ pub fn setup_calendar_day_delete(
     state: State<'_, AppState>,
     school_id: Uuid,
     id: Uuid,
+    expected_rev: i64,
 ) -> SetupResult<()> {
     let mut ws = workspace(&state)?;
-    Ok(ws.time_model()?.delete_calendar_day(school_id, id)?)
+    let expected = Expected::Rev(expected_rev);
+    Ok(ws
+        .time_model()?
+        .delete_calendar_day(school_id, id, expected)?)
 }
 
 /// Mapped teaching dates that land on a weekday the school does not work.

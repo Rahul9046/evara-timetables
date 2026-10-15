@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 use evara_core::calendar::WorkingDays;
 
+use crate::repo::Expected;
 use crate::repo::structure::{AcademicYearInput, CampusInput, SchoolInput, TermInput};
 use crate::repo::time_model::{
     CalendarDayInput, CalendarDayKind, CycleDayInput, CycleInput, CycleKind,
@@ -280,6 +281,7 @@ impl Project {
             .time_model()
             .update_cycle_day(
                 day,
+                Expected::Any,
                 &CycleDayInput {
                     cycle_id: existing.cycle_id,
                     ordinal: existing.ordinal,
@@ -397,6 +399,7 @@ fn a_cycle_cannot_be_shortened_below_a_day_it_already_has() {
         .time_model()
         .update_cycle(
             cycle,
+            Expected::Any,
             &CycleInput {
                 school_id: school,
                 name: "Rotation".to_owned(),
@@ -596,6 +599,7 @@ fn editing_the_default_cycle_leaves_it_the_default() {
         .time_model()
         .update_cycle(
             created.id,
+            Expected::Any,
             &CycleInput {
                 school_id: school,
                 name: "Six-day rotation".to_owned(),
@@ -743,6 +747,7 @@ fn an_update_consumes_exactly_one_revision() {
         .time_model()
         .update_cycle_day(
             day,
+            Expected::Any,
             &CycleDayInput {
                 cycle_id: cycle,
                 ordinal: 1,
@@ -1377,6 +1382,7 @@ fn changing_a_periods_kind_refreshes_the_grid_without_renaming_anything() {
         .time_model()
         .update_period(
             was_break,
+            Expected::Any,
             &PeriodInput {
                 period_structure_id: structure,
                 ordinal: 3,

@@ -179,6 +179,11 @@ pub const TRACKED_TABLES: &[&str] = &[
     "teacher_campus",
     "student_school_enrolment",
     "resource_campus",
+    // V14 — the Curriculum prerequisites: what a school teaches, and who can teach it.
+    "department",
+    "subject",
+    "teacher_qualification",
+    "teacher_department",
 ];
 
 /// Installs the change-log triggers for one table.

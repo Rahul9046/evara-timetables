@@ -37,7 +37,7 @@ use rusqlite::{OptionalExtension, Transaction};
 use uuid::Uuid;
 
 use super::row::{entity, opt_text, text};
-use super::{Stamp, delete, translate, update};
+use super::{Expected, Stamp, delete, translate, update};
 use crate::Database;
 use crate::error::{DbError, Result};
 
@@ -256,6 +256,7 @@ impl Availability<'_> {
                     "availability",
                     "availability",
                     existing,
+                    Expected::Any,
                     AVAILABILITY_ASSIGNMENTS,
                     rusqlite::params![
                         input.status.as_str(),
@@ -313,7 +314,7 @@ impl Availability<'_> {
     pub fn clear(&mut self, scope: &AvailabilityRuleInput) -> Result<bool> {
         self.db.write(|tx| match find_scope(tx, scope)? {
             Some(id) => {
-                delete(tx, "availability", "availability", id)?;
+                delete(tx, "availability", "availability", id, Expected::Any)?;
                 Ok(true)
             }
             None => Ok(false),
@@ -517,7 +518,7 @@ pub(crate) fn clear_for_entity(
     let removed = ids.len();
     for raw in ids {
         let id = super::row::parse_id_text("availability.id", &raw)?;
-        delete(tx, "availability", "availability", id)?;
+        delete(tx, "availability", "availability", id, Expected::Any)?;
     }
     Ok(removed)
 }
