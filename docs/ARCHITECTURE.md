@@ -99,6 +99,23 @@ never a second hand-maintained model.
 A rule in the UI, SQL in the solver, or a vendor name in the core are all architecture
 bugs.
 
+### The write contract is one of these rules
+
+`evara-db`'s `repo` module owns two things no repository may reimplement, because a second
+copy is a second place for them to go wrong:
+
+- **`Stamp` and `rev`/`updated_at` maintenance.** A repository never names those columns in
+  its own SQL; `repo::update` appends them. See
+  [OPEN-DECISIONS](OPEN-DECISIONS.md) D17.
+- **The revision precondition.** Since Stage B, `repo::update` and `repo::delete` take an
+  `Expected` and put it in the statement's `WHERE` clause, so a save built on a version
+  somebody else has since changed is refused rather than applied. A command handler never
+  constructs `Expected::Any`; it wraps the `expectedRev` the interface sent. See
+  [adr/0027](adr/0027-revisions-are-checked-on-write.md).
+
+A read-compare-write revision check would be an architecture bug of the same kind as a rule
+in the UI: it looks like the thing and is not.
+
 ---
 
 ## 4. Key documents

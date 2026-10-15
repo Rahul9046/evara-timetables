@@ -423,13 +423,12 @@ fn a_successful_save_advances_the_revision_exactly_once() {
 // rest of the surface is checked for is that it *carries* the precondition at all, which
 // is the thing a missed command would get wrong.
 
-/// Every single-record update, each offered a revision that is one behind.
+/// Every single-record update in Structure, each offered a revision that is wrong.
 #[test]
-fn every_single_record_update_refuses_a_stale_revision() {
+fn every_structure_update_refuses_a_stale_revision() {
     let mut project = Project::new();
     let north = project.north;
 
-    // --- structure
     let school_rev = project
         .db()
         .structure()
@@ -493,8 +492,14 @@ fn every_single_record_update_refuses_a_stale_revision() {
         },
     );
     expect_conflict(outcome, "academic year");
+}
 
-    // --- people
+/// The same for People.
+#[test]
+fn every_people_update_refuses_a_stale_revision() {
+    let mut project = Project::new();
+    let north = project.north;
+
     let level = project
         .db()
         .people()
@@ -553,8 +558,14 @@ fn every_single_record_update_refuses_a_stale_revision() {
         },
     );
     expect_conflict(outcome, "student");
+}
 
-    // --- curriculum, the tables this stage adds
+/// And for the two tables this stage adds.
+#[test]
+fn every_curriculum_update_refuses_a_stale_revision() {
+    let mut project = Project::new();
+    let north = project.north;
+
     let department = project
         .db()
         .curriculum()
@@ -604,9 +615,9 @@ fn every_single_record_update_refuses_a_stale_revision() {
     expect_conflict(outcome, "subject");
 }
 
-/// Every single-record delete, each offered a revision that is wrong.
+/// Every single-record delete in Structure, each offered a revision that is wrong.
 #[test]
-fn every_single_record_delete_refuses_a_stale_revision() {
+fn every_structure_delete_refuses_a_stale_revision() {
     let mut project = Project::new();
     let north = project.north;
 
@@ -646,6 +657,13 @@ fn every_single_record_delete_refuses_a_stale_revision() {
             .delete_academic_year(north, year, Expected::Rev(99)),
         "academic year",
     );
+}
+
+/// The same for People and the Curriculum.
+#[test]
+fn every_people_and_curriculum_delete_refuses_a_stale_revision() {
+    let mut project = Project::new();
+    let north = project.north;
 
     let level = project
         .db()

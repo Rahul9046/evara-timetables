@@ -194,6 +194,11 @@ the change feed exists to prevent.
 Enforcement lands with the first repository in Phase 1C: a shared update helper, plus a
 test asserting no entity table is written without bumping `rev`.
 
+**Stage B made this load-bearing rather than tidy.** `rev` now has two readers — the change
+feed and the write path, which puts it in every update's `WHERE` clause (D28). A trigger
+that bumped `rev` would make every second write in a transaction conflict with itself, so
+"no self-updating triggers" is now a correctness requirement and not only a preference.
+
 ### D18 — Where the project lifecycle lives ✅ RESOLVED 2026-10-06 (Phase 1B)
 
 `Workspace` is in `evara-db` rather than in a new orchestration crate or in the Tauri
@@ -384,6 +389,62 @@ spell's status is this school's own answer. `TeacherInSchool::is_effectively_act
 the single place the conjunction is computed for anything that has to *decide* rather than
 display.
 
+### D26 — Is `teacher_qualification` project-level or per school? ✅ RESOLVED 2026-10-15 (Stage B)
+
+**Project-level, with the subject supplying the school.** Audit decision 6 recommended it
+and flagged it as *"the one place the two scopes genuinely collide"*; Stage B implements it
+and records the reasoning as [adr/0025](adr/0025-teacher-qualifications-across-school-owned-subjects.md).
+
+`teacher_qualification (id, teacher_id, subject_id)` — no `school_id`, because
+`subject.school_id` already says it, and no membership requirement, because competence does
+not expire when employment does. A teacher shared between two schools who teaches
+Mathematics at both holds **two** qualifications, one per subject record, and remains
+**one** teacher.
+
+A project-wide subject catalogue was the alternative and was rejected: it needs an owner
+above the school, which ADR 0023 §7 settled there is none of; two schools' "Mathematics" are
+not the same thing; and it would make the single-school case — most of them — maintain a
+catalogue *and* an adoption list.
+
+The rule this hands to Stage C, which is the point of settling it now: **assigning a lesson
+requires the conjunction** — a qualification for the subject, an *active* membership at the
+school, and campus eligibility where the lesson's campus is constrained.
+
+### D27 — Where does a teacher's department live? ✅ RESOLVED 2026-10-15 (Stage B)
+
+**Its own table, and `teacher.department_id` is not added at all.**
+
+`V10` reserved the column and `V13` made it wrong: one column on a project-level identity
+cannot say "Mathematics at Northgate, Science at Southmoor", and would force either a second
+teacher record — the duplication `V13` removed — or an arbitrary choice of whose answer
+survives. The audit's own `teacher_school.department_id` fixes the scope and not the
+cardinality: Mathematics *and* Physics at one school is just as ordinary, and is how most
+science faculties are staffed.
+
+So `teacher_department (id, teacher_id, department_id)`, unique per *(teacher, department)*,
+with the school reached through `department.school_id` — and held to membership by a trigger
+pair, exactly as `V13` held campus eligibility.
+[adr/0026](adr/0026-teacher-departments-are-a-narrowing-of-membership.md).
+
+### D28 — What happens when two windows save the same record? ✅ RESOLVED 2026-10-15 (Stage B)
+
+**The second is refused with a typed error, and nothing is merged.**
+
+`ROADMAP.md` called this *"the last thing between this phase and done"* through three
+phases. The revision goes in the statement's `WHERE` clause, so the check and the write are
+one atomic operation rather than a read followed by a hopeful write — the sequence *read,
+compare in Rust, write* is explicitly not what this is, because it is the same race with a
+longer window.
+
+44 of the 84 mutation commands take `expectedRev`: every category where a lost update is
+possible. The other 40 are classified rather than omitted, and
+[adr/0027](adr/0027-revisions-are-checked-on-write.md) §3 and §4 is the inventory, including
+the four deliberate last-write-wins exceptions and the one residual gap.
+
+**No merging, no field-level resolution, no notion of whose edit matters more.** The user is
+told what happened and decides. A merge Evara performed itself would be a guess about
+intent, which is the one thing a timetable cannot afford.
+
 ## Technical risks
 
 ### R1 — Incremental scoring correctness (highest)
@@ -455,6 +516,14 @@ the schema rule a backstop that never fires in normal operation.
 It would still fire for a write that bypassed the repository — which cannot happen today,
 since a connection without `evara_site_id()` cannot write to a tracked table at all. Worth
 revisiting if any future edge genuinely needs SET NULL on a hot path.
+
+**Stage B chose `RESTRICT` rather than SET NULL for a new edge because of this risk.**
+`subject.department_id` is shaped exactly like an optional classification reference and is
+nevertheless `RESTRICT`, with `delete_department` refusing while any subject or teacher
+refers to it. ADR 0025 §6 argues it: a `SET NULL` there would rewrite every affected subject
+without incrementing a single revision, in the same stage that made the revision a
+precondition. The remedy — clearing a subject's department — is an ordinary edit through a
+real update, so each row's revision stays truthful.
 
 ### R8 — Single-file SQLite on synced folders — *detection and warning shipped*
 

@@ -46,6 +46,10 @@ const APP_VERSION: &str = "0.1.0-test";
 /// The SQL under test, read from the migration itself so the two cannot drift apart.
 const V14_SQL: &str = include_str!("../migrations/V14__curriculum_and_qualifications.sql");
 
+/// A fixed timestamp for rows written directly, so a migration test can assert that the
+/// upgrade left them byte for byte as they were.
+const STAMP: &str = "2026-01-01T00:00:00.000Z";
+
 // ================================================================== the trust fixture
 
 /// Two schools in one project. Named rather than numbered, because every assertion below
@@ -279,7 +283,6 @@ fn a_v13_project_upgrades_without_touching_a_single_row() {
     let dir = TempDir::new().expect("temp dir");
     let path = dir.path().join(format!("legacy.{PROJECT_EXTENSION}"));
     let site = Uuid::now_v7();
-    const STAMP: &str = "2026-01-01T00:00:00.000Z";
 
     let school = Uuid::now_v7();
     let teacher = Uuid::now_v7();
@@ -1385,12 +1388,19 @@ fn deleting_the_person_takes_their_qualifications_with_them() {
         .delete_teacher(north, teacher, Expected::Any)
         .expect("delete the teacher");
 
-    let remaining = trust
+    let remaining: Vec<Uuid> = trust
         .db()
         .curriculum()
         .subject_teachers(north, subject)
-        .expect("list");
-    assert!(remaining.is_empty());
+        .expect("list")
+        .into_iter()
+        .map(|entry| entry.teacher.id)
+        .collect();
+    assert_eq!(
+        remaining,
+        Vec::<Uuid>::new(),
+        "deleting the person must take their qualifications with them"
+    );
     // And the subject itself is untouched.
     assert!(
         trust
@@ -1737,14 +1747,15 @@ fn deleting_the_person_takes_their_department_associations_with_them() {
         .delete_teacher(north, teacher, Expected::Any)
         .expect("delete the teacher");
 
-    assert!(
-        trust
-            .db()
-            .curriculum()
-            .department_teachers(north, maths)
-            .expect("list")
-            .is_empty()
-    );
+    let remaining: Vec<Uuid> = trust
+        .db()
+        .curriculum()
+        .department_teachers(north, maths)
+        .expect("list")
+        .into_iter()
+        .map(|teacher| teacher.id)
+        .collect();
+    assert_eq!(remaining, Vec::<Uuid>::new());
     // And the department survives, which is the whole asymmetry: a department is a
     // school's own record, a person is not.
     assert!(

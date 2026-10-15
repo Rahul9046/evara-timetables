@@ -141,32 +141,36 @@ fn main() -> ExitCode {
 /// Grouped the way the repositories are, so a reader can check the list against
 /// `evara-db` rather than against nothing.
 fn write_all() -> (Vec<Generated>, Vec<String>) {
-    use evara_core::time::{CycleCoverage, CycleRotation};
+    let (mut files, mut errors, mut required) = entities();
+    let (more_files, more_errors, more_required) = time_model_and_interface();
+    files.extend(more_files);
+    errors.extend(more_errors);
+    required.extend(more_required);
+
+    errors.extend(check_dependencies_are_listed(&files, &required));
+    (files, errors)
+}
+
+/// What a project holds: Structure, People, shared identities, Curriculum, availability.
+///
+/// Split from [`time_model_and_interface`] because the list had outgrown one screen, and
+/// the seam is the one a reader already uses — the groups are `DATA-MODEL.md`'s.
+fn entities() -> (Vec<Generated>, Vec<String>, BTreeSet<(PathBuf, String)>) {
     use evara_db::{
         AcademicYear, AcademicYearInput, AvailabilityEntity, AvailabilityRule,
         AvailabilityRuleInput, AvailabilityStatus, Building, BuildingInput, BuildingWithCampuses,
-        CalendarDay, CalendarDayInput, CalendarDayKind, Campus, CampusInput, Cycle, CycleDay,
-        CycleDayInput, CycleInput, CycleKind, CycleShape, EnrolmentStatus, GridCell, GridPreview,
-        GroupKind, MaterialisationCounts, MaterialisationPlan, MaterialisationRequest,
-        NonWorkingInstructionalDay, Period, PeriodInput, PeriodKind, PeriodStructure,
-        PeriodStructureInput, PlanFingerprint, PlannedSlot, Resource, ResourceInput, Room,
-        RoomInput, RoomType, RoomTypeInput, RoomWithCampuses, School, SchoolDependents,
-        SchoolInput, Student, StudentEnrolment, StudentEnrolmentInput, StudentGroup,
-        StudentGroupInput, StudentGroupMember, StudentGroupMemberInput, StudentInSchool,
-        StudentInput, Teacher, TeacherCampus, TeacherCampusInput, TeacherInSchool, TeacherInput,
-        TeacherSchool, TeacherSchoolInput, Term, TermInput, Timeslot, TimeslotInput,
-        WeeklyCycleDay, YearLevel, YearLevelInput,
+        Campus, CampusInput, Department, DepartmentDependents, DepartmentInput, EnrolmentStatus,
+        GroupKind, QualifiedSubject, QualifiedTeacher, Resource, ResourceInput, Room, RoomInput,
+        RoomType, RoomTypeInput, RoomWithCampuses, School, SchoolDependents, SchoolInput, Student,
+        StudentEnrolment, StudentEnrolmentInput, StudentGroup, StudentGroupInput,
+        StudentGroupMember, StudentGroupMemberInput, StudentInSchool, StudentInput, Subject,
+        SubjectDependents, SubjectInput, Teacher, TeacherCampus, TeacherCampusInput,
+        TeacherDepartment, TeacherDepartmentInput, TeacherDepartmentView, TeacherInSchool,
+        TeacherInput, TeacherQualification, TeacherQualificationInput, TeacherSchool,
+        TeacherSchoolInput, Term, TermInput, YearLevel, YearLevelInput,
     };
-    use evara_db::{
-        Department, DepartmentDependents, DepartmentInput, QualifiedSubject, QualifiedTeacher,
-        Subject, SubjectDependents, SubjectInput, TeacherDepartment, TeacherDepartmentInput,
-        TeacherDepartmentView, TeacherQualification, TeacherQualificationInput,
-    };
-    use evara_desktop_lib::commands::AppInfo;
-    use evara_desktop_lib::commands::error::SetupError;
-    use evara_desktop_lib::commands::structure::{LogoLimits, SchoolLogoView};
 
-    let (files, mut errors, required) = contract![
+    contract![
         // Static structure.
         School,
         SchoolInput,
@@ -228,6 +232,24 @@ fn write_all() -> (Vec<Generated>, Vec<String>) {
         AvailabilityRuleInput,
         AvailabilityEntity,
         AvailabilityStatus,
+    ]
+}
+
+/// When it happens, and the few types the command handlers define themselves.
+fn time_model_and_interface() -> (Vec<Generated>, Vec<String>, BTreeSet<(PathBuf, String)>) {
+    use evara_core::time::{CycleCoverage, CycleRotation};
+    use evara_db::{
+        CalendarDay, CalendarDayInput, CalendarDayKind, Cycle, CycleDay, CycleDayInput, CycleInput,
+        CycleKind, CycleShape, GridCell, GridPreview, MaterialisationCounts, MaterialisationPlan,
+        MaterialisationRequest, NonWorkingInstructionalDay, Period, PeriodInput, PeriodKind,
+        PeriodStructure, PeriodStructureInput, PlanFingerprint, PlannedSlot, Timeslot,
+        TimeslotInput, WeeklyCycleDay,
+    };
+    use evara_desktop_lib::commands::AppInfo;
+    use evara_desktop_lib::commands::error::SetupError;
+    use evara_desktop_lib::commands::structure::{LogoLimits, SchoolLogoView};
+
+    contract![
         // Time model.
         Cycle,
         CycleInput,
@@ -265,10 +287,7 @@ fn write_all() -> (Vec<Generated>, Vec<String>) {
         // no business crossing as JSON.
         SchoolLogoView,
         LogoLimits,
-    ];
-
-    errors.extend(check_dependencies_are_listed(&files, &required));
-    (files, errors)
+    ]
 }
 
 /// Fails when a listed type depends on one that is not listed.
