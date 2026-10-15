@@ -155,10 +155,10 @@ fn migration_is_idempotent_across_reopens() {
 /// Guards the phase boundary.
 ///
 /// Phase 1C added the static half of the Structure group, Phase 1D the time half, and
-/// Phase 2 the People group, availability, shared identities and — in Stage B — the
-/// curriculum prerequisites. Everything past it — lessons, activities, constraints,
-/// timetables, operations — belongs to a later phase and must not arrive by accident
-/// alongside something else.
+/// Phase 2 the People group, availability, shared identities, the curriculum prerequisites
+/// in Stage B and the lessons that reference them in Stage C. Everything past it —
+/// constraints, timetables, operations — belongs to a later phase and must not arrive by
+/// accident alongside something else.
 #[test]
 fn the_schema_contains_exactly_the_phases_shipped_so_far() {
     let (_dir, path) = project();
@@ -180,6 +180,8 @@ fn the_schema_contains_exactly_the_phases_shipped_so_far() {
         vec![
             // V3 — Structure, static part.
             "academic_year".to_owned(),
+            // V15 — lessons: one placeable occurrence of a class section.
+            "activity".to_owned(),
             // V1 — bootstrap.
             "app_meta".to_owned(),
             // V11 — availability.
@@ -191,6 +193,13 @@ fn the_schema_contains_exactly_the_phases_shipped_so_far() {
             "calendar_day".to_owned(),
             "campus".to_owned(),
             "change_log".to_owned(),
+            // V15 — who attends a class section, who is named on its roster, one
+            // deliverable instance of a course, and who teaches it.
+            "class_enrolment".to_owned(),
+            "class_group".to_owned(),
+            "class_section".to_owned(),
+            "class_teacher".to_owned(),
+            "course".to_owned(),
             "cycle".to_owned(),
             "cycle_day".to_owned(),
             // V14 — the Curriculum prerequisites.
@@ -232,17 +241,16 @@ fn the_schema_contains_exactly_the_phases_shipped_so_far() {
     // Named individually rather than inferred from the list above, so that a later
     // domain arriving early fails with the name of the table that jumped the queue.
     for not_yet in [
-        // Phase 3 — the lessons Stage B's departments and subjects exist to be referenced
-        // by. `department`, `subject`, `teacher_qualification` and `teacher_department`
-        // left this list in V14 and joined the manifest above.
-        "course",
-        "class_section",
-        "class_teacher",
-        "class_group",
+        // Still Phase 3's, and deliberately not in V15. ADR 0029 §5 argues each one:
+        // `course_request` is Milestone 2's request-based sectioning (ADR 0006), and the
+        // per-activity override tables are room ALLOCATION, which is Phase 6.
+        //
+        // `course`, `class_section`, `class_teacher`, `class_group` and `activity` left
+        // this list in V15 and joined the manifest above. `enrolment` is not here under
+        // that name at all: V15 ships it as `class_enrolment`, because V13 already made
+        // "enrolment" mean a spell at a school throughout this crate.
         "enrolment",
         "course_request",
-        // Phase 4 — activities.
-        "activity",
         "activity_teacher",
         "activity_group",
         "activity_room_candidate",

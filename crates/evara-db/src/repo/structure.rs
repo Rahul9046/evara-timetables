@@ -514,6 +514,12 @@ pub struct SchoolDependents {
     /// qualification recorded against it, through the subject. Counting the subjects is
     /// enough to explain the refusal — a school is told to remove its curriculum, not
     /// handed an arithmetic of what hangs off it.
+    ///
+    /// `V15`'s courses, class sections, staffing, rosters and occurrences are the same
+    /// case and are deliberately **not** counted separately. Every one of them hangs off a
+    /// subject of this school, so a school with lessons always has subjects and the total
+    /// is already non-zero; adding five more figures would make the refusal longer without
+    /// making it clearer.
     pub subjects: i64,
     /// Teachers owned by the school.
     pub teachers: i64,
@@ -1568,6 +1574,12 @@ impl Structure<'_> {
         self.db.write(|tx| {
             require_same_school(tx, "room type", "room_type", id, school_id)?;
             detach_rooms(tx, "room_type_id", id)?;
+            // `V15`'s. A course may *require* a kind of room, and the requirement cannot be
+            // expressed once the kind itself is gone — so it is cleared here through
+            // `update`, exactly as the rooms above are, which keeps each affected course's
+            // `rev` truthful and makes the schema's `SET NULL` a backstop that never fires.
+            // R10 in OPEN-DECISIONS is why it is cleared here rather than left to SQLite.
+            detach_courses_from_room_type(tx, id)?;
             delete(tx, "room type", "room_type", id, expected)
         })
     }
@@ -1595,6 +1607,39 @@ fn detach_rooms(tx: &rusqlite::Transaction<'_>, column: &str, id: Uuid) -> Resul
             room_id,
             Expected::Any,
             &format!("{column} = ?"),
+            &[&null],
+        )?;
+    }
+    Ok(())
+}
+
+/// Clears `course.required_room_type_id` on every course that required this kind of room.
+///
+/// The same shape as [`detach_rooms`] and for the same reason: one `update` per row, so
+/// each affected course's revision is incremented and each change-log entry is truthful. A
+/// bulk `UPDATE` — or the schema's own `SET NULL` — would rewrite the rows without bumping
+/// a single revision, which is R10 in `OPEN-DECISIONS`.
+///
+/// Written here rather than in `lessons` because it is part of what deleting a room type
+/// *means*, and `delete_room_type` is the only caller.
+fn detach_courses_from_room_type(tx: &rusqlite::Transaction<'_>, id: Uuid) -> Result<()> {
+    let affected: Vec<String> = {
+        let mut stmt =
+            tx.prepare("SELECT id FROM course WHERE required_room_type_id = ? ORDER BY id")?;
+        stmt.query_map([text(id)], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+
+    for raw in affected {
+        let course_id = parse_id_text("course.id", &raw)?;
+        let null: Option<String> = None;
+        update(
+            tx,
+            "course",
+            "course",
+            course_id,
+            Expected::Any,
+            "required_room_type_id = ?",
             &[&null],
         )?;
     }

@@ -76,13 +76,17 @@ preserve the schema for individual requests, weighted requests, alternate reques
 elective line generation, sectioning, class balancing and student allocation. No
 request-based algorithm is implemented in Milestone 1.
 
-### D6 — Multi-period activities: one activity or several linked
+### D6 — Multi-period activities: one activity or several linked ✅ RESOLVED 2026-10-15 (Stage C)
 
-**Recommendation: one activity with `duration_periods = N`** occupying consecutive
-periods. Alternative (N single-period activities + a `CONSECUTIVE` link) makes "double
-period" a rule that can be switched off, which it is not. Consequence: every evaluator
-must reason about slot *ranges*, and room/teacher occupancy indexes are built over spans.
-Cheap to get right at the start, expensive to add later.
+**Decided as recommended: one activity with `duration_periods = N`** occupying consecutive
+periods, shipped in `V15`. The alternative (N single-period activities + a `CONSECUTIVE`
+link) makes "double period" a rule that can be switched off, which it is not. Consequence:
+every evaluator must reason about slot *ranges*, and room/teacher occupancy indexes are
+built over spans.
+
+Not to be confused with **D30**, which is the orthogonal question of how many *occurrences*
+a cycle's demand is. A double period is one activity of duration 2; three doubles a cycle is
+three such activities. The two decisions together are ADR 0029 §2.
 
 ### D7 — Is the teacher a planning variable?
 
@@ -125,6 +129,10 @@ effectively a blocker. Windows code signing has a similar cost. Not a dependency
 — a distribution-cost decision that needs an owner before Phase 11.
 
 ### D12 — Student clash semantics when membership is not modelled
+
+Still open, and `V15` deliberately did not narrow it: `class_enrolment` is a roster overlay
+with no scheduling meaning in Milestone 1 (ADR 0029 §4), so clash detection has exactly the
+same input it had before Stage C.
 
 Many schools will never enter individual students. Clash detection then relies on the
 `student_group` hierarchy (`parent_group_id`) to decide which groups overlap. This is a
@@ -444,6 +452,63 @@ the four deliberate last-write-wins exceptions and the one residual gap.
 **No merging, no field-level resolution, no notion of whose edit matters more.** The user is
 told what happened and decides. A merge Evara performed itself would be a guess about
 intent, which is the one thing a timetable cannot afford.
+
+### D29 — Is an unqualified teacher assignment refused or warned about? ✅ RESOLVED 2026-10-15 (Stage C)
+
+**Warned about. Employment and campus eligibility are the requirements; the qualification is
+advisory.**
+
+`ROADMAP.md` left this open deliberately and asked for an ADR, because ADR 0025 §4 had
+written Stage C's rule as a conjunction of three conditions and a school mid-term with one
+absent specialist wants the third to be a warning.
+
+The decisive argument is not convenience. Given a database that refuses to timetable an
+unqualified teacher and a school that must timetable one, what the school does is **add the
+qualification** — so the field then says "she can teach A-level Chemistry" when what was
+meant was "she is covering 9C on Tuesdays", and the one record the whole design rests on has
+been corrupted to get past a check. A rule that is routinely worked around is worse than no
+rule, because it leaves the data looking compliant.
+
+So an **active** `teacher_school` membership and campus eligibility are refusals — each a
+`V15` trigger pair *and* a repository check that can name the remedy — and a missing
+`teacher_qualification` is reported by `Lessons::assignable_teachers`, labelled in the
+picker, and shown as a banner naming the subject *before* the save.
+[adr/0028](adr/0028-assigning-a-lesson-warns-about-qualifications.md) has the reasoning, what
+"warning" means concretely, and the four alternatives rejected.
+
+ADR 0025's **ownership** model is untouched: nothing in Stage C writes or removes a
+qualification, and `tests_lessons::a_qualification_is_untouched_by_everything_this_stage_does`
+asserts it. A school that wants enforcement gets it in Phase 4, as a `teacher-qualified`
+constraint it can set to `HARD` per school — which is the honest home for a preference, and
+the reason this decision forecloses nothing.
+
+### D30 — Is a cycle's worth of lesson demand one row or several? ✅ RESOLVED 2026-10-15 (Stage C)
+
+**Several. One `activity` row is one placeable occurrence, and there is no
+`occurrences_per_cycle` column.**
+
+A class needing four single periods a cycle holds four rows; one needing a double holds one
+row with `duration_periods = 2`. The occurrence count is how many rows there are and the
+demand is `SUM(duration_periods)`, which is a sum rather than a product — four singles and a
+double is five occurrences and six period slots, and no single multiplication says that.
+
+Three things depend on it, and [adr/0029](adr/0029-a-lesson-is-a-course-a-section-and-its-occurrences.md)
+§2 sets them out: the solver's variable set becomes the rows with no expansion step;
+`timetable_entry`'s `UNIQUE (timetable_id, activity_id, timeslot_id)` already assumes it,
+*because* a multi-period activity occupies several slots; and the commonest real constraint in
+this product category — "spread these four Mathematics periods across four different days" —
+addresses the occurrences individually and needs them to be individual rows.
+
+The interface still asks the two numbers a school thinks in and states their product, so the
+model's shape is not the user's problem. Writing `count` rows is a **creation** under
+ADR 0027 §5, so no new concurrency model was needed — which is the practical payoff of rows
+over a count.
+
+Related, and settled with it: `course.periods_per_cycle` is a *declaration* and a section's
+rows are the *actual* demand; a difference between them is reported as advice and refuses
+nothing (ADR 0029 §3). And `class_enrolment` is a **roster overlay**, never added to the
+attending groups' size (ADR 0029 §4), which is what keeps ADR 0006's promise that a timetable
+can be built without a single student record.
 
 ## Technical risks
 

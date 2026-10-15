@@ -59,6 +59,12 @@ departments: number,
  * qualification recorded against it, through the subject. Counting the subjects is
  * enough to explain the refusal — a school is told to remove its curriculum, not
  * handed an arithmetic of what hangs off it.
+ *
+ * `V15`'s courses, class sections, staffing, rosters and occurrences are the same
+ * case and are deliberately **not** counted separately. Every one of them hangs off a
+ * subject of this school, so a school with lessons always has subjects and the total
+ * is already non-zero; adding five more figures would make the refusal longer without
+ * making it clearer.
  */
 subjects: number, 
 /**

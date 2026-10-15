@@ -11,4 +11,13 @@ total: number,
 /**
  * Teachers qualified to teach it.
  */
-qualifiedTeachers: number, };
+qualifiedTeachers: number, 
+/**
+ * Courses that are offerings of it.
+ *
+ * Added in Stage C. `ROADMAP.md` said in advance that this is where the new count
+ * goes — *"`course.subject_id` is `RESTRICT`, like every ownership edge, and
+ * `Curriculum::subject_dependents` is the place to add the new count so a refused
+ * subject delete goes on explaining itself."*
+ */
+courses: number, };

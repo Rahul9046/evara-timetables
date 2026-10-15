@@ -69,6 +69,13 @@ pub use crate::repo::curriculum::{
     QualifiedTeacher, Subject, SubjectDependents, SubjectInput, TeacherDepartment,
     TeacherDepartmentInput, TeacherDepartmentView, TeacherQualification, TeacherQualificationInput,
 };
+pub use crate::repo::lessons::{
+    Activity, ActivityInput, AssignedTeacher, AssignmentEligibility, AttendingGroup,
+    ClassEnrolment, ClassEnrolmentInput, ClassGroup, ClassGroupInput, ClassSection,
+    ClassSectionDependents, ClassSectionInput, ClassSectionView, ClassTeacher, ClassTeacherInput,
+    Course, CourseDependents, CourseInput, CourseView, Lessons, RosteredStudent, SectionDemand,
+    TaughtSection, TeacherCandidate,
+};
 pub use crate::repo::membership::{
     EnrolmentStatus, Membership, StudentEnrolment, StudentEnrolmentInput, StudentInSchool,
     TeacherCampus, TeacherCampusInput, TeacherInSchool, TeacherSchool, TeacherSchoolInput,
@@ -334,6 +341,21 @@ impl Database {
         Curriculum::new(self)
     }
 
+    /// Reads and writes courses, class sections, their staffing and audience, and the
+    /// occurrences they demand.
+    ///
+    /// Separate from [`Database::curriculum`] because the two answer different questions. A
+    /// subject is *what* a school teaches; a course is an **offering** of one, a class
+    /// section is one deliverable instance of that offering, and an activity is one
+    /// placeable occurrence of that instance. None of those four tables carries a
+    /// `school_id` — every one of them resolves its school through the chain
+    /// `subject -> course -> class_section -> activity`, which is
+    /// [adr/0029](../../docs/adr/0029-a-lesson-is-a-course-a-section-and-its-occurrences.md)
+    /// and `ROADMAP.md`'s Phase 3 note made concrete.
+    pub fn lessons(&mut self) -> Lessons<'_> {
+        Lessons::new(self)
+    }
+
     /// Reads the connection settings back from SQLite, for diagnostics and tests.
     ///
     /// # Errors
@@ -456,3 +478,7 @@ mod tests_multi_school;
 /// Stage 0B: shared teachers, students and resources, and what sharing must never permit.
 #[cfg(test)]
 mod tests_membership;
+
+/// Stage C: courses, class sections, who teaches and attends them, and what they demand.
+#[cfg(test)]
+mod tests_lessons;

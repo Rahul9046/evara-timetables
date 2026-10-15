@@ -7,9 +7,10 @@
  *
  * Stage 0C added **Schools** and restored **Resources**. Stage A then reordered the whole
  * list — people before the time model, year levels out of Students and into the structure
- * of the school year — and added a disabled **Lessons** entry so the order reads correctly
- * before Stage C fills it in. Both changes are product decisions, which is exactly why they
- * are asserted as data here.
+ * of the school year — and added a disabled **Lessons** entry so the order read correctly
+ * before there was a screen behind it. Stage C built that screen and removed the
+ * disabled-for-its-own-reason mechanism with it. All of those are product decisions, which
+ * is exactly why they are asserted as data here.
  *
  * So this covers the list as data *and* what the user actually sees, because the two can
  * disagree: the sidebar numbers steps from their array position, so an insertion has to
@@ -107,6 +108,9 @@ vi.mock("./Departments", () => ({
 vi.mock("./Subjects", () => ({
   Subjects: () => <div>stub:subjects</div>,
 }));
+vi.mock("./Lessons", () => ({
+  Lessons: (props: { school: School }) => <div>stub:lessons:{props.school.id}</div>,
+}));
 
 const { SchoolSetup, SECTIONS } = await import("./SchoolSetup");
 
@@ -161,8 +165,8 @@ describe("the section list", () => {
       // The shape of a school year, then the stages within it.
       "years",
       "yearLevels",
-      // What is taught. Departments and Subjects are Stage B; Lessons is Stage C, and
-      // comes after them because a lesson is taught *of* a subject.
+      // What is taught, and how often. Lessons comes after Departments and Subjects
+      // because a lesson is taught *of* a subject.
       "departments",
       "subjects",
       "lessons",
@@ -227,7 +231,7 @@ describe("the section list", () => {
  * reason, has no `render`, and cannot be opened.
  */
 describe("the Lessons entry", () => {
-  it("is in the list, after the subjects it will be taught of", () => {
+  it("is in the list, after the subjects it is taught of", () => {
     const of = (id: string) => SECTIONS.findIndex((s) => s.id === id);
     // Stage B inserted Departments and Subjects between Year levels and Lessons, which is
     // the dependency order: `course.subject_id` references a subject, so the subject has
@@ -238,39 +242,40 @@ describe("the Lessons entry", () => {
     expect(of("lessons")).toBe(of("teachers") - 1);
   });
 
-  it("is the only section that is not built, and says when it arrives", () => {
-    const later = SECTIONS.filter((s) => s.comingLater !== undefined);
-    expect(later.map((s) => s.id)).toEqual(["lessons"]);
-    expect(later[0]?.comingLater).toMatch(/Stage C/);
+  it("is built, so every section now has a screen", () => {
+    // Stage C's structural change to the shell. Until it landed, one entry carried a
+    // `comingLater` string and no `render`; the mechanism went with the stage that made it
+    // unnecessary, so "every section renders something" is now a property of the list
+    // rather than a thing to remember.
+    expect(SECTIONS.every((s) => typeof s.render === "function")).toBe(true);
   });
 
-  it("has nothing to render, so it cannot be opened by accident", () => {
-    expect(SECTIONS.find((s) => s.id === "lessons")?.render).toBeUndefined();
-  });
-
-  it("is offered as disabled, labelled, and distinct from a locked section", async () => {
+  it("is enabled once a school exists, and opens the Lessons screen", async () => {
     await open();
+
+    // The enablement arrives with the effect that settles the active school, so it is
+    // awaited rather than asserted on the first paint — `ready` is false until then for
+    // every school-owned section, Lessons included.
+    const lessons = within(nav()).getByRole("button", { name: /^Lessons/ });
+    await waitFor(() => expect(lessons.hasAttribute("disabled")).toBe(false));
+    expect(lessons.textContent).not.toContain("Coming later");
+    expect(lessons.textContent).not.toContain("Needs a school");
+
+    await userEvent.click(lessons);
+    expect(await screen.findByText(`stub:lessons:${SCHOOL.id}`)).toBeTruthy();
+  });
+
+  it("is gated on a school like every other school-owned section", async () => {
+    // It used to be disabled for a reason adding a school would not change. Now it is
+    // disabled for the ordinary reason, and the two must not read the same.
+    listSchools.mockResolvedValue([]);
+    render(<SchoolSetup />);
+    await screen.findByText(/^stub:schools:/);
 
     const lessons = within(nav()).getByRole("button", { name: /^Lessons/ });
     expect(lessons.hasAttribute("disabled")).toBe(true);
-    expect(lessons.textContent).toContain("Coming later");
-    expect(lessons.getAttribute("title")).toMatch(/Stage C/);
-    // Not "Needs a school": adding a school would not make it appear, and conflating the
-    // two reasons would promise something untrue.
-    expect(lessons.textContent).not.toContain("Needs a school");
-  });
-
-  it("renders no screen when clicked", async () => {
-    await open();
-
-    // A disabled button does not fire, so the body is unchanged — and the fallback in
-    // `SchoolSetup` means even a programmatic request could not blank it.
-    await userEvent.click(within(nav()).getByRole("button", { name: /^Lessons/ }));
-
-    expect(screen.getByText(/^stub:schools:/)).toBeTruthy();
-    // Nothing about lessons in the body — only the sidebar entry that announces them.
-    const body = document.querySelector(".setupBody") as HTMLElement;
-    expect(within(body).queryByText(/lesson/i)).toBeNull();
+    expect(lessons.textContent).toContain("Needs a school");
+    expect(lessons.getAttribute("title")).toMatch(/Add a school first/);
   });
 });
 
@@ -325,6 +330,7 @@ describe("navigating between the sections", () => {
     ["Resources", /^stub:resources$/],
     ["Academic years and terms", /^stub:years$/],
     ["Year levels", /^stub:yearLevels$/],
+    ["Lessons", /^stub:lessons:/],
     ["Teachers", /^stub:teachers$/],
     ["Students", /^stub:students$/],
     ["Student groups", /^stub:groups$/],
@@ -420,15 +426,17 @@ describe("before any school exists", () => {
     render(<SchoolSetup />);
     await screen.findByText(/^stub:schools:/);
 
-    // Fifteen school-owned sections, of which Lessons is disabled for its own reason.
+    // Fifteen school-owned sections, all locked for the one reason there now is. Stage C
+    // removed the second: Lessons used to be disabled for a reason adding a school would
+    // not change, and conflating the two would have promised something untrue.
     const locked = within(nav())
       .getAllByRole("button")
       .filter((b) => b.hasAttribute("disabled"));
     expect(locked).toHaveLength(15);
     expect(
       locked.filter((b) => b.textContent?.includes("Needs a school")),
-    ).toHaveLength(14);
-    expect(locked.filter((b) => b.textContent?.includes("Coming later"))).toHaveLength(1);
+    ).toHaveLength(15);
+    expect(locked.filter((b) => b.textContent?.includes("Coming later"))).toHaveLength(0);
   });
 
   it("opens on Schools, which is where the first school is added", async () => {

@@ -37,6 +37,7 @@ use uuid::Uuid;
 
 use super::availability::{AvailabilityEntity, clear_for_entity};
 use super::curriculum::{associations_of, qualifications_of};
+use super::lessons::{assignments_of_teacher, rosters_of_student, sections_of_group};
 use super::membership::{
     EnrolmentStatus, StudentEnrolmentInput, eligibility_of_teacher, enrolments_of_student,
     insert_enrolment, insert_membership, memberships_of_teacher, mirror_student_onto_enrolment,
@@ -359,6 +360,14 @@ impl People<'_> {
             // authoritative one. Leaving it to the schema's SET NULL would change rows
             // without incrementing `rev`, which is the thing this helper exists to avoid.
             detach_year_level(tx, "student_school_enrolment", id)?;
+            // `V15`'s. A course may name the year level it is for, and losing the year
+            // level leaves a complete course that is simply no longer labelled — so this is
+            // ADR 0010's "optional classification, therefore SET NULL" case, cleared here
+            // through `update` first so each affected course's `rev` stays truthful. It is
+            // deliberately *not* treated the way `subject.department_id` is: ADR 0025 §6
+            // departed from ADR 0010 there partly because refusing is what a school wants
+            // from a department still in use, and that argument does not carry over.
+            detach_year_level(tx, "course", id)?;
             delete(tx, "year level", "year_level", id, expected)
         })
     }
@@ -640,6 +649,21 @@ impl People<'_> {
                     Expected::Any,
                 )?;
             }
+            // `V15`'s. A class assignment has this person on one end of it, so it means
+            // nothing once they are gone — the same judgement the two rows above and the
+            // qualifications before them get. Note the asymmetry with
+            // `remove_teacher_from_school`, which *refuses* while an assignment remains:
+            // withdrawing one school's employment is an edit, and destroying the person is
+            // not. ADR 0025 §5 draws that line and ADR 0029 §7 extends it here.
+            for assignment in assignments_of_teacher(tx, id)? {
+                delete(
+                    tx,
+                    "class teacher",
+                    "class_teacher",
+                    assignment,
+                    Expected::Any,
+                )?;
+            }
             for membership in memberships_of_teacher(tx, id)? {
                 delete(
                     tx,
@@ -879,6 +903,15 @@ impl People<'_> {
                 return Err(DbError::StillReferenced { entity: "student" });
             }
 
+            // `V15`'s, and refused for exactly the reason group membership is: "she was in
+            // 9MAT-A" is history, and ADR 0018's rule is that where the dependent row *is*
+            // the history, the delete is refused and the remedy is made visible rather than
+            // performed. `Lessons::class_count_of_student` is what the confirmation reads
+            // first, so this message is the backstop and not the explanation.
+            if rosters_of_student(tx, id)? > 0 {
+                return Err(DbError::StillReferenced { entity: "student" });
+            }
+
             for enrolment in enrolments_of_student(tx, id)? {
                 delete(
                     tx,
@@ -895,7 +928,7 @@ impl People<'_> {
 
 // --------------------------------------------------------------------- student group
 
-const STUDENT_GROUP_COLUMNS: &str = "id, school_id, name, code, kind, year_level_id, \
+pub(crate) const STUDENT_GROUP_COLUMNS: &str = "id, school_id, name, code, kind, year_level_id, \
      parent_group_id, size, campus_id, created_at, updated_at, rev";
 
 const STUDENT_GROUP_ASSIGNMENTS: &str = "name = ?, code = ?, kind = ?, year_level_id = ?, \
@@ -1062,6 +1095,18 @@ impl People<'_> {
             )?;
 
             if children > 0 {
+                return Err(DbError::StillReferenced {
+                    entity: "student group",
+                });
+            }
+
+            // `V15`'s. A group attending three class sections is the audience of three
+            // lessons, and deleting it would take the audience out from under them — so
+            // this refuses, unlike the group's own memberships below, which it clears.
+            // `class_group.student_group_id` is `RESTRICT` for the reason every edge to a
+            // substantial record is, and `Lessons::class_count_of_group` reports the count
+            // so the confirmation explains before the button rather than after it.
+            if sections_of_group(tx, id)? > 0 {
                 return Err(DbError::StillReferenced {
                     entity: "student group",
                 });

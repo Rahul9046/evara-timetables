@@ -56,6 +56,7 @@ use crate::meta::now_iso8601;
 
 pub mod availability;
 pub mod curriculum;
+pub mod lessons;
 pub mod membership;
 pub mod people;
 pub(crate) mod row;

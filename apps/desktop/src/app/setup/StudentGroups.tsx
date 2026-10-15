@@ -53,6 +53,7 @@ import type {
 import {
   addGroupMember,
   countGroupMembers,
+  groupClassCount,
   createStudentGroup,
   deleteStudentGroup,
   describeSetupError,
@@ -116,6 +117,17 @@ export function StudentGroups(props: { school: School; context?: SetupContext })
    */
   const [memberCounts, setMemberCounts] = useState<Readonly<Record<string, number>>>({});
 
+  /**
+   * How many class sections each group attends, for the same confirmation.
+   *
+   * Stage C's addition, and the reason the delete can now be *refused* rather than merely
+   * explained: a group attending three class sections is the audience of three lessons,
+   * and `delete_student_group` refuses while any remain. Read up front for the same reason
+   * the member counts are — a dialogue that decides whether to offer a destructive button
+   * cannot wait for a round trip.
+   */
+  const [classCounts, setClassCounts] = useState<Readonly<Record<string, number>>>({});
+
   useEffect(() => {
     const rows = groups.items;
     if (!rows || rows.length === 0) return;
@@ -132,6 +144,26 @@ export function StudentGroups(props: { school: School; context?: SetupContext })
     ).then((pairs) => {
       if (!live) return;
       setMemberCounts(Object.fromEntries(pairs.filter((pair) => pair !== null)));
+    });
+    return () => {
+      live = false;
+    };
+  }, [groups.items]);
+
+  useEffect(() => {
+    const rows = groups.items;
+    if (!rows || rows.length === 0) return;
+    let live = true;
+    void Promise.all(
+      rows.map((group) =>
+        groupClassCount(group.id).then(
+          (count) => [group.id, count] as const,
+          () => null,
+        ),
+      ),
+    ).then((pairs) => {
+      if (!live) return;
+      setClassCounts(Object.fromEntries(pairs.filter((pair) => pair !== null)));
     });
     return () => {
       live = false;
@@ -248,6 +280,33 @@ export function StudentGroups(props: { school: School; context?: SetupContext })
     remove: (row) => deleteStudentGroup(school.id, row.id, row.rev),
     emptyHint:
       "No groups yet. A group is whoever a lesson is taught to — a class, a cohort, a homeroom or an elective set.",
+    /**
+     * A group a lesson is taught to cannot be deleted, and the count says so first.
+     *
+     * Stage C's `class_group.student_group_id` is `RESTRICT`, for the reason every edge to
+     * a substantial record is: deleting the audience out from under three class sections is
+     * almost always the wrong row, and the useful answer names what is in the way.
+     */
+    deleteBlockedBy: (row) => {
+      const classes = classCounts[row.id] ?? 0;
+      if (classes === 0) return null;
+      return (
+        <>
+          <p>
+            {classes === 1
+              ? "1 class section is taught to this group"
+              : `${classes} class sections are taught to this group`}
+            .
+          </p>
+          <p className="muted">
+            A class section&rsquo;s audience is what a timetable is built around, so
+            deleting the group will not quietly take it. Remove the group from those
+            sections under <strong>Lessons</strong> — each one explicitly — and the delete
+            is then offered.
+          </p>
+        </>
+      );
+    },
     deleteNote: (row) => {
       const listed = memberCounts[row.id];
       if (listed === undefined || listed === 0) {

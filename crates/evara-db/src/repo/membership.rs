@@ -54,6 +54,7 @@ use rusqlite::{OptionalExtension, Transaction, types::ToSql};
 use uuid::Uuid;
 
 use super::curriculum::associations_in_school;
+use super::lessons::assignments_in_school;
 use super::people::{Student, Teacher};
 use super::row::{entity, opt_text, parse_id_text, text};
 use super::{Expected, Stamp, delete, require_same_school, translate, update};
@@ -101,7 +102,7 @@ entity! {
     }
 }
 
-const TEACHER_SCHOOL_COLUMNS: &str =
+pub(crate) const TEACHER_SCHOOL_COLUMNS: &str =
     "id, teacher_id, school_id, is_active, created_at, updated_at, rev";
 
 /// A teacher as one school sees them: the shared identity, and this school's view of it.
@@ -325,6 +326,30 @@ impl Membership<'_> {
                               cannot be removed from them. Clear “Currently teaching” to \
                               record that they have left, or delete the teacher."
                         .to_owned(),
+                });
+            }
+
+            // Class assignments are REFUSED rather than cleared, which is the opposite of
+            // the two narrowings below, and `V15`'s
+            // `teacher_school_delete_requires_no_class_assignment` is the schema half of
+            // that refusal. The asymmetry is deliberate and ADR 0029 §7 argues it: campus
+            // eligibility and a department association are organisational labels that mean
+            // nothing once the employment has gone, while a class assignment is scheduling
+            // input a timetable will be built on. ADR 0018's rule applies — where the
+            // dependent row is real, the delete is refused and the remedy is made visible.
+            //
+            // The remedy is also the one a school usually wants: recording that somebody
+            // has left is `set_teacher_membership_active(false)`, which keeps every
+            // assignment they have and stops them being offered new ones.
+            let classes = assignments_in_school(tx, teacher_id, school_id)?;
+            if classes > 0 {
+                return Err(DbError::Invalid {
+                    message: format!(
+                        "This teacher still teaches {classes} of this school's class \
+                         sections, so this school cannot be removed from them. Take them \
+                         off those sections first, or clear “Currently teaching” to record \
+                         that they have left — which keeps the classes they already have."
+                    ),
                 });
             }
 

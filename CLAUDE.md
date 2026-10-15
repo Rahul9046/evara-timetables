@@ -94,7 +94,41 @@ disagree about whether a placement is legal, the product is broken.
   only — a cascade inside another operation's transaction, a mutation whose contract is not
   a revision, or a test. **No command handler constructs one.** See
   [docs/adr/0027](docs/adr/0027-revisions-are-checked-on-write.md), whose §3 is the
-  inventory of all 84 mutations.
+  inventory of the 84 mutations that existed when it was written;
+  [adr/0029](docs/adr/0029-a-lesson-is-a-course-a-section-and-its-occurrences.md) §8 extends
+  it to Stage C's 16, for 100 mutations of which 53 carry a revision. A new mutation is
+  added to one of those inventories, never left out of both.
+- **A lesson is a course, a class section, and one row per occurrence.** `subject → course →
+  class_section → activity`, and **no table in that chain carries a `school_id`** — every
+  school-owned read and write resolves one through the chain with `require_school_owner`.
+  One `activity` row is **one placeable occurrence**: four single periods a cycle is four
+  rows, and there is no `occurrences_per_cycle` column, because `timetable_entry` is unique
+  on `(timetable_id, activity_id, timeslot_id)` and Phase 4's "spread these across four
+  days" has to address the occurrences individually. `split_index` is assigned once and
+  **never renumbered**. The interface asks *periods per lesson* and *times per cycle* and
+  writes `count` rows, which is a creation and so carries no revision precondition.
+  [adr/0029](docs/adr/0029-a-lesson-is-a-course-a-section-and-its-occurrences.md).
+- **Giving somebody a lesson needs employment and eligibility, and only *warns* about a
+  qualification.** An **active** `teacher_school` membership at the section's school and
+  campus eligibility where the section names a campus are refusals — a trigger pair each,
+  plus a repository check that names the remedy. A missing `teacher_qualification` is
+  reported and refuses nothing: a database that refused would be answered by entering a
+  qualification somebody does not have, which destroys the record it was protecting. This
+  amends [adr/0025](docs/adr/0025-teacher-qualifications-across-school-owned-subjects.md)
+  §4's conjunction and leaves its ownership model alone — **nothing in the lessons code
+  writes or removes a qualification.**
+  [adr/0028](docs/adr/0028-assigning-a-lesson-warns-about-qualifications.md).
+- **A class section's audience is its student groups. The individual roster is never added to
+  it.** A section taught to a group of 28 that also names four children has an audience of
+  28, because those four are among the 28. ADR 0006 requires a full timetable to be buildable
+  from `student_group.size` with no student records at all, so `class_enrolment` is optional
+  everywhere and has no scheduling meaning in Milestone 1.
+- **Never report that a demand *can* be scheduled.** `evara_core::lessons` reports
+  impossibility only — an occurrence longer than any unbroken run of teaching periods, a
+  total beyond every slot in the cycle. A demand that is merely difficult is not reported,
+  and before the school has a cycle and a bell schedule nothing is judged at all. Only a
+  solver can say a timetable exists, and claiming otherwise spends the user's trust on a
+  guess.
 - **A qualification is a property of the person; a department association is a narrowing of
   school membership.** The two look alike and are governed oppositely:
   `teacher_qualification` carries no `school_id`, requires no membership and survives one
