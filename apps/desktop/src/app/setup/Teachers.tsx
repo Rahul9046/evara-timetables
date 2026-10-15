@@ -102,6 +102,7 @@ import {
 import { AvailabilityPanel } from "./AvailabilityGrid";
 import { PersonSearch, type Candidate } from "./PersonSearch";
 import type { SetupContext } from "./SchoolSetup";
+import { TeacherCurriculum } from "./TeacherCurriculum";
 import { TeacherSchools } from "./TeacherSchools";
 import { useList } from "./useList";
 
@@ -375,6 +376,14 @@ export function Teachers(props: { school: School; context?: SetupContext }) {
         onClick: (row) => setChosenId(row.id),
       },
       {
+        // The same selection drives both panels below, so one button is enough to reach
+        // either — but they are named separately because they are different questions and
+        // a user looking for "what can she teach?" should not have to know it lives behind
+        // a button called Schools.
+        label: "Curriculum",
+        onClick: (row) => setChosenId(row.id),
+      },
+      {
         label: "Go to home school",
         onClick: (row) => selectSchool?.(row.schoolId),
         blockedBy: (row) =>
@@ -555,6 +564,17 @@ export function Teachers(props: { school: School; context?: SetupContext }) {
       />
 
       <TeacherSchools
+        school={school}
+        schools={schools}
+        teacher={chosen}
+        onSelectSchool={(id) => selectSchool?.(id)}
+        onChanged={refreshAll}
+      />
+
+      {/* Stage B. Below the relationships rather than above them, because a department
+          association needs the school membership the panel above edits — so the order on
+          screen is the order the prerequisites run in. */}
+      <TeacherCurriculum
         school={school}
         schools={schools}
         teacher={chosen}

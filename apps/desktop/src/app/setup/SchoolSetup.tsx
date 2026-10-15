@@ -50,6 +50,7 @@ import { AcademicYearsAndTerms } from "./AcademicYearsAndTerms";
 import { CalendarMapping } from "./CalendarMapping";
 import { CampusesAndBuildings } from "./CampusesAndBuildings";
 import { CyclesAndCycleDays } from "./CyclesAndCycleDays";
+import { Departments } from "./Departments";
 import { GridPreviewSection } from "./GridPreviewSection";
 import { PeriodStructuresAndPeriods } from "./PeriodStructuresAndPeriods";
 import { ResourcesAndSharing } from "./ResourcesAndSharing";
@@ -57,6 +58,7 @@ import { RoomsAndRoomTypes } from "./RoomsAndRoomTypes";
 import { SchoolDetails } from "./SchoolDetails";
 import { Schools } from "./Schools";
 import { StudentGroups } from "./StudentGroups";
+import { Subjects } from "./Subjects";
 import { Students } from "./Students";
 import { Teachers } from "./Teachers";
 import { YearLevels } from "./YearLevels";
@@ -119,7 +121,7 @@ interface Section {
 }
 
 /**
- * The fifteen sections, in the order a school is actually configured.
+ * The seventeen sections, in the order a school is actually configured.
  *
  * Exported so a test can assert the list rather than the rendering: the set of sections and
  * their order is a product decision, and a silently dropped or reordered one would
@@ -140,9 +142,16 @@ interface Section {
  * | 1–2 | Schools, School details | which institution |
  * | 3–5 | Campuses, Rooms, Resources | where, and with what |
  * | 6–7 | Academic years, Year levels | the shape of a school year |
- * | 8 | Lessons | *Stage C* — what is taught |
- * | 9–11 | Teachers, Students, Student groups | who |
- * | 12–15 | Cycles, Bell schedules, Calendar, Grid preview | when |
+ * | 8–9 | Departments, Subjects | what is taught |
+ * | 10 | Lessons | *Stage C* — how often, and to whom |
+ * | 11–13 | Teachers, Students, Student groups | who |
+ * | 14–17 | Cycles, Bell schedules, Calendar, Grid preview | when |
+ *
+ * **Stage B inserted Departments and Subjects at 8 and 9**, before the Lessons entry that
+ * announces Stage C rather than after it, because that is the dependency: a lesson is
+ * taught *of* a subject. Nothing addresses a section by position — `openSection` and the
+ * tests use the identifier — so the insertion changed no behaviour anywhere it was not
+ * meant to, which is the property Stage A's reorder established and this one relies on.
  *
  * **The one genuine dependency this inverts is availability**, which is set against a
  * cycle's days and a bell schedule's periods and therefore appears on the Teachers, Rooms
@@ -211,14 +220,29 @@ export const SECTIONS: readonly Section[] = [
     needsSchool: true,
     render: (school) => <YearLevels school={school} />,
   },
-  // What is taught. Stage C; see `Section.comingLater`.
+  // What is taught. Departments and subjects are Stage B; Lessons is Stage C — see
+  // `Section.comingLater`.
+  {
+    id: "departments",
+    label: "Departments",
+    blurb: "How the teaching of this school is organised",
+    needsSchool: true,
+    render: (school, context) => <Departments school={school} context={context} />,
+  },
+  {
+    id: "subjects",
+    label: "Subjects",
+    blurb: "What this school teaches",
+    needsSchool: true,
+    render: (school, context) => <Subjects school={school} context={context} />,
+  },
   {
     id: "lessons",
     label: "Lessons",
     blurb: "What is taught, and how often",
     needsSchool: true,
     comingLater:
-      "Lessons arrive in Stage C, after Subjects and Departments. The order is shown now so the rest of the workflow reads correctly.",
+      "Lessons arrive in Stage C. Departments and Subjects above are the prerequisites, and they are available now.",
   },
   // Who. After the year levels they are placed in, and before the rotation they are
   // timetabled into.
