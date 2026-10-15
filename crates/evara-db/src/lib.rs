@@ -403,6 +403,12 @@ mod tests_support;
 mod tests;
 
 #[cfg(test)]
+mod tests_concurrency;
+
+#[cfg(test)]
+mod tests_curriculum;
+
+#[cfg(test)]
 mod tests_lifecycle;
 
 #[cfg(test)]
