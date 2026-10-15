@@ -406,12 +406,12 @@ static TEACHERS: &[TemplateColumn] = &[
     column!("departmentCodes", "Department Codes", required: false, code: true, example: "MAT",
         aka: ["Departments", "Department", "Department Code"],
         "Optional. One or more of this school's existing department codes, separated by \
-         semicolons. Departments are never created by a teacher import — import them \
-         first if they are missing."),
+         commas or semicolons. Departments are never created by a teacher import — import \
+         them first if they are missing."),
     column!("campusCodes", "Campus Codes", required: false, code: true, example: "NGM",
         aka: ["Campuses", "Campus", "Campus Code", "Site"],
-        "Optional. One or more of this school's existing campus codes, separated by \
-         semicolons. Leaving this blank means the teacher is not narrowed to particular \
+        "Optional. One or more of this school's existing campus codes, separated by commas \
+         or semicolons. Leaving this blank means the teacher is not narrowed to particular \
          campuses, which is what most schools want."),
 ];
 

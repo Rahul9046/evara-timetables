@@ -105,6 +105,12 @@ States. There is no reading of that file which is safe to guess, so it is an err
 the one format Evara reads. A real date in an Excel date-formatted cell is read correctly
 whatever the display format, because the stored value is unambiguous.
 
+### Columns that hold a list
+
+A few columns take more than one value — a teacher's departments, a teacher's campuses.
+Separate them with **commas or semicolons**, whichever you would naturally type:
+`MAT, SCI` and `MAT; SCI` are the same thing. Surrounding spaces are ignored.
+
 ### Yes/no columns
 
 `Yes`, `No`, `Y`, `N`, `True`, `False`, `T`, `F`, `1`, `0`, `Active`, `Inactive`, in any

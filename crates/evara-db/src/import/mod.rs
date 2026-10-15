@@ -608,7 +608,12 @@ impl<'a> Row<'a> {
         let Some(raw) = self.code(field) else {
             return Vec::new();
         };
-        raw.split(';')
+        // Both separators, because which one a user types depends on the file they are
+        // in: a comma is the natural thing to write in a workbook cell, and a semicolon is
+        // what somebody who has been bitten by a CSV writes. Accepting one and refusing the
+        // other turns "MAT, SCI" into a hunt for a department called "MAT, SCI" — which is
+        // exactly what it did before this line.
+        raw.split([';', ','])
             .map(str::trim)
             .filter(|part| !part.is_empty())
             .map(ToOwned::to_owned)

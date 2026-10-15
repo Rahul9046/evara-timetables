@@ -181,8 +181,16 @@ fn teachers(
             school_id,
             &read.department_keys,
             Reference::Department,
+            "departmentCodes",
         )?,
-        campuses: resolve_all(conn, row, school_id, &read.campus_keys, Reference::Campus)?,
+        campuses: resolve_all(
+            conn,
+            row,
+            school_id,
+            &read.campus_keys,
+            Reference::Campus,
+            "campusCodes",
+        )?,
     };
     if row.has_error() {
         return Ok(invalid(row, label));
@@ -1966,6 +1974,22 @@ fn resolve_one(
     let Some(needle) = needle else {
         return Ok(None);
     };
+    resolve_in(conn, row, school_id, needle, kind, kind.field())
+}
+
+/// Resolves one reference, reporting a miss against a named column.
+///
+/// `field` rather than `kind.field()` because a list of references lives in a *plural*
+/// column — `departmentCodes` — and a finding naming the singular one would point the form
+/// at a field this import does not have, leaving the offending input unmarkable.
+fn resolve_in(
+    conn: &Connection,
+    row: &mut Row<'_>,
+    school_id: Uuid,
+    needle: &str,
+    kind: Reference,
+    field: &'static str,
+) -> Result<Option<Uuid>> {
     let found = match kind {
         Reference::Department => lookup::department_by_key(conn, school_id, needle)?,
         Reference::Campus => lookup::campus_by_key(conn, school_id, needle)?,
@@ -1976,7 +2000,7 @@ fn resolve_one(
         Found::One((id, _)) => Ok(Some(id)),
         Found::None => {
             row.note(RowFinding::error(
-                kind.field(),
+                field,
                 format!(
                     "this school has no {} called “{needle}”. Nothing is created to fill a \
                      gap — add it first, or clear the cell.",
@@ -1987,7 +2011,7 @@ fn resolve_one(
         }
         Found::Many(_) => {
             row.note(RowFinding::error(
-                kind.field(),
+                field,
                 format!(
                     "more than one of this school's {}s answers to “{needle}”.",
                     kind.noun()
@@ -2005,10 +2029,11 @@ fn resolve_all(
     school_id: Uuid,
     needles: &[String],
     kind: Reference,
+    field: &'static str,
 ) -> Result<Vec<Uuid>> {
     let mut found = Vec::new();
     for needle in needles {
-        if let Some(id) = resolve_one(conn, row, school_id, Some(needle), kind)? {
+        if let Some(id) = resolve_in(conn, row, school_id, needle, kind, field)? {
             found.push(id);
         }
     }

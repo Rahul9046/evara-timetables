@@ -649,6 +649,134 @@ fn a_record_that_disagrees_with_the_file_is_never_overwritten_without_an_answer(
 }
 
 #[test]
+fn a_teacher_row_can_narrow_membership_to_departments_and_campuses() {
+    let mut fixture = Fixture::new();
+    let north = fixture.north;
+    let maths = fixture.department(north, "Mathematics", "MAT");
+    let campus = fixture.north_main;
+
+    let fields = [
+        "code",
+        "givenName",
+        "familyName",
+        "departmentCodes",
+        "campusCodes",
+    ];
+    let sheet = table(&fields, &[&["T-0007", "Ada", "Lovelace", "MAT", "NGM"]]);
+    let map = mapping(&fields);
+    let plan = fixture
+        .db()
+        .import()
+        .plan(north, ImportKind::Teachers, &sheet, &map, &[])
+        .expect("plan");
+    assert_eq!(plan.counts.create, 1, "{:?}", plan.rows);
+    fixture
+        .db()
+        .import()
+        .apply(
+            north,
+            ImportKind::Teachers,
+            &sheet,
+            &map,
+            &[],
+            &plan.fingerprint,
+        )
+        .expect("apply");
+
+    // Both are narrowings of this school's membership (ADR 0026), written in the same
+    // transaction as the teacher — so there is no window in which a department association
+    // exists without the membership its trigger pair holds it to.
+    let department: String = fixture
+        .db()
+        .read(|conn| {
+            conn.query_row("SELECT department_id FROM teacher_department", [], |row| {
+                row.get(0)
+            })
+            .map_err(DbError::from)
+        })
+        .expect("read the department association");
+    assert_eq!(department, maths.to_string());
+    let eligible: String = fixture
+        .db()
+        .read(|conn| {
+            conn.query_row("SELECT campus_id FROM teacher_campus", [], |row| row.get(0))
+                .map_err(DbError::from)
+        })
+        .expect("read the campus eligibility");
+    assert_eq!(eligible, campus.to_string());
+
+    // And the same file again adds neither: a narrowing either exists or it does not.
+    let plan = fixture
+        .db()
+        .import()
+        .plan(north, ImportKind::Teachers, &sheet, &map, &[])
+        .expect("plan again");
+    assert_eq!(plan.counts.unchanged, 1, "{:?}", plan.rows);
+    assert_eq!(fixture.count("SELECT COUNT(*) FROM teacher_department"), 1);
+    assert_eq!(fixture.count("SELECT COUNT(*) FROM teacher_campus"), 1);
+}
+
+#[test]
+fn a_teacher_row_naming_a_department_this_school_does_not_have_is_an_error() {
+    let mut fixture = Fixture::new();
+    let north = fixture.north;
+    let south = fixture.south;
+    // The department exists — at the other school. Resolution is scoped, so it is simply
+    // not there to be found, and nothing is created to fill the gap.
+    fixture.department(south, "Mathematics", "MAT");
+
+    let fields = ["code", "givenName", "familyName", "departmentCodes"];
+    let sheet = table(&fields, &[&["T-0007", "Ada", "Lovelace", "MAT"]]);
+    let plan = fixture
+        .db()
+        .import()
+        .plan(north, ImportKind::Teachers, &sheet, &mapping(&fields), &[])
+        .expect("plan");
+
+    assert_eq!(plan.rows[0].action, RowAction::Invalid);
+    assert!(!plan.can_apply());
+    assert_eq!(
+        fixture.count("SELECT COUNT(*) FROM department"),
+        1,
+        "the other school's department is the only one, and no placeholder was made"
+    );
+    assert_eq!(fixture.count("SELECT COUNT(*) FROM teacher"), 0);
+}
+
+#[test]
+fn a_teacher_row_can_name_several_departments_in_one_cell() {
+    let mut fixture = Fixture::new();
+    let north = fixture.north;
+    fixture.department(north, "Mathematics", "MAT");
+    fixture.department(north, "Science", "SCI");
+
+    let fields = ["code", "givenName", "familyName", "departmentCodes"];
+    // A teacher in two departments is ordinary, and a spreadsheet has one cell for it.
+    let sheet = table(&fields, &[&["T-0007", "Ada", "Lovelace", "MAT, SCI"]]);
+    let map = mapping(&fields);
+    let plan = fixture
+        .db()
+        .import()
+        .plan(north, ImportKind::Teachers, &sheet, &map, &[])
+        .expect("plan");
+    assert_eq!(plan.counts.create, 1, "{:?}", plan.rows);
+    fixture
+        .db()
+        .import()
+        .apply(
+            north,
+            ImportKind::Teachers,
+            &sheet,
+            &map,
+            &[],
+            &plan.fingerprint,
+        )
+        .expect("apply");
+
+    assert_eq!(fixture.count("SELECT COUNT(*) FROM teacher_department"), 2);
+}
+
+#[test]
 fn a_name_that_matches_asks_rather_than_merging() {
     let mut fixture = Fixture::new();
     let north = fixture.north;
