@@ -44,14 +44,20 @@ const cycleShape =
 vi.mock("../../ipc/setup", () => ({
   listCycles: () => listCycles(),
   createCycle: (input: unknown) => createCycle(input),
-  updateCycle: (id: string, input: unknown) => updateCycle(id, input),
+  updateCycle: (id: string, rev: number, input: unknown) =>
+    updateCycle(id, rev, input),
   deleteCycle: (id: string) => deleteCycle(id),
   listCycleDays: (cycleId: string) => listCycleDays(cycleId),
   createCycleDay: (input: unknown) => createCycleDay(input),
-  updateCycleDay: (id: string, input: unknown) => updateCycleDay(id, input),
+  updateCycleDay: (id: string, rev: number, input: unknown) =>
+    updateCycleDay(id, rev, input),
   deleteCycleDay: (id: string) => deleteCycleDay(id),
   cycleShape: (cycleId: string, workingDays: readonly number[]) =>
     cycleShape(cycleId, workingDays),
+  isConflict: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { kind?: string }).kind === "conflict",
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
       ? String((error as { message: unknown }).message)
@@ -462,7 +468,7 @@ describe("existing cycle records", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateCycle).toHaveBeenCalled());
-    expect(updateCycle).toHaveBeenCalledWith("cycle-1", {
+    expect(updateCycle).toHaveBeenCalledWith("cycle-1", 4, {
       schoolId: "school-1",
       name: "Fortnight",
       // Read from the row and sent straight back. The backend refuses a change, and the
@@ -930,7 +936,7 @@ describe("a weekly cycle", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateCycleDay).toHaveBeenCalled());
-    expect(updateCycleDay).toHaveBeenCalledWith("day-1", {
+    expect(updateCycleDay).toHaveBeenCalledWith("day-1", 1, {
       cycleId: "cycle-1",
       ordinal: 1,
       label: "Lundi",

@@ -31,12 +31,17 @@ vi.mock("../../ipc/setup", () => ({
   deleteCampus: vi.fn(() => Promise.resolve()),
   listBuildings: (campusId: string) => listBuildings(campusId),
   createBuilding: (input: unknown, shared: unknown) => createBuilding(input, shared),
-  updateBuilding: (id: string, input: unknown) => updateBuilding(id, input),
+  updateBuilding: (id: string, rev: number, input: unknown) =>
+    updateBuilding(id, rev, input),
   shareBuilding: (buildingId: string, campusId: string) =>
     shareBuilding(buildingId, campusId),
   unshareBuilding: (schoolId: string, buildingId: string, campusId: string) =>
     unshareBuilding(schoolId, buildingId, campusId),
   deleteBuilding: (id: string) => deleteBuilding(id),
+  isConflict: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { kind?: string }).kind === "conflict",
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
       ? String((error as { message: unknown }).message)
@@ -281,7 +286,7 @@ describe("editing the share set", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateBuilding).toHaveBeenCalled());
-    expect(updateBuilding).toHaveBeenCalledWith("b-sports", {
+    expect(updateBuilding).toHaveBeenCalledWith("b-sports", 1, {
       campusId: "north",
       name: "Sports Hall",
     });

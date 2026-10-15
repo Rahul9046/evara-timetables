@@ -27,6 +27,10 @@ vi.mock("../../ipc/setup", () => ({
   getSchoolLogoLimits: () => getSchoolLogoLimits(),
   setSchoolLogo: (id: string, data: string) => setSchoolLogo(id, data),
   clearSchoolLogo: () => clearSchoolLogo(),
+  isConflict: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { kind?: string }).kind === "conflict",
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
       ? String((error as { message: unknown }).message)

@@ -266,7 +266,12 @@ export function TeacherSchools(props: {
                               row.isActive
                                 ? setPending({ kind: "deactivate", membership: row })
                                 : run(() =>
-                                    setTeacherMembershipActive(school.id, teacher.id, true),
+                                    setTeacherMembershipActive(
+                                      school.id,
+                                      teacher.id,
+                                      row.rev,
+                                      true,
+                                    ),
                                   )
                             }
                           >
@@ -370,7 +375,14 @@ export function TeacherSchools(props: {
           if (pending.kind === "remove") {
             run(() => removeTeacherFromSchool(school.id, teacher.id));
           } else if (pending.kind === "deactivate") {
-            run(() => setTeacherMembershipActive(school.id, teacher.id, false));
+            run(() =>
+              setTeacherMembershipActive(
+                school.id,
+                teacher.id,
+                pending.membership.rev,
+                false,
+              ),
+            );
           } else {
             run(() => removeTeacherCampus(school.id, teacher.id, pending.campus.campus.id));
           }

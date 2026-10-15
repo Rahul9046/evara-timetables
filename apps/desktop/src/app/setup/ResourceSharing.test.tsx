@@ -25,8 +25,9 @@ const listCampuses = vi.fn<(schoolId: string) => Promise<Campus[]>>();
 const listResources = vi.fn<(schoolId: string) => Promise<Resource[]>>();
 const listResourceCampuses = vi.fn<(resourceId: string) => Promise<string[]>>();
 const createResource = vi.fn<(input: unknown) => Promise<Resource>>();
-const updateResource = vi.fn<(id: string, input: unknown) => Promise<Resource>>();
-const deleteResource = vi.fn<(schoolId: string, id: string) => Promise<void>>();
+const updateResource =
+  vi.fn<(id: string, rev: number, input: unknown) => Promise<Resource>>();
+const deleteResource = vi.fn<(schoolId: string, id: string, rev: number) => Promise<void>>();
 const shareResource =
   vi.fn<(schoolId: string, resourceId: string, campusId: string) => Promise<void>>();
 const unshareResource =
@@ -37,12 +38,18 @@ vi.mock("../../ipc/setup", () => ({
   listResources: (schoolId: string) => listResources(schoolId),
   listResourceCampuses: (resourceId: string) => listResourceCampuses(resourceId),
   createResource: (input: unknown) => createResource(input),
-  updateResource: (id: string, input: unknown) => updateResource(id, input),
-  deleteResource: (schoolId: string, id: string) => deleteResource(schoolId, id),
+  updateResource: (id: string, rev: number, input: unknown) =>
+    updateResource(id, rev, input),
+  deleteResource: (schoolId: string, id: string, rev: number) =>
+    deleteResource(schoolId, id, rev),
   shareResource: (schoolId: string, resourceId: string, campusId: string) =>
     shareResource(schoolId, resourceId, campusId),
   unshareResource: (schoolId: string, resourceId: string, campusId: string) =>
     unshareResource(schoolId, resourceId, campusId),
+  isConflict: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { kind?: string }).kind === "conflict",
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
       ? String((error as { message: unknown }).message)
@@ -336,7 +343,7 @@ describe("moving a resource's home campus", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateResource).toHaveBeenCalled());
-    expect(updateResource.mock.calls[0]?.[1]).toMatchObject({
+    expect(updateResource.mock.calls[0]?.[2]).toMatchObject({
       campusId: NORTH_JUNIOR.id,
     });
     expect(unshareResource).not.toHaveBeenCalled();
@@ -452,7 +459,9 @@ describe("deleting a resource", () => {
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "Delete resource" }));
 
-    await waitFor(() => expect(deleteResource).toHaveBeenCalledWith(NORTH.id, MINIBUS.id));
+    await waitFor(() =>
+      expect(deleteResource).toHaveBeenCalledWith(NORTH.id, MINIBUS.id, 1),
+    );
   });
 
   it("is explained rather than offered while another school shares it", async () => {

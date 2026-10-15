@@ -250,8 +250,8 @@ export function CalendarMapping(props: { school: School }) {
       }),
       list: loadCalendar,
       create: createCalendarDay,
-      update: updateCalendarDay,
-      remove: (id) => deleteCalendarDay(school.id, id),
+      update: (row, input) => updateCalendarDay(row.id, row.rev, input),
+      remove: (row) => deleteCalendarDay(school.id, row.id, row.rev),
       emptyHint:
         "No dates are recorded in this range. Add the teaching days you want mapped onto cycle days, and the closures you want marked. Evara records only what you enter — it does not assume weekends or holidays.",
       blockedBy:

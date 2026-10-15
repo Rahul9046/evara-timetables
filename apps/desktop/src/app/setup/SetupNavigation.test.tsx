@@ -88,6 +88,10 @@ vi.mock("../../ipc/setup", () => ({
   clearAvailability: vi.fn(() => Promise.resolve(true)),
   previewGrid: vi.fn(() => Promise.resolve(null)),
   gridPreview: vi.fn(() => Promise.resolve(null)),
+  isConflict: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { kind?: string }).kind === "conflict",
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
       ? String((error as { message: unknown }).message)

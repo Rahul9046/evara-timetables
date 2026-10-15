@@ -34,6 +34,10 @@ vi.mock("../../ipc/setup", () => ({
   listAvailability: (kind: unknown, id: unknown) => listAvailability(kind, id),
   setAvailability: (input: unknown) => setAvailability(input),
   clearAvailability: (scope: unknown) => clearAvailability(scope),
+  isConflict: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { kind?: string }).kind === "conflict",
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
       ? String((error as { message: unknown }).message)

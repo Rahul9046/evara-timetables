@@ -34,7 +34,12 @@ vi.mock("../../ipc/setup", () => ({
   getSchoolLogoLimits: () => getSchoolLogoLimits(),
   setSchoolLogo: (id: string, data: string) => setSchoolLogo(id, data),
   clearSchoolLogo: () => clearSchoolLogo(),
-  updateSchool: (id: string, input: unknown) => updateSchool(id, input),
+  updateSchool: (id: string, rev: number, input: unknown) =>
+    updateSchool(id, rev, input),
+  isConflict: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { kind?: string }).kind === "conflict",
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
       ? String((error as { message: unknown }).message)
@@ -110,7 +115,7 @@ describe("selecting a timezone", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateSchool).toHaveBeenCalled());
-    expect(updateSchool.mock.calls[0]?.[1]).toMatchObject({
+    expect(updateSchool.mock.calls[0]?.[2]).toMatchObject({
       timezone: "Asia/Kolkata",
     });
   });
@@ -132,7 +137,7 @@ describe("selecting a timezone", () => {
 
     // ...and the backend is sent an identifier.
     await waitFor(() => expect(updateSchool).toHaveBeenCalled());
-    const input = updateSchool.mock.calls[0]?.[1] as Record<string, string>;
+    const input = updateSchool.mock.calls[0]?.[2] as Record<string, string>;
     expect(input.timezone).toBe("Asia/Kolkata");
     expect(input.timezone).not.toContain("—");
   });
@@ -162,7 +167,7 @@ describe("selecting a locale", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateSchool).toHaveBeenCalled());
-    expect(updateSchool.mock.calls[0]?.[1]).toMatchObject({ locale: "en-IN" });
+    expect(updateSchool.mock.calls[0]?.[2]).toMatchObject({ locale: "en-IN" });
   });
 
   it("is not inferred from the timezone", async () => {
@@ -200,7 +205,7 @@ describe("reopening an existing project", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateSchool).toHaveBeenCalled());
-    expect(updateSchool).toHaveBeenCalledWith("school-1", {
+    expect(updateSchool).toHaveBeenCalledWith("school-1", 3, {
       name: "Northgate Secondary",
       // A school with no code saves none. `code` is nullable and unique only when given,
       // so an empty box must reach the column as NULL rather than as "".
@@ -255,7 +260,7 @@ describe("the school code", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateSchool).toHaveBeenCalled());
-    expect(updateSchool.mock.calls[0]?.[1]).toMatchObject({ code: "NGS" });
+    expect(updateSchool.mock.calls[0]?.[2]).toMatchObject({ code: "NGS" });
   });
 
   it("is preserved when another field is edited", async () => {
@@ -270,7 +275,7 @@ describe("the school code", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateSchool).toHaveBeenCalled());
-    expect(updateSchool.mock.calls[0]?.[1]).toMatchObject({
+    expect(updateSchool.mock.calls[0]?.[2]).toMatchObject({
       code: "NGS",
       timezone: "Asia/Kolkata",
     });
@@ -286,7 +291,7 @@ describe("the school code", () => {
     await waitFor(() => expect(updateSchool).toHaveBeenCalled());
     // `code` is unique when given through a partial index, so two schools saved with ""
     // would collide on a value neither of them has.
-    expect(updateSchool.mock.calls[0]?.[1]).toMatchObject({ code: null });
+    expect(updateSchool.mock.calls[0]?.[2]).toMatchObject({ code: null });
   });
 
   it("marks the code field when the backend reports a duplicate", async () => {
@@ -327,7 +332,7 @@ describe("a stored value the list does not offer", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateSchool).toHaveBeenCalled());
-    expect(updateSchool.mock.calls[0]?.[1]).toMatchObject({
+    expect(updateSchool.mock.calls[0]?.[2]).toMatchObject({
       timezone: "Mars/Olympus_Mons",
     });
   });
@@ -344,7 +349,7 @@ describe("a stored value the list does not offer", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateSchool).toHaveBeenCalled());
-    expect(updateSchool.mock.calls[0]?.[1]).toMatchObject({
+    expect(updateSchool.mock.calls[0]?.[2]).toMatchObject({
       timezone: "Mars/Olympus_Mons",
     });
   });
@@ -359,7 +364,7 @@ describe("a stored value the list does not offer", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateSchool).toHaveBeenCalled());
-    expect(updateSchool.mock.calls[0]?.[1]).toMatchObject({
+    expect(updateSchool.mock.calls[0]?.[2]).toMatchObject({
       timezone: "Asia/Kolkata",
     });
   });
@@ -376,7 +381,7 @@ describe("a stored value the list does not offer", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(updateSchool).toHaveBeenCalled());
-    expect(updateSchool.mock.calls[0]?.[1]).toMatchObject({
+    expect(updateSchool.mock.calls[0]?.[2]).toMatchObject({
       timezone: "Asia/Calcutta",
     });
   });

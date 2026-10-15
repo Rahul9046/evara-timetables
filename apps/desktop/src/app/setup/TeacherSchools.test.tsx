@@ -39,7 +39,9 @@ const listTeacherMemberships = vi.fn<(teacherId: string) => Promise<TeacherSchoo
 const listTeacherCampuses = vi.fn<(teacherId: string) => Promise<string[]>>();
 const addTeacherToSchool = vi.fn<(input: unknown) => Promise<TeacherSchool>>();
 const setTeacherMembershipActive =
-  vi.fn<(schoolId: string, teacherId: string, isActive: boolean) => Promise<TeacherSchool>>();
+  vi.fn<
+    (schoolId: string, teacherId: string, rev: number, isActive: boolean) => Promise<TeacherSchool>
+  >();
 const removeTeacherFromSchool = vi.fn<(schoolId: string, teacherId: string) => Promise<void>>();
 const assignTeacherCampus =
   vi.fn<(schoolId: string, teacherId: string, campusId: string) => Promise<TeacherCampus>>();
@@ -57,8 +59,12 @@ vi.mock("../../ipc/setup", () => ({
   listTeacherMemberships: (teacherId: string) => listTeacherMemberships(teacherId),
   listTeacherCampuses: (teacherId: string) => listTeacherCampuses(teacherId),
   addTeacherToSchool: (input: unknown) => addTeacherToSchool(input),
-  setTeacherMembershipActive: (schoolId: string, teacherId: string, isActive: boolean) =>
-    setTeacherMembershipActive(schoolId, teacherId, isActive),
+  setTeacherMembershipActive: (
+    schoolId: string,
+    teacherId: string,
+    rev: number,
+    isActive: boolean,
+  ) => setTeacherMembershipActive(schoolId, teacherId, rev, isActive),
   removeTeacherFromSchool: (schoolId: string, teacherId: string) =>
     removeTeacherFromSchool(schoolId, teacherId),
   assignTeacherCampus: (schoolId: string, teacherId: string, campusId: string) =>
@@ -72,6 +78,10 @@ vi.mock("../../ipc/setup", () => ({
   listCycles: vi.fn(() => Promise.resolve([])),
   listPeriodStructures: vi.fn(() => Promise.resolve([])),
   gridPreview: vi.fn(() => Promise.resolve(null)),
+  isConflict: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { kind?: string }).kind === "conflict",
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
       ? String((error as { message: unknown }).message)
@@ -368,7 +378,14 @@ describe("a teacher's schools", () => {
     await user.click(within(dialog).getByRole("button", { name: "Mark as left" }));
 
     await waitFor(() => expect(setTeacherMembershipActive).toHaveBeenCalled());
-    expect(setTeacherMembershipActive).toHaveBeenCalledWith(NORTH.id, ADA.id, false);
+    // The MEMBERSHIP's revision, not the teacher's: `teacher_school` is the row that
+    // changes, and nothing about the person does.
+    expect(setTeacherMembershipActive).toHaveBeenCalledWith(
+      NORTH.id,
+      ADA.id,
+      expect.any(Number),
+      false,
+    );
     expect(removeTeacherFromSchool).not.toHaveBeenCalled();
   });
 
@@ -381,7 +398,12 @@ describe("a teacher's schools", () => {
     await user.click(within(panel).getByRole("button", { name: "Mark as teaching" }));
 
     await waitFor(() => expect(setTeacherMembershipActive).toHaveBeenCalled());
-    expect(setTeacherMembershipActive).toHaveBeenCalledWith(NORTH.id, ADA.id, true);
+    expect(setTeacherMembershipActive).toHaveBeenCalledWith(
+      NORTH.id,
+      ADA.id,
+      expect.any(Number),
+      true,
+    );
   });
 
   it("removes a non-home membership, and says what survives it", async () => {

@@ -190,8 +190,8 @@ export function Schools(props: {
           return rows;
         }),
       create: (input) => createSchool(input),
-      update: (id, input) => updateSchool(id, input),
-      remove: (id) => deleteSchool(id),
+      update: (row, input) => updateSchool(row.id, row.rev, input),
+      remove: (row) => deleteSchool(row.id, row.rev),
       rowActions: [
         {
           label: "Select",

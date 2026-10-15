@@ -57,8 +57,13 @@ vi.mock("../../ipc/setup", () => ({
   nonWorkingInstructionalDays: (schoolId: string, week: readonly number[]) =>
     nonWorkingInstructionalDays(schoolId, week),
   createCalendarDay: (input: unknown) => createCalendarDay(input),
-  updateCalendarDay: (id: string, input: unknown) => updateCalendarDay(id, input),
+  updateCalendarDay: (id: string, rev: number, input: unknown) =>
+    updateCalendarDay(id, rev, input),
   deleteCalendarDay: (id: string) => deleteCalendarDay(id),
+  isConflict: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { kind?: string }).kind === "conflict",
   describeSetupError: (error: unknown) => String(error),
   offendingField: () => null,
 }));

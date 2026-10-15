@@ -29,12 +29,18 @@ const deleteTerm = vi.fn();
 vi.mock("../../ipc/setup", () => ({
   listAcademicYears: () => listAcademicYears(),
   createAcademicYear: (input: unknown) => createAcademicYear(input),
-  updateAcademicYear: (id: string, input: unknown) => updateAcademicYear(id, input),
+  updateAcademicYear: (id: string, rev: number, input: unknown) =>
+    updateAcademicYear(id, rev, input),
   deleteAcademicYear: (id: string) => deleteAcademicYear(id),
   listTerms: (yearId: string) => listTerms(yearId),
   createTerm: (input: unknown) => createTerm(input),
-  updateTerm: (id: string, input: unknown) => updateTerm(id, input),
+  updateTerm: (id: string, rev: number, input: unknown) =>
+    updateTerm(id, rev, input),
   deleteTerm: (id: string) => deleteTerm(id),
+  isConflict: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { kind?: string }).kind === "conflict",
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
       ? String((error as { message: unknown }).message)
@@ -252,7 +258,7 @@ describe("saving", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateAcademicYear).toHaveBeenCalled());
-    expect(updateAcademicYear).toHaveBeenCalledWith("y1", {
+    expect(updateAcademicYear).toHaveBeenCalledWith("y1", 1, {
       schoolId: "school-1",
       name: "2027/2028",
       // Byte for byte what was read, with no normalising round trip through a Date.
@@ -274,7 +280,7 @@ describe("saving", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateTerm).toHaveBeenCalled());
-    expect(updateTerm).toHaveBeenCalledWith("t1", {
+    expect(updateTerm).toHaveBeenCalledWith("t1", 1, {
       academicYearId: "y1",
       name: "Autumn",
       ordinal: 1,

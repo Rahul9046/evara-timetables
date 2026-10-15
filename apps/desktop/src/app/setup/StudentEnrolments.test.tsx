@@ -41,12 +41,16 @@ const listEnrolmentHistory = vi.fn<(studentId: string) => Promise<StudentEnrolme
 const listGroupsForStudent = vi.fn<(studentId: string) => Promise<StudentGroup[]>>();
 const enrolStudent = vi.fn<(input: unknown) => Promise<StudentEnrolment>>();
 const updateEnrolment =
-  vi.fn<(schoolId: string, id: string, input: unknown) => Promise<StudentEnrolment>>();
+  vi.fn<
+    (schoolId: string, id: string, rev: number, input: unknown) => Promise<StudentEnrolment>
+  >();
 const leaveSchool =
-  vi.fn<(schoolId: string, studentId: string, leftOn: string | null) => Promise<StudentEnrolment>>();
+  vi.fn<
+    (schoolId: string, studentId: string, rev: number, leftOn: string | null) => Promise<StudentEnrolment>
+  >();
 const transferStudent =
   vi.fn<
-    (from: string, to: string, studentId: string, arriving: unknown) => Promise<StudentEnrolment>
+    (from: string, to: string, studentId: string, rev: number, arriving: unknown) => Promise<StudentEnrolment>
   >();
 const createStudent = vi.fn((_input: unknown) => Promise.resolve({}));
 
@@ -58,18 +62,31 @@ vi.mock("../../ipc/setup", () => ({
   listGroupsForStudent: (studentId: string) => listGroupsForStudent(studentId),
   listEnrolmentHistory: (studentId: string) => listEnrolmentHistory(studentId),
   enrolStudent: (input: unknown) => enrolStudent(input),
-  updateEnrolment: (schoolId: string, id: string, input: unknown) =>
-    updateEnrolment(schoolId, id, input),
-  leaveSchool: (schoolId: string, studentId: string, leftOn: string | null) =>
-    leaveSchool(schoolId, studentId, leftOn),
-  transferStudent: (from: string, to: string, studentId: string, arriving: unknown) =>
-    transferStudent(from, to, studentId, arriving),
+  updateEnrolment: (schoolId: string, id: string, rev: number, input: unknown) =>
+    updateEnrolment(schoolId, id, rev, input),
+  leaveSchool: (
+    schoolId: string,
+    studentId: string,
+    rev: number,
+    leftOn: string | null,
+  ) => leaveSchool(schoolId, studentId, rev, leftOn),
+  transferStudent: (
+    from: string,
+    to: string,
+    studentId: string,
+    rev: number,
+    arriving: unknown,
+  ) => transferStudent(from, to, studentId, rev, arriving),
   createStudent: (input: unknown) => createStudent(input),
   updateStudent: vi.fn(() => Promise.resolve({})),
   deleteStudent: vi.fn(() => Promise.resolve()),
   createYearLevel: vi.fn(() => Promise.resolve({})),
   updateYearLevel: vi.fn(() => Promise.resolve({})),
   deleteYearLevel: vi.fn(() => Promise.resolve()),
+  isConflict: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { kind?: string }).kind === "conflict",
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
       ? String((error as { message: unknown }).message)
@@ -363,7 +380,7 @@ describe("this school's enrolment of one student", () => {
     await user.click(screen.getByRole("button", { name: "Save enrolment" }));
 
     await waitFor(() => expect(updateEnrolment).toHaveBeenCalled());
-    expect(updateEnrolment).toHaveBeenCalledWith(NORTH.id, "e-north", {
+    expect(updateEnrolment).toHaveBeenCalledWith(NORTH.id, "e-north", 1, {
       studentId: CASS.id,
       schoolId: NORTH.id,
       admissionNo: "NG-2002",
@@ -416,7 +433,8 @@ describe("this school's enrolment of one student", () => {
     await user.click(within(dialog).getByRole("button", { name: "Mark as left" }));
 
     await waitFor(() => expect(leaveSchool).toHaveBeenCalled());
-    expect(leaveSchool).toHaveBeenCalledWith(NORTH.id, CASS.id, "2027-07-20");
+    // The spell's revision, because the spell is the row a departure rewrites.
+    expect(leaveSchool).toHaveBeenCalledWith(NORTH.id, CASS.id, 1, "2027-07-20");
   });
 
   it("records a departure with no date, rather than inventing one", async () => {
@@ -430,7 +448,7 @@ describe("this school's enrolment of one student", () => {
 
     await waitFor(() => expect(leaveSchool).toHaveBeenCalled());
     // `null`, not today's date: the fact is the status, and only the school knows the day.
-    expect(leaveSchool).toHaveBeenCalledWith(NORTH.id, CASS.id, null);
+    expect(leaveSchool).toHaveBeenCalledWith(NORTH.id, CASS.id, 1, null);
   });
 
   it("says a departure keeps the spell and the groups", async () => {
@@ -591,7 +609,9 @@ describe("transferring a student", () => {
     await user.click(within(dialog).getByRole("button", { name: "Transfer student" }));
 
     await waitFor(() => expect(transferStudent).toHaveBeenCalled());
-    expect(transferStudent).toHaveBeenCalledWith(NORTH.id, SOUTH.id, CASS.id, {
+    // Still one call, still atomic, with one precondition: the leaving spell. ADR 0027
+    // refuses to split a transfer in two merely to give each half a revision.
+    expect(transferStudent).toHaveBeenCalledWith(NORTH.id, SOUTH.id, CASS.id, 1, {
       studentId: CASS.id,
       schoolId: SOUTH.id,
       admissionNo: "SM-88",
@@ -631,7 +651,7 @@ describe("transferring a student", () => {
     await user.click(within(dialog).getByRole("button", { name: "Transfer student" }));
 
     await waitFor(() => expect(transferStudent).toHaveBeenCalled());
-    expect(transferStudent.mock.calls[0]?.[3]).toMatchObject({ enrolledOn: null });
+    expect(transferStudent.mock.calls[0]?.[4]).toMatchObject({ enrolledOn: null });
   });
 
   it("refuses to review without a destination, and sends nothing", async () => {

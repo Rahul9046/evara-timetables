@@ -244,8 +244,8 @@ export function StudentGroups(props: { school: School; context?: SetupContext })
     }),
     list: () => listStudentGroups(school.id),
     create: (input) => createStudentGroup(input),
-    update: (id, input) => updateStudentGroup(id, input),
-    remove: (id) => deleteStudentGroup(school.id, id),
+    update: (row, input) => updateStudentGroup(row.id, row.rev, input),
+    remove: (row) => deleteStudentGroup(school.id, row.id, row.rev),
     emptyHint:
       "No groups yet. A group is whoever a lesson is taught to — a class, a cohort, a homeroom or an elective set.",
     deleteNote: (row) => {

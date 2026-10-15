@@ -179,8 +179,8 @@ export function RoomsAndRoomTypes(props: { school: School; context?: SetupContex
       }),
       list: () => listRoomTypes(school.id),
       create: createRoomType,
-      update: updateRoomType,
-      remove: (id) => deleteRoomType(school.id, id),
+      update: (row, input) => updateRoomType(row.id, row.rev, input),
+      remove: (row) => deleteRoomType(school.id, row.id, row.rev),
       emptyHint:
         "Room types are optional. They become useful when a lesson needs a particular kind of space — a lab, a gym, a music room — rather than a specific room.",
       deleteNote: () => (
@@ -398,8 +398,9 @@ export function RoomsAndRoomTypes(props: { school: School; context?: SetupContex
       // The repository is the authority on each step and refuses the ones that are not
       // allowed; a refusal leaves the earlier steps applied, which is why the panel
       // re-reads the list after every mutation rather than patching it.
-      update: async (id, input) => {
-        const existing = (await loadRooms()).find((row) => row.id === id);
+      update: async (row, input) => {
+        const id = row.id;
+        const existing = (await loadRooms()).find((other) => other.id === id);
         // The room's own home campus, not the one being viewed. A room shared *into* this
         // campus is homed on another — possibly another school's — and taking the viewed
         // campus as home would leave a withdrawal of this campus's own access silently
@@ -413,7 +414,7 @@ export function RoomsAndRoomTypes(props: { school: School; context?: SetupContex
           if (!after.has(campus)) await unshareRoom(school.id, id, campus);
         }
 
-        const room = await updateRoom(id, withoutShares(input));
+        const room = await updateRoom(id, row.rev, withoutShares(input));
 
         for (const campus of after) {
           if (!before.has(campus)) await shareRoom(id, campus);
@@ -421,7 +422,7 @@ export function RoomsAndRoomTypes(props: { school: School; context?: SetupContex
 
         return { ...room, campusIds: [home, ...after] };
       },
-      remove: (id) => deleteRoom(school.id, id),
+      remove: (row) => deleteRoom(school.id, row.id, row.rev),
       // Withdrawing a share is reversible but it is not nothing: a campus loses a room it
       // may have been timetabling into. Asking first is the same courtesy a delete gets.
       confirmSubmit: (draft, row) => {

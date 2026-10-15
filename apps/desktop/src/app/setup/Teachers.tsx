@@ -359,14 +359,14 @@ export function Teachers(props: { school: School; context?: SetupContext }) {
     // same flag in the same transaction.
     create: (input) =>
       createTeacher(input).then((row) => ({ ...row, membershipActive: row.isActive })),
-    update: (id, input) =>
-      updateTeacher(id, input).then((row) => ({
-        ...row,
+    update: (row, input) =>
+      updateTeacher(row.id, row.rev, input).then((saved) => ({
+        ...saved,
         membershipActive:
-          (staff.items ?? []).find((known) => known.id === id)?.membershipActive ??
-          row.isActive,
+          (staff.items ?? []).find((known) => known.id === row.id)?.membershipActive ??
+          saved.isActive,
       })),
-    remove: (id) => deleteTeacher(school.id, id),
+    remove: (row) => deleteTeacher(school.id, row.id, row.rev),
     emptyHint:
       "No teachers at this school yet. Add the staff who will appear on the timetable — or, if somebody already works at another school in this campus file, add them with “Add an existing teacher” rather than entering them twice.",
     rowActions: [

@@ -88,8 +88,8 @@ export function YearLevels(props: { school: School }) {
     }),
     list: () => listYearLevels(school.id),
     create: (input) => createYearLevel(input),
-    update: (id, input) => updateYearLevel(id, input),
-    remove: (id) => deleteYearLevel(school.id, id),
+    update: (row, input) => updateYearLevel(row.id, row.rev, input),
+    remove: (row) => deleteYearLevel(school.id, row.id, row.rev),
     emptyHint:
       "No year levels yet. Add the stages this school teaches — Year 7 to Year 13, Grade 1 to Grade 6, whatever this school calls them. They belong to this school alone, so another school in this campus file can hold its own Grade 1 without colliding.",
     deleteNote: () =>

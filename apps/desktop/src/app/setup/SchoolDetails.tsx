@@ -66,7 +66,9 @@ export function SchoolDetails(props: {
     setBusy(true);
     setSaveError(null);
     try {
-      await updateSchool(school.id, schoolInput(draft));
+      // `school.rev` is the revision this form was opened against, so a save built on a
+      // version another window has since changed is refused rather than applied.
+      await updateSchool(school.id, school.rev, schoolInput(draft));
       onChanged();
       setEditing(false);
     } catch (e: unknown) {

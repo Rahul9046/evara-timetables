@@ -39,14 +39,15 @@ const listSchoolTeachers = vi.fn<(schoolId: string) => Promise<TeacherInSchool[]
 const listStudents = vi.fn<(schoolId: string) => Promise<Student[]>>();
 const listSchoolStudents = vi.fn<(schoolId: string) => Promise<StudentInSchool[]>>();
 const listYearLevels = vi.fn<(schoolId: string) => Promise<YearLevel[]>>();
-const updateTeacher = vi.fn<(id: string, input: unknown) => Promise<Teacher>>();
+const updateTeacher = vi.fn<(id: string, rev: number, input: unknown) => Promise<Teacher>>();
 const listEnrolmentHistory = vi.fn<(studentId: string) => Promise<StudentEnrolment[]>>();
 
 vi.mock("../../ipc/setup", () => ({
   listTeachers: (schoolId: string) => listTeachers(schoolId),
   listSchoolTeachers: (schoolId: string) => listSchoolTeachers(schoolId),
   createTeacher: vi.fn(() => Promise.resolve({})),
-  updateTeacher: (id: string, input: unknown) => updateTeacher(id, input),
+  updateTeacher: (id: string, rev: number, input: unknown) =>
+    updateTeacher(id, rev, input),
   deleteTeacher: vi.fn(() => Promise.resolve()),
   listStudents: (schoolId: string) => listStudents(schoolId),
   listSchoolStudents: (schoolId: string) => listSchoolStudents(schoolId),
@@ -81,6 +82,10 @@ vi.mock("../../ipc/setup", () => ({
   listCycles: vi.fn(() => Promise.resolve([])),
   listPeriodStructures: vi.fn(() => Promise.resolve([])),
   gridPreview: vi.fn(() => Promise.resolve(null)),
+  isConflict: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { kind?: string }).kind === "conflict",
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
       ? String((error as { message: unknown }).message)

@@ -21,14 +21,21 @@ import type { School, YearLevel, YearLevelInput } from "@evara/domain";
 
 const listYearLevels = vi.fn<(schoolId: string) => Promise<YearLevel[]>>();
 const createYearLevel = vi.fn<(input: YearLevelInput) => Promise<YearLevel>>();
-const updateYearLevel = vi.fn<(id: string, input: YearLevelInput) => Promise<YearLevel>>();
-const deleteYearLevel = vi.fn<(schoolId: string, id: string) => Promise<void>>();
+const updateYearLevel =
+  vi.fn<(id: string, rev: number, input: YearLevelInput) => Promise<YearLevel>>();
+const deleteYearLevel = vi.fn<(schoolId: string, id: string, rev: number) => Promise<void>>();
 
 vi.mock("../../ipc/setup", () => ({
   listYearLevels: (schoolId: string) => listYearLevels(schoolId),
   createYearLevel: (input: YearLevelInput) => createYearLevel(input),
-  updateYearLevel: (id: string, input: YearLevelInput) => updateYearLevel(id, input),
-  deleteYearLevel: (schoolId: string, id: string) => deleteYearLevel(schoolId, id),
+  updateYearLevel: (id: string, rev: number, input: YearLevelInput) =>
+    updateYearLevel(id, rev, input),
+  deleteYearLevel: (schoolId: string, id: string, rev: number) =>
+    deleteYearLevel(schoolId, id, rev),
+  isConflict: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { kind?: string }).kind === "conflict",
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
       ? String((error as { message: unknown }).message)
@@ -46,7 +53,9 @@ const { YearLevels } = await import("./YearLevels");
 const STAMP = {
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
-  rev: 1,
+  // Not 1: an assertion that a write carried the row's revision must fail if the
+  // screen sent a default instead.
+  rev: 4,
 };
 
 const NORTH = { id: "school-north", name: "Northgate Secondary", code: "NGS" } as School;
@@ -72,7 +81,7 @@ beforeEach(() => {
   createYearLevel.mockImplementation((input) =>
     Promise.resolve(yearLevel("y-new", input.schoolId, input.name, input.ordinal)),
   );
-  updateYearLevel.mockImplementation((id, input) =>
+  updateYearLevel.mockImplementation((id, _rev, input) =>
     Promise.resolve(yearLevel(id, input.schoolId, input.name, input.ordinal)),
   );
   deleteYearLevel.mockResolvedValue(undefined);
@@ -265,7 +274,7 @@ describe("editing a year level", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateYearLevel).toHaveBeenCalled());
-    expect(updateYearLevel).toHaveBeenCalledWith("y-n-8", {
+    expect(updateYearLevel).toHaveBeenCalledWith("y-n-8", 4, {
       schoolId: NORTH.id,
       name: "Grade 8",
       ordinal: 8,
@@ -283,7 +292,7 @@ describe("editing a year level", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateYearLevel).toHaveBeenCalled());
-    expect(updateYearLevel.mock.calls[0]?.[1]).toMatchObject({
+    expect(updateYearLevel.mock.calls[0]?.[2]).toMatchObject({
       name: "Year 8",
       ordinal: 12,
     });
@@ -312,7 +321,7 @@ describe("deleting a year level", () => {
     await user.click(within(dialog).getByRole("button", { name: "Delete year level" }));
 
     await waitFor(() => expect(deleteYearLevel).toHaveBeenCalled());
-    expect(deleteYearLevel).toHaveBeenCalledWith(NORTH.id, "y-n-8");
+    expect(deleteYearLevel).toHaveBeenCalledWith(NORTH.id, "y-n-8", 4);
   });
 
   it("says the students in it are kept", async () => {
@@ -360,7 +369,7 @@ describe("deleting a year level", () => {
     await user.click(within(dialog).getByRole("button", { name: "Delete year level" }));
 
     await waitFor(() => expect(deleteYearLevel).toHaveBeenCalled());
-    expect(deleteYearLevel).toHaveBeenCalledWith(SOUTH.id, "y-s-1");
+    expect(deleteYearLevel).toHaveBeenCalledWith(SOUTH.id, "y-s-1", 4);
     for (const call of deleteYearLevel.mock.calls) {
       expect(call[0]).not.toBe(NORTH.id);
     }
