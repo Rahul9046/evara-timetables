@@ -82,9 +82,15 @@ export function Departments(props: { school: School; context?: SetupContext }) {
    *
    * Read when the row is rendered rather than when Delete is pressed, because
    * `deleteBlockedBy` has to answer synchronously — the dialogue decides whether to offer a
-   * destructive button from it. An unread row falls back to the subject count above, which
-   * is never *more* permissive: it can only miss teacher associations, and the backend
-   * refuses those regardless.
+   * destructive button from it.
+   *
+   * A row whose report has not arrived yet falls back to the subject count above, which
+   * knows nothing about teacher associations. So in that window a delete can be *offered*
+   * and then refused by the backend, with its own message. That is the ordinary pre-Stage-B
+   * behaviour rather than a regression, the window is one round trip from the list read
+   * beside it, and the alternative — blocking Delete until a count arrives — would make a
+   * delete look impossible whenever a read was slow. Every list read re-reads every row's
+   * report, so the fallback is never used for a row the user has been looking at.
    */
   const [reports, setReports] = useState<ReadonlyMap<string, DepartmentDependents>>(new Map());
 
