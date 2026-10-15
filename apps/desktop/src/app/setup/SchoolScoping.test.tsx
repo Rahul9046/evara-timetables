@@ -23,7 +23,7 @@ import type { Campus, School, Teacher, TeacherInSchool } from "@evara/domain";
 
 const listTeachers = vi.fn<(schoolId: string) => Promise<Teacher[]>>();
 const listSchoolTeachers = vi.fn<(schoolId: string) => Promise<TeacherInSchool[]>>();
-const deleteTeacher = vi.fn<(schoolId: string, id: string) => Promise<void>>();
+const deleteTeacher = vi.fn<(schoolId: string, id: string, rev: number) => Promise<void>>();
 const listCampuses = vi.fn<(schoolId: string) => Promise<Campus[]>>();
 const listAvailability = vi.fn(() => Promise.resolve([]));
 const countAvailability = vi.fn(() => Promise.resolve(0));
@@ -33,7 +33,8 @@ vi.mock("../../ipc/setup", () => ({
   listSchoolTeachers: (schoolId: string) => listSchoolTeachers(schoolId),
   createTeacher: vi.fn(() => Promise.resolve({})),
   updateTeacher: vi.fn(() => Promise.resolve({})),
-  deleteTeacher: (schoolId: string, id: string) => deleteTeacher(schoolId, id),
+  deleteTeacher: (schoolId: string, id: string, rev: number) =>
+    deleteTeacher(schoolId, id, rev),
   listCampuses: (schoolId: string) => listCampuses(schoolId),
   listAvailability: () => listAvailability(),
   countAvailability: () => countAvailability(),
@@ -44,6 +45,32 @@ vi.mock("../../ipc/setup", () => ({
   gridPreview: vi.fn(() => Promise.resolve(null)),
   // Mirrors the real wrapper closely enough for these tests: the typed `wrongSchool`
   // error carries the message the user is shown.
+  // Stage B. Empty by default: a suite that is about something else should not have
+  // to describe a curriculum, and one that is about this panel overrides them.
+  listDepartments: vi.fn(() => Promise.resolve([])),
+  listSubjects: vi.fn(() => Promise.resolve([])),
+  listTeacherDepartments: vi.fn(() => Promise.resolve([])),
+  listQualifications: vi.fn(() => Promise.resolve([])),
+  listSubjectTeachers: vi.fn(() => Promise.resolve([])),
+  listDepartmentTeachers: vi.fn(() => Promise.resolve([])),
+  departmentDependents: vi.fn(() =>
+    Promise.resolve({ total: 0, subjects: 0, teachers: 0 }),
+  ),
+  subjectDependents: vi.fn(() => Promise.resolve({ total: 0, qualifiedTeachers: 0 })),
+  addQualification: vi.fn(() => Promise.resolve({})),
+  removeQualification: vi.fn(() => Promise.resolve()),
+  addTeacherDepartment: vi.fn(() => Promise.resolve({})),
+  removeTeacherDepartment: vi.fn(() => Promise.resolve()),
+  createDepartment: vi.fn(() => Promise.resolve({})),
+  updateDepartment: vi.fn(() => Promise.resolve({})),
+  deleteDepartment: vi.fn(() => Promise.resolve()),
+  createSubject: vi.fn(() => Promise.resolve({})),
+  updateSubject: vi.fn(() => Promise.resolve({})),
+  deleteSubject: vi.fn(() => Promise.resolve()),
+  isConflict: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { kind?: string }).kind === "conflict",
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
       ? String((error as { message: unknown }).message)
@@ -181,7 +208,7 @@ describe("deleting is scoped too", () => {
     await confirmDelete();
 
     await waitFor(() => expect(deleteTeacher).toHaveBeenCalled());
-    expect(deleteTeacher).toHaveBeenCalledWith(NORTH.id, "t-north");
+    expect(deleteTeacher).toHaveBeenCalledWith(NORTH.id, "t-north", 1);
   });
 
   /**
@@ -202,7 +229,7 @@ describe("deleting is scoped too", () => {
     await confirmDelete();
 
     await waitFor(() => expect(deleteTeacher).toHaveBeenCalled());
-    expect(deleteTeacher).toHaveBeenCalledWith(SOUTH.id, "t-south");
+    expect(deleteTeacher).toHaveBeenCalledWith(SOUTH.id, "t-south", 1);
     for (const call of deleteTeacher.mock.calls) {
       expect(call[0]).not.toBe(NORTH.id);
     }

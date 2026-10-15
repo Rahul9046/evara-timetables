@@ -39,7 +39,8 @@ const listTeachers = vi.fn<(schoolId: string) => Promise<Teacher[]>>();
 const listSchoolTeachers = vi.fn<(schoolId: string) => Promise<TeacherInSchool[]>>();
 const listCampuses = vi.fn<(schoolId: string) => Promise<Campus[]>>();
 const createTeacher = vi.fn<(input: TeacherInput) => Promise<Teacher>>();
-const updateTeacher = vi.fn<(id: string, input: TeacherInput) => Promise<Teacher>>();
+const updateTeacher =
+  vi.fn<(id: string, rev: number, input: TeacherInput) => Promise<Teacher>>();
 const listTeacherMemberships = vi.fn<(teacherId: string) => Promise<TeacherSchool[]>>();
 const listTeacherCampuses = vi.fn<(teacherId: string) => Promise<string[]>>();
 const assignTeacherCampus =
@@ -52,7 +53,8 @@ vi.mock("../../ipc/setup", () => ({
   listSchoolTeachers: (schoolId: string) => listSchoolTeachers(schoolId),
   listCampuses: (schoolId: string) => listCampuses(schoolId),
   createTeacher: (input: TeacherInput) => createTeacher(input),
-  updateTeacher: (id: string, input: TeacherInput) => updateTeacher(id, input),
+  updateTeacher: (id: string, rev: number, input: TeacherInput) =>
+    updateTeacher(id, rev, input),
   deleteTeacher: vi.fn(() => Promise.resolve()),
   listTeacherMemberships: (teacherId: string) => listTeacherMemberships(teacherId),
   listTeacherCampuses: (teacherId: string) => listTeacherCampuses(teacherId),
@@ -70,6 +72,32 @@ vi.mock("../../ipc/setup", () => ({
   listCycles: vi.fn(() => Promise.resolve([])),
   listPeriodStructures: vi.fn(() => Promise.resolve([])),
   gridPreview: vi.fn(() => Promise.resolve(null)),
+  // Stage B. Empty by default: a suite that is about something else should not have
+  // to describe a curriculum, and one that is about this panel overrides them.
+  listDepartments: vi.fn(() => Promise.resolve([])),
+  listSubjects: vi.fn(() => Promise.resolve([])),
+  listTeacherDepartments: vi.fn(() => Promise.resolve([])),
+  listQualifications: vi.fn(() => Promise.resolve([])),
+  listSubjectTeachers: vi.fn(() => Promise.resolve([])),
+  listDepartmentTeachers: vi.fn(() => Promise.resolve([])),
+  departmentDependents: vi.fn(() =>
+    Promise.resolve({ total: 0, subjects: 0, teachers: 0 }),
+  ),
+  subjectDependents: vi.fn(() => Promise.resolve({ total: 0, qualifiedTeachers: 0 })),
+  addQualification: vi.fn(() => Promise.resolve({})),
+  removeQualification: vi.fn(() => Promise.resolve()),
+  addTeacherDepartment: vi.fn(() => Promise.resolve({})),
+  removeTeacherDepartment: vi.fn(() => Promise.resolve()),
+  createDepartment: vi.fn(() => Promise.resolve({})),
+  updateDepartment: vi.fn(() => Promise.resolve({})),
+  deleteDepartment: vi.fn(() => Promise.resolve()),
+  createSubject: vi.fn(() => Promise.resolve({})),
+  updateSubject: vi.fn(() => Promise.resolve({})),
+  deleteSubject: vi.fn(() => Promise.resolve()),
+  isConflict: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { kind?: string }).kind === "conflict",
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
       ? String((error as { message: unknown }).message)
@@ -261,7 +289,7 @@ describe("editing a teacher preserves every stored workload value", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateTeacher).toHaveBeenCalled());
-    const [id, input] = updateTeacher.mock.calls[0] as [string, TeacherInput];
+    const [id, , input] = updateTeacher.mock.calls[0] as [string, number, TeacherInput];
     expect(id).toBe(ADA.id);
     expect(input.givenName).toBe("Adaeze");
     // The whole point of the stage's riskiest change, asserted exactly.
@@ -281,8 +309,8 @@ describe("editing a teacher preserves every stored workload value", () => {
     await waitFor(() => expect(updateTeacher).toHaveBeenCalled());
     // `100` is `V10`'s `DEFAULT`, and is what a form that rebuilt the draft from nothing
     // would send. It is the single most likely wrong answer here.
-    expect(updateTeacher.mock.calls[0]?.[1].ftePercent).not.toBe(100);
-    expect(updateTeacher.mock.calls[0]?.[1].ftePercent).toBe(60);
+    expect(updateTeacher.mock.calls[0]?.[2].ftePercent).not.toBe(100);
+    expect(updateTeacher.mock.calls[0]?.[2].ftePercent).toBe(60);
   });
 
   it("does not null the three ceilings", async () => {
@@ -293,7 +321,7 @@ describe("editing a teacher preserves every stored workload value", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateTeacher).toHaveBeenCalled());
-    const input = updateTeacher.mock.calls[0]?.[1] as TeacherInput;
+    const input = updateTeacher.mock.calls[0]?.[2] as TeacherInput;
     // `null` is the other likely wrong answer: a hidden field read as "blank" means "no
     // ceiling", which would silently lift a real limit.
     expect(input.maxPeriodsPerDay).not.toBeNull();
@@ -316,7 +344,7 @@ describe("editing a teacher preserves every stored workload value", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateTeacher).toHaveBeenCalled());
-    const input = updateTeacher.mock.calls[0]?.[1] as TeacherInput;
+    const input = updateTeacher.mock.calls[0]?.[2] as TeacherInput;
     // A blank ceiling means *no ceiling*, never zero. Sending `0` would forbid them from
     // teaching at all.
     expect(input.maxPeriodsPerDay).toBeNull();
@@ -335,7 +363,7 @@ describe("editing a teacher preserves every stored workload value", () => {
     await waitFor(() => expect(updateTeacher).toHaveBeenCalled());
     // Omitting a key would be indistinguishable from "leave it alone", which this command
     // never means — and `TeacherInput`'s non-optional fields would fail to deserialise.
-    expect(Object.keys(updateTeacher.mock.calls[0]?.[1] ?? {}).sort()).toEqual([
+    expect(Object.keys(updateTeacher.mock.calls[0]?.[2] ?? {}).sort()).toEqual([
       "code",
       "email",
       "familyName",
@@ -362,7 +390,7 @@ describe("editing a teacher preserves every stored workload value", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateTeacher).toHaveBeenCalledTimes(2));
-    expect(updateTeacher.mock.calls[1]?.[1]).toMatchObject({
+    expect(updateTeacher.mock.calls[1]?.[2]).toMatchObject({
       ftePercent: 60,
       maxPeriodsPerDay: 4,
       maxPeriodsPerCycle: 18,
@@ -445,7 +473,7 @@ describe("home campus and campus eligibility stay different things", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateTeacher).toHaveBeenCalled());
-    expect(updateTeacher.mock.calls[0]?.[1].homeCampusId).toBe(NORTH_MAIN.id);
+    expect(updateTeacher.mock.calls[0]?.[2].homeCampusId).toBe(NORTH_MAIN.id);
   });
 
   it("does not touch the home campus when eligibility changes", async () => {

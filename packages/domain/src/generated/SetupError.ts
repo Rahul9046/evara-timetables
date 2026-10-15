@@ -31,6 +31,22 @@ entity: string,
 /**
  * Message to show.
  */
+message: string, } | { "kind": "conflict", 
+/**
+ * What kind of record it was.
+ */
+entity: string, 
+/**
+ * Revision this window was holding.
+ */
+expected_rev: number, 
+/**
+ * Revision the record is actually at.
+ */
+actual_rev: number, 
+/**
+ * Message to show.
+ */
 message: string, } | { "kind": "duplicate", 
 /**
  * What kind of record collided.

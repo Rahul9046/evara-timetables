@@ -102,15 +102,18 @@ vi.mock("../../ipc/setup", () => ({
   leaveSchool: vi.fn(() => Promise.resolve({})),
   transferStudent: vi.fn(() => Promise.resolve({})),
   createTeacher: (input: unknown) => createTeacher(input),
-  updateTeacher: (id: string, input: unknown) => updateTeacher(id, input),
+  updateTeacher: (id: string, rev: number, input: unknown) =>
+    updateTeacher(id, rev, input),
   deleteTeacher: (id: string) => deleteTeacher(id),
   listStudents: () => listStudents(),
   createStudent: (input: unknown) => createStudent(input),
-  updateStudent: (id: string, input: unknown) => updateStudent(id, input),
+  updateStudent: (id: string, rev: number, input: unknown) =>
+    updateStudent(id, rev, input),
   deleteStudent: (id: string) => deleteStudent(id),
   listStudentGroups: () => listStudentGroups(),
   createStudentGroup: (input: unknown) => createStudentGroup(input),
-  updateStudentGroup: (id: string, input: unknown) => updateStudentGroup(id, input),
+  updateStudentGroup: (id: string, rev: number, input: unknown) =>
+    updateStudentGroup(id, rev, input),
   deleteStudentGroup: (id: string) => deleteStudentGroup(id),
   listGroupMembers: (groupId: string) => listGroupMembers(groupId),
   countGroupMembers: (groupId: string) => countGroupMembers(groupId),
@@ -118,6 +121,32 @@ vi.mock("../../ipc/setup", () => ({
   removeGroupMember: (schoolId: string, groupId: string, studentId: string) =>
     removeGroupMember(schoolId, groupId, studentId),
   listGroupsForStudent: (studentId: string) => listGroupsForStudent(studentId),
+  // Stage B. Empty by default: a suite that is about something else should not have
+  // to describe a curriculum, and one that is about this panel overrides them.
+  listDepartments: vi.fn(() => Promise.resolve([])),
+  listSubjects: vi.fn(() => Promise.resolve([])),
+  listTeacherDepartments: vi.fn(() => Promise.resolve([])),
+  listQualifications: vi.fn(() => Promise.resolve([])),
+  listSubjectTeachers: vi.fn(() => Promise.resolve([])),
+  listDepartmentTeachers: vi.fn(() => Promise.resolve([])),
+  departmentDependents: vi.fn(() =>
+    Promise.resolve({ total: 0, subjects: 0, teachers: 0 }),
+  ),
+  subjectDependents: vi.fn(() => Promise.resolve({ total: 0, qualifiedTeachers: 0 })),
+  addQualification: vi.fn(() => Promise.resolve({})),
+  removeQualification: vi.fn(() => Promise.resolve()),
+  addTeacherDepartment: vi.fn(() => Promise.resolve({})),
+  removeTeacherDepartment: vi.fn(() => Promise.resolve()),
+  createDepartment: vi.fn(() => Promise.resolve({})),
+  updateDepartment: vi.fn(() => Promise.resolve({})),
+  deleteDepartment: vi.fn(() => Promise.resolve()),
+  createSubject: vi.fn(() => Promise.resolve({})),
+  updateSubject: vi.fn(() => Promise.resolve({})),
+  deleteSubject: vi.fn(() => Promise.resolve()),
+  isConflict: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { kind?: string }).kind === "conflict",
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
       ? String((error as { message: unknown }).message)
@@ -291,7 +320,7 @@ describe("Teachers", () => {
     await submitForm(user, /save changes/i);
 
     await waitFor(() => expect(updateTeacher).toHaveBeenCalled());
-    expect(updateTeacher.mock.calls[0]?.[1]).toMatchObject({ isActive: false });
+    expect(updateTeacher.mock.calls[0]?.[2]).toMatchObject({ isActive: false });
     expect(deleteTeacher).not.toHaveBeenCalled();
   });
 });

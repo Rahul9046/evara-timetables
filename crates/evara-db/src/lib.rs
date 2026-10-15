@@ -61,9 +61,13 @@ pub use crate::connection::{BUSY_TIMEOUT, PragmaReport};
 pub use crate::error::{DbError, InternalError, Result};
 pub use crate::meta::ProjectIdentity;
 pub use crate::migrations::supported_schema_version;
-pub use crate::repo::Stamp;
 pub use crate::repo::availability::{
     Availability, AvailabilityEntity, AvailabilityRule, AvailabilityRuleInput, AvailabilityStatus,
+};
+pub use crate::repo::curriculum::{
+    Curriculum, Department, DepartmentDependents, DepartmentInput, QualifiedSubject,
+    QualifiedTeacher, Subject, SubjectDependents, SubjectInput, TeacherDepartment,
+    TeacherDepartmentInput, TeacherDepartmentView, TeacherQualification, TeacherQualificationInput,
 };
 pub use crate::repo::membership::{
     EnrolmentStatus, Membership, StudentEnrolment, StudentEnrolmentInput, StudentInSchool,
@@ -86,6 +90,7 @@ pub use crate::repo::time_model::{
     PeriodStructure, PeriodStructureInput, PlanFingerprint, PlannedSlot, TimeModel, Timeslot,
     TimeslotInput, WeeklyCycleDay,
 };
+pub use crate::repo::{Expected, Stamp};
 pub use crate::settings::{MAX_RECENT_PROJECTS, RecentProject, Settings};
 pub use crate::workspace::{PROJECT_EXTENSION, ProjectSummary, Workspace};
 
@@ -317,6 +322,18 @@ impl Database {
         Membership::new(self)
     }
 
+    /// Reads and writes departments, subjects, qualifications and department membership.
+    ///
+    /// Separate from [`Database::people`] for the reason [`Database::membership`] is: a
+    /// teacher is one row for one person, while what they are *qualified* to teach names a
+    /// school-owned subject and what *department* they are in names one school's internal
+    /// organisation. Those are two different scopes meeting on one identity, and
+    /// [adr/0025](../../docs/adr/0025-teacher-qualifications-across-school-owned-subjects.md)
+    /// is about keeping them apart.
+    pub fn curriculum(&mut self) -> Curriculum<'_> {
+        Curriculum::new(self)
+    }
+
     /// Reads the connection settings back from SQLite, for diagnostics and tests.
     ///
     /// # Errors
@@ -384,6 +401,12 @@ mod tests_support;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod tests_concurrency;
+
+#[cfg(test)]
+mod tests_curriculum;
 
 #[cfg(test)]
 mod tests_lifecycle;

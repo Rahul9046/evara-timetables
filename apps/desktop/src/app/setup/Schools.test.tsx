@@ -23,16 +23,42 @@ import type { School, SchoolDependents } from "@evara/domain";
 
 const listSchools = vi.fn<() => Promise<School[]>>();
 const createSchool = vi.fn<(input: unknown) => Promise<School>>();
-const updateSchool = vi.fn<(id: string, input: unknown) => Promise<School>>();
-const deleteSchool = vi.fn<(id: string) => Promise<void>>();
+const updateSchool = vi.fn<(id: string, rev: number, input: unknown) => Promise<School>>();
+const deleteSchool = vi.fn<(id: string, rev: number) => Promise<void>>();
 const schoolDependents = vi.fn<(id: string) => Promise<SchoolDependents>>();
 
 vi.mock("../../ipc/setup", () => ({
   listSchools: () => listSchools(),
   createSchool: (input: unknown) => createSchool(input),
-  updateSchool: (id: string, input: unknown) => updateSchool(id, input),
-  deleteSchool: (id: string) => deleteSchool(id),
+  updateSchool: (id: string, rev: number, input: unknown) => updateSchool(id, rev, input),
+  deleteSchool: (id: string, rev: number) => deleteSchool(id, rev),
   schoolDependents: (id: string) => schoolDependents(id),
+  // Stage B. Empty by default: a suite that is about something else should not have
+  // to describe a curriculum, and one that is about this panel overrides them.
+  listDepartments: vi.fn(() => Promise.resolve([])),
+  listSubjects: vi.fn(() => Promise.resolve([])),
+  listTeacherDepartments: vi.fn(() => Promise.resolve([])),
+  listQualifications: vi.fn(() => Promise.resolve([])),
+  listSubjectTeachers: vi.fn(() => Promise.resolve([])),
+  listDepartmentTeachers: vi.fn(() => Promise.resolve([])),
+  departmentDependents: vi.fn(() =>
+    Promise.resolve({ total: 0, subjects: 0, teachers: 0 }),
+  ),
+  subjectDependents: vi.fn(() => Promise.resolve({ total: 0, qualifiedTeachers: 0 })),
+  addQualification: vi.fn(() => Promise.resolve({})),
+  removeQualification: vi.fn(() => Promise.resolve()),
+  addTeacherDepartment: vi.fn(() => Promise.resolve({})),
+  removeTeacherDepartment: vi.fn(() => Promise.resolve()),
+  createDepartment: vi.fn(() => Promise.resolve({})),
+  updateDepartment: vi.fn(() => Promise.resolve({})),
+  deleteDepartment: vi.fn(() => Promise.resolve()),
+  createSubject: vi.fn(() => Promise.resolve({})),
+  updateSubject: vi.fn(() => Promise.resolve({})),
+  deleteSubject: vi.fn(() => Promise.resolve()),
+  isConflict: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { kind?: string }).kind === "conflict",
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
       ? String((error as { message: unknown }).message)
@@ -82,6 +108,8 @@ function empty(): SchoolDependents {
     timeslots: 0,
     calendarDays: 0,
     yearLevels: 0,
+    departments: 0,
+    subjects: 0,
     teachers: 0,
     students: 0,
     studentGroups: 0,
@@ -278,7 +306,7 @@ describe("editing a school", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateSchool).toHaveBeenCalled());
-    expect(updateSchool).toHaveBeenCalledWith(NORTH.id, {
+    expect(updateSchool).toHaveBeenCalledWith(NORTH.id, 1, {
       name: "Northgate Academy",
       code: "NGS",
       timezone: "Europe/London",
@@ -299,7 +327,7 @@ describe("editing a school", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateSchool).toHaveBeenCalled());
-    expect(updateSchool.mock.calls[0]?.[1]).toMatchObject({
+    expect(updateSchool.mock.calls[0]?.[2]).toMatchObject({
       code: "NGS",
       workingDays: [1, 2, 3, 4, 5, 6],
     });
@@ -316,7 +344,7 @@ describe("editing a school", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateSchool).toHaveBeenCalled());
-    expect(updateSchool.mock.calls[0]?.[1]).toMatchObject({ code: "NGA" });
+    expect(updateSchool.mock.calls[0]?.[2]).toMatchObject({ code: "NGA" });
   });
 
   it("keeps a timezone this build does not offer", async () => {
@@ -331,7 +359,7 @@ describe("editing a school", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateSchool).toHaveBeenCalled());
-    expect(updateSchool.mock.calls[0]?.[1]).toMatchObject({
+    expect(updateSchool.mock.calls[0]?.[2]).toMatchObject({
       timezone: "Mars/Olympus_Mons",
     });
   });
@@ -387,7 +415,7 @@ describe("deleting a school", () => {
     expect(within(dialog).getByText(/holds nothing/)).toBeTruthy();
     await user.click(within(dialog).getByRole("button", { name: "Delete school" }));
 
-    await waitFor(() => expect(deleteSchool).toHaveBeenCalledWith(SOUTH.id));
+    await waitFor(() => expect(deleteSchool).toHaveBeenCalledWith(SOUTH.id, 1));
     expect(onChanged).toHaveBeenCalled();
   });
 

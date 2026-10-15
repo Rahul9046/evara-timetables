@@ -15,19 +15,47 @@
 //! This is deliberately *not* an ORM. Repositories still write their own SQL for the
 //! columns they own; what is centralised is only the part that must never vary.
 //!
+//! # Optimistic concurrency — Stage B
+//!
+//! [`Expected`] is the other half of [`Stamp`]. A stamp says what a *new* row's revision
+//! is; an expectation says what an *existing* row's revision was when the caller last
+//! looked at it. Both [`update`] and [`delete`] take one, and both put it in the statement
+//! as a predicate:
+//!
+//! ```sql
+//! UPDATE room SET ..., updated_at = ?, rev = rev + 1 WHERE id = ? AND rev = ?
+//! ```
+//!
+//! That ordering is the point. The sequence *read the revision, compare it in Rust, then
+//! write* is not a concurrency control at all — it is a race with a longer window — so it
+//! is not available here: the comparison is the `WHERE` clause, and a caller cannot reach
+//! the write without it. When the predicate matches nothing, one extra read inside the same
+//! transaction decides whether the row is absent ([`DbError::NotFound`]) or merely moved on
+//! ([`DbError::Conflict`]), because the interface's next step differs completely between
+//! the two. Nothing was written either way: no revision was consumed and no trigger fired,
+//! so the change feed gains no entry for a conflict.
+//!
+//! Until Stage B no write took a precondition, and the roadmap called that *"the last thing
+//! between this phase and done"* — two windows on one project could overwrite each other,
+//! and the second save won silently. See
+//! [adr/0027](../../../docs/adr/0027-revisions-are-checked-on-write.md) for the contract
+//! each category of mutation carries, including the ones for which a revision is
+//! deliberately the wrong question.
+//!
 //! # Transactions
 //!
 //! Every function here takes a [`Transaction`], so a multi-statement operation is one unit
 //! and the change-log rows it produces share its fate. Nothing in this module opens or
 //! commits a transaction of its own.
 
-use rusqlite::{OptionalExtension, Transaction, types::ToSql};
+use rusqlite::{Connection, OptionalExtension, Transaction, types::ToSql};
 use uuid::Uuid;
 
 use crate::error::{DbError, Result};
 use crate::meta::now_iso8601;
 
 pub mod availability;
+pub mod curriculum;
 pub mod membership;
 pub mod people;
 pub(crate) mod row;
@@ -71,6 +99,49 @@ impl Default for Stamp {
     }
 }
 
+/// The revision a caller believes a row is at.
+///
+/// The counterpart of [`Stamp`]: a stamp describes a row being created, an expectation
+/// describes a row already there. Passed to [`update`] and [`delete`], which put it in the
+/// statement's `WHERE` clause rather than comparing it beforehand — see this module's
+/// header for why that distinction is the whole mechanism.
+///
+/// # Why an enum rather than `Option<i64>`
+///
+/// Because "I have no revision in hand" is a claim worth making out loud. `None` reads as
+/// an absent argument that somebody may simply have forgotten to thread through;
+/// [`Expected::Any`] is a sentence, it is greppable, and every use of it in this crate is
+/// one of three documented kinds:
+///
+/// 1. A **cascade** inside another operation's transaction — clearing a classification
+///    reference, mirroring a value onto a compatibility column. The user never saw that
+///    row's revision, so demanding it would mean inventing one.
+/// 2. An operation whose concurrency contract is **not** a revision, recorded in ADR 0027
+///    §4: a relationship that either exists or does not, an availability cell, a
+///    materialisation guarded by a plan fingerprint instead.
+/// 3. A **test** that is about something else entirely.
+///
+/// No command handler constructs one. Every mutation the interface can reach takes a
+/// revision from the record it is looking at, which is what makes the coverage claim in
+/// ADR 0027 §3 checkable rather than hopeful.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Expected {
+    /// The caller read the row at this revision and will not overwrite a newer one.
+    Rev(i64),
+    /// The caller has no revision in hand. One of the three kinds above, and said so.
+    Any,
+}
+
+impl Expected {
+    /// The revision to match, or `None` for [`Expected::Any`].
+    const fn rev(self) -> Option<i64> {
+        match self {
+            Self::Rev(rev) => Some(rev),
+            Self::Any => None,
+        }
+    }
+}
+
 /// Accepts only a plain lowercase SQL identifier.
 ///
 /// Table and column names are interpolated into statements and cannot be parameter-bound,
@@ -99,10 +170,17 @@ pub(crate) fn identifier(value: &str) -> Result<&str> {
 /// `updated_at` and `rev` clauses are appended here and must **not** appear in
 /// `assignments`.
 ///
-/// Returns the new [`Stamp`] values for the row.
+/// `expected` becomes part of the statement's `WHERE` clause, so the revision check and
+/// the write are one atomic operation rather than a read followed by a hopeful write. A
+/// row that has moved on since the caller read it matches nothing, so nothing is written:
+/// no column changes, no revision is consumed and no change-log trigger fires.
+///
+/// Returns the new `updated_at` and `rev` for the row.
 ///
 /// # Errors
 ///
+/// - [`DbError::Conflict`] if the row is there at a different revision. Somebody else
+///   saved first, and the caller's values would have overwritten theirs.
 /// - [`DbError::NotFound`] if no row has that identifier, in which case nothing was
 ///   written and no revision was consumed.
 /// - Any constraint failure, which aborts the statement and likewise leaves `rev`
@@ -112,6 +190,7 @@ pub(crate) fn update(
     entity: &'static str,
     table: &str,
     id: Uuid,
+    expected: Expected,
     assignments: &str,
     params: &[&dyn ToSql],
 ) -> Result<(String, i64)> {
@@ -124,19 +203,29 @@ pub(crate) fn update(
     let updated_at = now_iso8601();
     let id_text = id.to_string();
 
-    let sql =
-        format!("UPDATE {table} SET {assignments}, updated_at = ?, rev = rev + 1 WHERE id = ?");
+    let predicate = match expected {
+        Expected::Rev(_) => " AND rev = ?",
+        Expected::Any => "",
+    };
+    let sql = format!(
+        "UPDATE {table} SET {assignments}, updated_at = ?, rev = rev + 1 \
+         WHERE id = ?{predicate}"
+    );
 
     let mut bound: Vec<&dyn ToSql> = params.to_vec();
     bound.push(&updated_at);
     bound.push(&id_text);
+    let rev_arg = expected.rev();
+    if let Some(ref value) = rev_arg {
+        bound.push(value);
+    }
 
     let changed = tx
         .execute(&sql, bound.as_slice())
         .map_err(|error| translate(error, entity))?;
 
     if changed == 0 {
-        return Err(DbError::NotFound { entity });
+        return Err(why_nothing_matched(tx, entity, table, id, expected)?);
     }
 
     // Read the revision back rather than assuming: the row is the authority, and this
@@ -148,6 +237,45 @@ pub(crate) fn update(
     )?;
 
     Ok((updated_at, rev))
+}
+
+/// Explains a write that matched no row.
+///
+/// Called only after an `UPDATE` or `DELETE` carrying the revision predicate changed
+/// nothing, and inside that same transaction, so the answer it reads is the state the
+/// predicate was evaluated against. The write has already failed atomically; this decides
+/// only what to *call* the failure — and the two names need completely different responses
+/// from the interface. "That record no longer exists" sends somebody looking for something
+/// that is in fact there, and "somebody else changed it" sends them looking for an edit
+/// that never happened.
+fn why_nothing_matched(
+    tx: &Transaction<'_>,
+    entity: &'static str,
+    table: &str,
+    id: Uuid,
+    expected: Expected,
+) -> Result<DbError> {
+    let Some(wanted) = expected.rev() else {
+        // No predicate was in play, so the row is simply not there.
+        return Ok(DbError::NotFound { entity });
+    };
+
+    let actual: Option<i64> = tx
+        .query_row(
+            &format!("SELECT rev FROM {table} WHERE id = ?"),
+            [&id.to_string()],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    Ok(match actual {
+        None => DbError::NotFound { entity },
+        Some(actual) => DbError::Conflict {
+            entity,
+            expected: wanted,
+            actual,
+        },
+    })
 }
 
 /// Refuses a write whose target row belongs to a different school.
@@ -165,12 +293,18 @@ pub(crate) fn update(
 /// This form reads the column directly, for the tables that name their school. A child
 /// whose ownership is only reachable through a parent uses [`require_school_owner`].
 ///
+/// Takes a [`Connection`] rather than a [`Transaction`], which costs a write call site
+/// nothing — `&Transaction` coerces — and lets a *read* refuse a wrong-school identifier
+/// without opening a write transaction to ask a question. `Curriculum::subject_teachers`
+/// is why: another school may not read this school's qualifications, and making that true
+/// should not mean taking a write lock.
+///
 /// # Errors
 ///
 /// - [`DbError::NotFound`] if no row has that identifier.
 /// - [`DbError::WrongSchool`] if one does and another school owns it.
 pub(crate) fn require_same_school(
-    tx: &Transaction<'_>,
+    conn: &Connection,
     entity: &'static str,
     table: &str,
     id: Uuid,
@@ -178,7 +312,7 @@ pub(crate) fn require_same_school(
 ) -> Result<()> {
     let table = identifier(table)?;
     require_school_owner(
-        tx,
+        conn,
         entity,
         &format!("SELECT school_id FROM {table} WHERE id = ?"),
         id,
@@ -204,13 +338,13 @@ pub(crate) fn require_same_school(
 ///   parent chain is broken, and neither is a licence to delete anything.
 /// - [`DbError::WrongSchool`] if it returns a different school.
 pub(crate) fn require_school_owner(
-    tx: &Transaction<'_>,
+    conn: &Connection,
     entity: &'static str,
     owner_query: &str,
     id: Uuid,
     school_id: Uuid,
 ) -> Result<()> {
-    let owner: Option<String> = tx
+    let owner: Option<String> = conn
         .query_row(owner_query, [&id.to_string()], |row| row.get(0))
         .optional()?;
 
@@ -221,13 +355,19 @@ pub(crate) fn require_school_owner(
     }
 }
 
-/// Deletes one row.
+/// Deletes one row, at the revision the caller expects it to be at.
 ///
 /// The change-log `DELETE` trigger fires inside the caller's transaction, so a removed
 /// row stays attributable even though the row itself is gone.
 ///
+/// `expected` is in the `WHERE` clause for the same reason as in [`update`]: a row
+/// somebody else has edited since the caller read it must not be deleted on the strength
+/// of what it used to say. A delete is the one mutation where losing the other edit is
+/// irreversible, so it is checked exactly as carefully as an update.
+///
 /// # Errors
 ///
+/// - [`DbError::Conflict`] if the row is there at a different revision.
 /// - [`DbError::NotFound`] if nothing matched.
 /// - [`DbError::StillReferenced`] if a foreign key with `ON DELETE RESTRICT` blocks it.
 pub(crate) fn delete(
@@ -235,17 +375,29 @@ pub(crate) fn delete(
     entity: &'static str,
     table: &str,
     id: Uuid,
+    expected: Expected,
 ) -> Result<()> {
     let table = identifier(table)?;
+    let id_text = id.to_string();
+
+    let predicate = match expected {
+        Expected::Rev(_) => " AND rev = ?",
+        Expected::Any => "",
+    };
+    let sql = format!("DELETE FROM {table} WHERE id = ?{predicate}");
+
+    let mut bound: Vec<&dyn ToSql> = vec![&id_text];
+    let rev_arg = expected.rev();
+    if let Some(ref value) = rev_arg {
+        bound.push(value);
+    }
+
     let changed = tx
-        .execute(
-            &format!("DELETE FROM {table} WHERE id = ?"),
-            [&id.to_string()],
-        )
+        .execute(&sql, bound.as_slice())
         .map_err(|error| translate(error, entity))?;
 
     if changed == 0 {
-        return Err(DbError::NotFound { entity });
+        return Err(why_nothing_matched(tx, entity, table, id, expected)?);
     }
     Ok(())
 }

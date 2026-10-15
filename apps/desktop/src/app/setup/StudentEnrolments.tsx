@@ -280,7 +280,7 @@ export function StudentEnrolments(props: {
     setProblems(found);
     if (!isValid(found)) return;
     if (mode === "edit" && current) {
-      run(() => updateEnrolment(school.id, current.id, spellFrom(school.id)));
+      run(() => updateEnrolment(school.id, current.id, current.rev, spellFrom(school.id)));
     } else {
       run(() => enrolStudent(spellFrom(school.id)));
     }
@@ -513,7 +513,16 @@ export function StudentEnrolments(props: {
         tone="danger"
         busy={busy}
         onConfirm={() =>
-          run(() => leaveSchool(school.id, student.id, leftOn.trim().length === 0 ? null : leftOn.trim()))
+          run(() =>
+            leaveSchool(
+              school.id,
+              student.id,
+              // The spell being ended is the row that changes, so its revision is the
+              // precondition — not the student's, which this does not touch.
+              current?.rev ?? 0,
+              leftOn.trim().length === 0 ? null : leftOn.trim(),
+            ),
+          )
         }
         onCancel={() => setLeaving(false)}
       >
@@ -549,7 +558,18 @@ export function StudentEnrolments(props: {
         busy={busy}
         onConfirm={() => {
           if (summary === null) return;
-          run(() => transferStudent(school.id, summary.schoolId, student.id, summary));
+          // One call, still atomic across two schools, with the LEAVING spell's revision
+          // as the precondition: it is the only existing row a transfer rewrites. The
+          // arriving spell is an insert and has no prior version. ADR 0027 §4.
+          run(() =>
+            transferStudent(
+              school.id,
+              summary.schoolId,
+              student.id,
+              current?.rev ?? 0,
+              summary,
+            ),
+          );
         }}
         onCancel={() => setSummary(null)}
       >

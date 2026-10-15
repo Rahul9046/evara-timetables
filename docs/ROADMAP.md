@@ -136,9 +136,10 @@ preview.
 > without a screen. Scheduling *against* resources is still Phase 4's.
 >
 > Stage 0C also added a Schools section; Stage A then split Year levels out of Students and
-> announced Lessons, so the workflow is **fifteen** sections, in configuration rather than
-> dependency order — see [adr/0023](adr/0023-the-interface-scopes-to-one-school.md) for the
-> school scoping, and the Stage A entry below for the order.
+> announced Lessons; Stage B inserted Departments and Subjects before that announcement, so
+> the workflow is **seventeen** sections, in configuration rather than dependency order —
+> see [adr/0023](adr/0023-the-interface-scopes-to-one-school.md) for the school scoping, and
+> the Stage A and Stage B entries below for the order.
 
 Three things in it are more than CRUD:
 
@@ -273,10 +274,11 @@ used to come last, after the grid, on the reasoning that nothing about them depe
 That was defensible and produced a workflow nobody follows — a school knows who it teaches
 long before it has decided what its rotation looks like, and being asked for a six-day
 cycle before being asked for a year level is being asked the abstract question first. The
-fifteen sections now run: which institution (Schools, School details), where it is
+fifteen sections ran: which institution (Schools, School details), where it is
 (Campuses, Rooms, Resources), the shape of a school year (Academic years, Year levels),
 what is taught (**Lessons** — Stage C, announced and disabled), who (Teachers, Students,
-Student groups), and when (Cycles, Bell schedules, Calendar, Grid preview).
+Student groups), and when (Cycles, Bell schedules, Calendar, Grid preview). Stage B then put
+**Departments** and **Subjects** in front of the Lessons entry, making seventeen.
 
 The one genuine dependency this inverts is **availability**, which is set against a cycle's
 days and a bell schedule's periods and now appears before either exists. It degrades
@@ -317,32 +319,129 @@ pass.
 > in this stage creates a lessons table, form, placeholder row or scheduling model, and the
 > navigation entry has no `render` at all so it cannot be opened.
 
-Remaining in this phase:
+**Curriculum prerequisites and revision checking (Stage B) ✅ complete.** Migration `V14`,
+additive with no backfill: `department` and `subject` (school-owned), `teacher_qualification`
+(project-level) and `teacher_department` (a narrowing of membership). And the item this phase
+has carried since Phase 1E — **every write now states the revision it was built on.**
 
-- Migration for `department`, `subject` and `teacher_qualification`, plus
-  `teacher.department_id`, and a Subjects screen. Deferred to the Curriculum work that
-  first reads them.
-- `rev` checking on update, for optimistic concurrency — still outstanding from the item
-  above, and the last thing between this phase and done.
-- ~~Type generation (`ts-rs`) wired into the build, plus the typed `src/ipc/` wrappers.~~
-  Done in Phase 1E.
-- ~~One reusable table + form shell in the UI.~~ Done in Phase 1E —
-  `app/ui/CrudPanel.tsx` takes a declarative spec and the People screens should use it.
-- Remaining from this item: `rev` checking on update, for optimistic concurrency. Phase 1E
-  exposes `rev` to the interface but no command takes it as a precondition yet, so a
-  second window can still overwrite the first's edit.
-- ~~Screens: Teachers, Student Groups, Year Levels.~~ Done. Subjects remains, with the
-  migration above; Rooms shipped in Phase 1E.
-- ~~The `availability` table and an availability grid editor shared by teachers, rooms and
-  groups.~~ **Done.** Migration `V11`, one polymorphic table for all six entity kinds, and
-  one keyboard-navigable grid wired into Teachers, Rooms and Student groups. Axes come from
-  `GridPreview`, so cycle days and periods are never re-derived.
+What it delivers, and the two decisions in it that are not obvious:
+
+- **A qualification is a property of the person**, naming one school-owned subject. A
+  teacher shared between two schools who teaches Mathematics at both holds *two*
+  qualifications, one per subject record, and remains *one* teacher. It carries no
+  `school_id` — the subject supplies it — requires no school membership, and **outlives
+  one**: deactivating a teacher, withdrawing a membership, archiving them, changing their
+  campuses and changing their department all leave it exactly where it was. Only an explicit
+  removal, or deleting the person, takes it. See
+  [adr/0025](adr/0025-teacher-qualifications-across-school-owned-subjects.md), which also
+  settles **[OPEN 6]** of the audit and records one deliberate departure from ADR 0010.
+- **`teacher.department_id` is not added, now or later.** `V10` reserved it and `V13` made it
+  wrong: one column on a project-level identity cannot say "Mathematics at Northgate, Science
+  at Southmoor". The audit's own `teacher_school.department_id` fixes the scope and not the
+  cardinality — Mathematics *and* Physics at one school is just as ordinary. So the
+  association is its own table, modelled on `teacher_campus` down to the trigger names.
+  [adr/0026](adr/0026-teacher-departments-are-a-narrowing-of-membership.md).
+
+**`rev` is now a precondition, not only a record.** The revision goes in the statement's
+`WHERE` clause, so the check and the write are one atomic operation rather than a read
+followed by a hopeful write:
+
+```sql
+UPDATE room SET ..., updated_at = ?, rev = rev + 1 WHERE id = ? AND rev = ?
+```
+
+A stale save matches nothing, so nothing is written: no column changes, no revision is
+consumed, and no change-log entry is appended. It is reported as `DbError::Conflict`, which
+the interface distinguishes from `NotFound` because the responses differ completely — one
+means reload, the other means it has gone.
+
+**44 of the 84 mutation commands take `expectedRev`**, which is every category where a lost
+update is possible: 20 single-record updates, 19 deletes, the per-school employment flag, a
+spell's placement and departure, and the atomic transfer. The other 40 are classified rather
+than omitted — 20 creations (no previous version exists), 14 relationships (existence, not
+revision), 2 plan-guarded grid calls (a `PlanFingerprint`, which is stronger), and 4
+documented last-write-wins exceptions. The full inventory, including the one residual gap
+(a school logo), is [adr/0027](adr/0027-revisions-are-checked-on-write.md) §3 and §4.
+
+**What the interface does with a refusal** is the half a backend guarantee is worthless
+without, and `CrudPanel` does none of the four tempting wrong things: it never retries with a
+fresh revision, never discards what the user typed, never reports success, and offers a
+reload rather than performing one. ADR 0027 §6, asserted in `RevisionConflicts.test.tsx` as
+four things *not* happening.
+
+**Two new School Setup sections, at 8 and 9** — before the Lessons entry that announces
+Stage C rather than after it, because that is the dependency: a lesson is taught *of* a
+subject. The workflow is **seventeen** sections.
+
+- **Departments** — this school's own organisational units, never shared, so two schools may
+  each hold a Mathematics Department. A delete is refused while subjects or staff still refer
+  to it, and *explained with counts read before the button is offered* rather than failing
+  when it is pressed.
+- **Subjects** — what the school teaches. Two schools' Mathematics are two records that may
+  share a name *and* a code; nothing merges them. The department picker offers this school's
+  departments and no others, and a school with none is told so rather than blocked, because
+  the field is optional. A read-only panel lists who is qualified.
+- **Teachers** gains a *Curriculum* panel keeping the two kinds of fact visibly apart. Both
+  lists are project-wide and grouped by owning school; another school's rows are shown,
+  labelled and not editable, which is ADR 0023 §5's rule applied once more.
+
+The existing frontend suite came out of this stronger rather than merely adjusted: every
+assertion that checked a payload now also pins that the screen sent the row's own revision,
+and fixtures moved off `rev: 1` wherever an assertion reads one, so a screen sending a
+default cannot pass by coincidence. 65 Rust tests added across two new suites and 58 frontend
+tests across three; **582 Rust and 980 frontend tests pass.**
+
+> Deliberately **not** in Stage B, and not implied by it: qualification levels or
+> certification expiry (ADR 0025's *Known limitation*), a head of department or a
+> primary-department flag (ADR 0026's), a department hierarchy, a project-wide subject
+> catalogue (rejected in ADR 0025 §2), `subject.colour` and `subject.default_room_type_id`
+> (Phase 7 and Stage C respectively), **Lessons** and activity modelling (**Stage C**, which
+> is what the disabled navigation entry still announces), and Excel roster imports
+> (**Stage D**). Nothing here creates a lessons, course or class-section table.
+>
+> Nor is any kind of **merge** claimed. A conflict is reported and the user decides; a merge
+> Evara performed itself would be a guess about intent, which is the one thing a timetable
+> cannot afford.
+
+Remaining in this phase: **nothing.** Both open items are closed.
 
 **Closes M1-3, M1-4, M1-5, M1-6.**
 
 ---
 
 ## Phase 3 — Curriculum and activities
+
+### What Stage B leaves Stage C to build on
+
+`V14` deliberately stopped at the prerequisites, so the contract Stage C inherits is worth
+stating once rather than rediscovering:
+
+- **A lesson is taught *of* a subject**, by identifier. `subject.id` is UUIDv7 and never
+  renumbered, so a school that entered its curriculum in Stage B finds it still means the
+  same thing. `course.subject_id` is `RESTRICT`, like every ownership edge, and
+  `Curriculum::subject_dependents` is the place to add the new count so a refused subject
+  delete goes on explaining itself.
+- **A subject is school-owned, and `course` must be too.** Two schools' "Mathematics" are
+  two records; a course referencing one is a course of that school. Resolve the school
+  through `subject.school_id` rather than adding a second `school_id` to `course` — the same
+  rule `V14`'s own tables follow.
+- **Assigning a teacher to a lesson requires the conjunction**, not the qualification alone:
+  a `teacher_qualification` for the lesson's subject, an **active** `teacher_school`
+  membership at the lesson's school, and `teacher_campus` eligibility where the lesson's
+  campus is constrained. ADR 0025 §4 settles this and explains why a qualification on its own
+  is never authority to timetable somebody: it outlives employment on purpose.
+- **Offer qualified teachers, do not require them.** `Curriculum::subject_teachers` is the
+  read a lesson's teacher picker wants; it is project-wide in the people it returns, so a
+  visiting teacher qualified for this school's Chemistry appears. Whether an *unqualified*
+  assignment is refused or merely warned about is Stage C's decision and should be an ADR,
+  because a school mid-term with one absent specialist will want the warning.
+- **A department is not a scheduling concept yet.** Phase 4's load constraints are its first
+  reader. A lesson does not belong to a department; its subject may.
+- **Every new update and delete takes `expectedRev`.** ADR 0027 §3's inventory is the shape
+  to extend, not a one-off: a Stage C command that omits it would be the only unguarded
+  single-record write in the project.
+
+### The work
 
 - Migration `0003`: Curriculum group, then Activities group (activity, activity_teacher,
   activity_group, activity_room_candidate, activity_resource, line, line_member,
@@ -475,8 +574,8 @@ Phase 2's remaining work is sequenced as stages, which is how the multi-school a
 | 0B | Shared identities and school memberships (`V13`) | ✅ complete |
 | 0C | Multi-school management interface | ✅ complete |
 | **A** | **School Setup UX restructuring** | ✅ **complete** |
-| B | Subjects, departments, teacher qualifications, `rev` checking | next |
-| C | Lessons and activity modelling | after B |
+| **B** | **Subjects, departments, teacher qualifications, `rev` checking** | ✅ **complete** |
+| C | Lessons and activity modelling | next |
 | D | Excel roster imports | after C |
 
 Lessons already appears in the School Setup navigation, disabled and labelled, so the order

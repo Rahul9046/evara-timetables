@@ -28,9 +28,12 @@ use rusqlite::{OptionalExtension, Transaction};
 use uuid::Uuid;
 
 use super::availability::{AvailabilityEntity, clear_for_entity};
+use super::curriculum::curriculum_counts;
 use super::membership::eligibility_at_campus;
 use super::row::{entity, opt_text, parse_id_text, text};
-use super::{Stamp, delete, require_same_school, require_school_owner, translate, update};
+use super::{
+    Expected, Stamp, delete, require_same_school, require_school_owner, translate, update,
+};
 use crate::Database;
 use crate::error::{DbError, Result};
 
@@ -299,13 +302,19 @@ impl Structure<'_> {
     ///
     /// [`DbError::NotFound`] if no school has that identifier;
     /// [`DbError::DuplicateValue`] if the name or code is taken by another school.
-    pub fn update_school(&mut self, id: Uuid, input: &SchoolInput) -> Result<School> {
+    pub fn update_school(
+        &mut self,
+        id: Uuid,
+        expected: Expected,
+        input: &SchoolInput,
+    ) -> Result<School> {
         self.db.write(|tx| {
             update(
                 tx,
                 "school",
                 "school",
                 id,
+                expected,
                 "name = ?, code = ?, timezone = ?, locale = ?, working_days = ?",
                 &[
                     &input.name,
@@ -350,6 +359,9 @@ impl Structure<'_> {
             let student_groups = count("SELECT COUNT(*) FROM student_group WHERE school_id = ?")?;
             let availability_rules =
                 count("SELECT COUNT(*) FROM availability WHERE school_id = ?")?;
+            // V14's two. Resolved next to the tables they are about, so this function does
+            // not become the second place that knows what a curriculum row means.
+            let (departments, subjects) = curriculum_counts(conn, school_id)?;
             // Only people the school did NOT create. Its own are already counted above,
             // and counting a home teacher twice would make the "can this be deleted?"
             // total disagree with itself. These are the shared ones: somebody another
@@ -376,6 +388,8 @@ impl Structure<'_> {
                     + timeslots
                     + calendar_days
                     + year_levels
+                    + departments
+                    + subjects
                     + teachers
                     + students
                     + student_groups
@@ -391,6 +405,8 @@ impl Structure<'_> {
                 timeslots,
                 calendar_days,
                 year_levels,
+                departments,
+                subjects,
                 teachers,
                 students,
                 student_groups,
@@ -422,7 +438,7 @@ impl Structure<'_> {
     /// - [`DbError::NotFound`] if no school has that identifier.
     /// - [`DbError::StillReferenced`] if it still owns anything. Call
     ///   [`Structure::school_dependents`] first to say what.
-    pub fn delete_school(&mut self, id: Uuid) -> Result<()> {
+    pub fn delete_school(&mut self, id: Uuid, expected: Expected) -> Result<()> {
         if self.school(id)?.is_none() {
             return Err(DbError::NotFound { entity: "school" });
         }
@@ -443,9 +459,9 @@ impl Structure<'_> {
                 .optional()?;
             if let Some(logo_id) = logo {
                 let logo_id = parse_id_text("school_logo.id", &logo_id)?;
-                delete(tx, "school logo", "school_logo", logo_id)?;
+                delete(tx, "school logo", "school_logo", logo_id, Expected::Any)?;
             }
-            delete(tx, "school", "school", id)
+            delete(tx, "school", "school", id, expected)
         })
     }
 
@@ -490,6 +506,15 @@ pub struct SchoolDependents {
     pub calendar_days: i64,
     /// Year levels owned by the school.
     pub year_levels: i64,
+    /// Departments owned by the school.
+    pub departments: i64,
+    /// Subjects owned by the school.
+    ///
+    /// A subject blocks the delete through its own `school_id`, and so does every
+    /// qualification recorded against it, through the subject. Counting the subjects is
+    /// enough to explain the refusal — a school is told to remove its curriculum, not
+    /// handed an arithmetic of what hangs off it.
+    pub subjects: i64,
     /// Teachers owned by the school.
     pub teachers: i64,
     /// Students owned by the school.
@@ -605,6 +630,7 @@ impl Structure<'_> {
                     "school logo",
                     "school_logo",
                     id,
+                    Expected::Any,
                     "media_type = ?, bytes = ?, width = ?, height = ?",
                     &[&media_type, &bytes, &width, &height],
                 )?;
@@ -665,7 +691,7 @@ impl Structure<'_> {
         };
         let id = parse_id_text("school_logo.id", &raw)?;
         self.db
-            .write(|tx| delete(tx, "school logo", "school_logo", id))
+            .write(|tx| delete(tx, "school logo", "school_logo", id, Expected::Any))
     }
 
     /// The format of a stored logo, or `None` if the project names one this build cannot read.
@@ -840,7 +866,12 @@ impl Structure<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`] or [`DbError::DuplicateValue`].
-    pub fn update_campus(&mut self, id: Uuid, input: &CampusInput) -> Result<Campus> {
+    pub fn update_campus(
+        &mut self,
+        id: Uuid,
+        expected: Expected,
+        input: &CampusInput,
+    ) -> Result<Campus> {
         self.db.write(|tx| {
             require_same_school(tx, "campus", "campus", id, input.school_id)?;
             update(
@@ -848,6 +879,7 @@ impl Structure<'_> {
                 "campus",
                 "campus",
                 id,
+                expected,
                 "name = ?, code = ?, address = ?",
                 &[&input.name, &input.code, &input.address],
             )
@@ -878,17 +910,23 @@ impl Structure<'_> {
     /// # Errors
     ///
     /// [`DbError::StillReferenced`] if buildings, rooms or resources remain on it.
-    pub fn delete_campus(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+    pub fn delete_campus(&mut self, school_id: Uuid, id: Uuid, expected: Expected) -> Result<()> {
         self.db.write(|tx| {
             require_same_school(tx, "campus", "campus", id, school_id)?;
             clear_for_entity(tx, AvailabilityEntity::Campus, id)?;
             for eligibility in eligibility_at_campus(tx, id)? {
-                delete(tx, "campus eligibility", "teacher_campus", eligibility)?;
+                delete(
+                    tx,
+                    "campus eligibility",
+                    "teacher_campus",
+                    eligibility,
+                    Expected::Any,
+                )?;
             }
             for share in resource_associations_at(tx, id)? {
-                delete(tx, "resource", "resource_campus", share)?;
+                delete(tx, "resource", "resource_campus", share, Expected::Any)?;
             }
-            delete(tx, "campus", "campus", id)
+            delete(tx, "campus", "campus", id, expected)
         })
     }
 }
@@ -1098,12 +1136,25 @@ impl Structure<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`] or [`DbError::DuplicateValue`].
-    pub fn update_building(&mut self, id: Uuid, input: &BuildingInput) -> Result<Building> {
+    pub fn update_building(
+        &mut self,
+        id: Uuid,
+        expected: Expected,
+        input: &BuildingInput,
+    ) -> Result<Building> {
         self.db.write(|tx| {
             for campus_id in associated_campuses(tx, id)? {
                 require_name_free(tx, campus_id, &input.name, Some(id))?;
             }
-            update(tx, "building", "building", id, "name = ?", &[&input.name])
+            update(
+                tx,
+                "building",
+                "building",
+                id,
+                expected,
+                "name = ?",
+                &[&input.name],
+            )
         })?;
         self.building(id)?
             .ok_or(DbError::NotFound { entity: "building" })
@@ -1196,7 +1247,13 @@ impl Structure<'_> {
                 });
             }
 
-            delete(tx, "building", "building_campus", association_id)
+            delete(
+                tx,
+                "building",
+                "building_campus",
+                association_id,
+                Expected::Any,
+            )
         })
     }
 
@@ -1213,15 +1270,21 @@ impl Structure<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`] if there is no such building.
-    pub fn delete_building(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+    pub fn delete_building(&mut self, school_id: Uuid, id: Uuid, expected: Expected) -> Result<()> {
         self.db.write(|tx| {
             require_school_owner(tx, "building", BUILDING_OWNER, id, school_id)?;
             require_unshared(tx, "building", BUILDING_SHARERS, id, school_id)?;
             detach_rooms(tx, "building_id", id)?;
             for association_id in associations_of(tx, id)? {
-                delete(tx, "building", "building_campus", association_id)?;
+                delete(
+                    tx,
+                    "building",
+                    "building_campus",
+                    association_id,
+                    Expected::Any,
+                )?;
             }
-            delete(tx, "building", "building", id)
+            delete(tx, "building", "building", id, expected)
         })
     }
 }
@@ -1468,7 +1531,12 @@ impl Structure<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`] or [`DbError::DuplicateValue`].
-    pub fn update_room_type(&mut self, id: Uuid, input: &RoomTypeInput) -> Result<RoomType> {
+    pub fn update_room_type(
+        &mut self,
+        id: Uuid,
+        expected: Expected,
+        input: &RoomTypeInput,
+    ) -> Result<RoomType> {
         self.db.write(|tx| {
             require_same_school(tx, "room type", "room_type", id, input.school_id)?;
             update(
@@ -1476,6 +1544,7 @@ impl Structure<'_> {
                 "room type",
                 "room_type",
                 id,
+                expected,
                 "name = ?, code = ?",
                 &[&input.name, &input.code],
             )
@@ -1490,11 +1559,16 @@ impl Structure<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`] if there is no such room type.
-    pub fn delete_room_type(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+    pub fn delete_room_type(
+        &mut self,
+        school_id: Uuid,
+        id: Uuid,
+        expected: Expected,
+    ) -> Result<()> {
         self.db.write(|tx| {
             require_same_school(tx, "room type", "room_type", id, school_id)?;
             detach_rooms(tx, "room_type_id", id)?;
-            delete(tx, "room type", "room_type", id)
+            delete(tx, "room type", "room_type", id, expected)
         })
     }
 }
@@ -1519,6 +1593,7 @@ fn detach_rooms(tx: &rusqlite::Transaction<'_>, column: &str, id: Uuid) -> Resul
             "room",
             "room",
             room_id,
+            Expected::Any,
             &format!("{column} = ?"),
             &[&null],
         )?;
@@ -1745,7 +1820,7 @@ impl Structure<'_> {
     ///
     /// [`DbError::NotFound`], [`DbError::DuplicateValue`], or [`DbError::Invalid`] if the
     /// building is not available to a campus the room serves.
-    pub fn update_room(&mut self, id: Uuid, input: &RoomInput) -> Result<Room> {
+    pub fn update_room(&mut self, id: Uuid, expected: Expected, input: &RoomInput) -> Result<Room> {
         self.db.write(|tx| {
             for campus_id in room_campuses_in(tx, id)? {
                 require_room_code_free(tx, campus_id, &input.code, Some(id))?;
@@ -1761,6 +1836,7 @@ impl Structure<'_> {
                 "room",
                 "room",
                 id,
+                expected,
                 "building_id = ?, room_type_id = ?, name = ?, code = ?, capacity = ?, \
                  is_bookable = ?, notes = ?",
                 &[
@@ -1843,7 +1919,7 @@ impl Structure<'_> {
             // this campus is exactly the dependency that has to block a withdrawal here,
             // the way rooms block `unshare_building`. Recorded in ADR 0014 rather than
             // guessed at now, because the shape of that reference is a later phase's.
-            delete(tx, "room", "room_campus", association_id)
+            delete(tx, "room", "room_campus", association_id, Expected::Any)
         })
     }
 
@@ -1856,15 +1932,15 @@ impl Structure<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`] if there is no such room.
-    pub fn delete_room(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+    pub fn delete_room(&mut self, school_id: Uuid, id: Uuid, expected: Expected) -> Result<()> {
         self.db.write(|tx| {
             require_school_owner(tx, "room", ROOM_OWNER, id, school_id)?;
             require_unshared(tx, "room", ROOM_SHARERS, id, school_id)?;
             clear_for_entity(tx, AvailabilityEntity::Room, id)?;
             for association_id in room_associations_of(tx, id)? {
-                delete(tx, "room", "room_campus", association_id)?;
+                delete(tx, "room", "room_campus", association_id, Expected::Any)?;
             }
-            delete(tx, "room", "room", id)
+            delete(tx, "room", "room", id, expected)
         })
     }
 }
@@ -2250,7 +2326,13 @@ impl Structure<'_> {
                     entity: "resource share",
                 });
             };
-            delete(tx, "resource", "resource_campus", association_id)
+            delete(
+                tx,
+                "resource",
+                "resource_campus",
+                association_id,
+                Expected::Any,
+            )
         })
     }
 
@@ -2270,7 +2352,12 @@ impl Structure<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`] or [`DbError::DuplicateValue`].
-    pub fn update_resource(&mut self, id: Uuid, input: &ResourceInput) -> Result<Resource> {
+    pub fn update_resource(
+        &mut self,
+        id: Uuid,
+        expected: Expected,
+        input: &ResourceInput,
+    ) -> Result<Resource> {
         self.db.write(|tx| {
             require_same_school(tx, "resource", "resource", id, input.school_id)?;
             let previous_home = resource_home_campus(tx, id)?;
@@ -2280,6 +2367,7 @@ impl Structure<'_> {
                 "resource",
                 "resource",
                 id,
+                expected,
                 "campus_id = ?, name = ?, code = ?, quantity = ?",
                 &[
                     &campus as &dyn ToSql,
@@ -2293,7 +2381,13 @@ impl Structure<'_> {
                 if let Some(old) = previous_home
                     && let Some(association) = resource_association(tx, id, old)?
                 {
-                    delete(tx, "resource", "resource_campus", association)?;
+                    delete(
+                        tx,
+                        "resource",
+                        "resource_campus",
+                        association,
+                        Expected::Any,
+                    )?;
                 }
                 if let Some(new) = input.campus_id
                     && resource_association(tx, id, new)?.is_none()
@@ -2325,15 +2419,21 @@ impl Structure<'_> {
     /// - [`DbError::NotFound`] if there is no such resource.
     /// - [`DbError::WrongSchool`] if another school owns it.
     /// - [`DbError::StillReferenced`] if another school still shares it.
-    pub fn delete_resource(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+    pub fn delete_resource(&mut self, school_id: Uuid, id: Uuid, expected: Expected) -> Result<()> {
         self.db.write(|tx| {
             require_same_school(tx, "resource", "resource", id, school_id)?;
             require_unshared(tx, "resource", RESOURCE_SHARERS, id, school_id)?;
             clear_for_entity(tx, AvailabilityEntity::Resource, id)?;
             for association_id in resource_associations_of(tx, id)? {
-                delete(tx, "resource", "resource_campus", association_id)?;
+                delete(
+                    tx,
+                    "resource",
+                    "resource_campus",
+                    association_id,
+                    Expected::Any,
+                )?;
             }
-            delete(tx, "resource", "resource", id)
+            delete(tx, "resource", "resource", id, expected)
         })
     }
 }
@@ -2513,6 +2613,7 @@ impl Structure<'_> {
     pub fn update_academic_year(
         &mut self,
         id: Uuid,
+        expected: Expected,
         input: &AcademicYearInput,
     ) -> Result<AcademicYear> {
         self.db.write(|tx| {
@@ -2522,6 +2623,7 @@ impl Structure<'_> {
                 "academic year",
                 "academic_year",
                 id,
+                expected,
                 "name = ?, starts_on = ?, ends_on = ?",
                 &[&input.name, &input.starts_on, &input.ends_on],
             )
@@ -2537,10 +2639,15 @@ impl Structure<'_> {
     ///
     /// [`DbError::StillReferenced`] if it still has terms. Terms are removed deliberately,
     /// never as a side effect.
-    pub fn delete_academic_year(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+    pub fn delete_academic_year(
+        &mut self,
+        school_id: Uuid,
+        id: Uuid,
+        expected: Expected,
+    ) -> Result<()> {
         self.db.write(|tx| {
             require_same_school(tx, "academic year", "academic_year", id, school_id)?;
-            delete(tx, "academic year", "academic_year", id)
+            delete(tx, "academic year", "academic_year", id, expected)
         })
     }
 }
@@ -2621,13 +2728,14 @@ impl Structure<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`], [`DbError::DuplicateValue`] or [`DbError::Invalid`].
-    pub fn update_term(&mut self, id: Uuid, input: &TermInput) -> Result<Term> {
+    pub fn update_term(&mut self, id: Uuid, expected: Expected, input: &TermInput) -> Result<Term> {
         self.db.write(|tx| {
             update(
                 tx,
                 "term",
                 "term",
                 id,
+                expected,
                 "name = ?, ordinal = ?, starts_on = ?, ends_on = ?",
                 &[
                     &input.name as &dyn ToSql,
@@ -2645,10 +2753,10 @@ impl Structure<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`] if there is no such term.
-    pub fn delete_term(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+    pub fn delete_term(&mut self, school_id: Uuid, id: Uuid, expected: Expected) -> Result<()> {
         self.db.write(|tx| {
             require_school_owner(tx, "term", TERM_OWNER, id, school_id)?;
-            delete(tx, "term", "term", id)
+            delete(tx, "term", "term", id, expected)
         })
     }
 }

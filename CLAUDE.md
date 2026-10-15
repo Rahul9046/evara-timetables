@@ -84,12 +84,34 @@ disagree about whether a placement is legal, the product is broken.
   trigger. Change-log triggers only observe what the repository wrote. In practice:
   go through `repo::update` and `repo::delete`, which own those columns — a repository
   must never name `rev` or `updated_at` in its own SQL.
+- **Every update and delete the interface can reach takes the caller's revision**, and
+  `repo::update` / `repo::delete` put it in the statement's `WHERE` clause. *Read the
+  revision, compare it in Rust, then write* is not a concurrency control — it is the same
+  race with a longer window — so it is not available: the comparison **is** the predicate.
+  A stale write matches nothing, so no column changes, no revision is consumed and no
+  change-log entry is appended; it is reported as `DbError::Conflict`, which is deliberately
+  not `NotFound`. `Expected::Any` means *no predicate* and is for three documented cases
+  only — a cascade inside another operation's transaction, a mutation whose contract is not
+  a revision, or a test. **No command handler constructs one.** See
+  [docs/adr/0027](docs/adr/0027-revisions-are-checked-on-write.md), whose §3 is the
+  inventory of all 84 mutations.
+- **A qualification is a property of the person; a department association is a narrowing of
+  school membership.** The two look alike and are governed oppositely:
+  `teacher_qualification` carries no `school_id`, requires no membership and survives one
+  being withdrawn, while `teacher_department` requires membership, is held to it by a
+  trigger pair, and is cleared when it goes. Never add `teacher.department_id` — a single
+  column on a project-level identity cannot say "Mathematics at Northgate, Science at
+  Southmoor". [adr/0025](docs/adr/0025-teacher-qualifications-across-school-owned-subjects.md)
+  and [adr/0026](docs/adr/0026-teacher-departments-are-a-narrowing-of-membership.md).
 - **New entity table?** Add it to `change_log::TRACKED_TABLES`. A schema-level test
   discovers entity tables and fails if any lacks its three triggers, so forgetting is a
   red test rather than a silent hole in the change feed.
 - **Choose `ON DELETE` deliberately.** Ownership edges are `RESTRICT`; optional
   classification references are `SET NULL`, and the repository clears them with a proper
-  update first so `rev` stays truthful. Never default to `CASCADE`.
+  update first so `rev` stays truthful. Never default to `CASCADE`. One documented
+  departure: `subject.department_id` is `RESTRICT` despite looking like a classification,
+  because a database-level `SET NULL` would rewrite rows without bumping `rev` and so
+  bypass the precondition above (R10, and ADR 0025 §6).
 - **No driver type crosses `evara-db`'s public API.** `rusqlite` and `refinery` errors are
   wrapped in `InternalError`; no other crate may depend on the SQLite driver, even for
   tests.

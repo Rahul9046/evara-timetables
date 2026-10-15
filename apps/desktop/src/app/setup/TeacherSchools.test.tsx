@@ -39,7 +39,9 @@ const listTeacherMemberships = vi.fn<(teacherId: string) => Promise<TeacherSchoo
 const listTeacherCampuses = vi.fn<(teacherId: string) => Promise<string[]>>();
 const addTeacherToSchool = vi.fn<(input: unknown) => Promise<TeacherSchool>>();
 const setTeacherMembershipActive =
-  vi.fn<(schoolId: string, teacherId: string, isActive: boolean) => Promise<TeacherSchool>>();
+  vi.fn<
+    (schoolId: string, teacherId: string, rev: number, isActive: boolean) => Promise<TeacherSchool>
+  >();
 const removeTeacherFromSchool = vi.fn<(schoolId: string, teacherId: string) => Promise<void>>();
 const assignTeacherCampus =
   vi.fn<(schoolId: string, teacherId: string, campusId: string) => Promise<TeacherCampus>>();
@@ -57,8 +59,12 @@ vi.mock("../../ipc/setup", () => ({
   listTeacherMemberships: (teacherId: string) => listTeacherMemberships(teacherId),
   listTeacherCampuses: (teacherId: string) => listTeacherCampuses(teacherId),
   addTeacherToSchool: (input: unknown) => addTeacherToSchool(input),
-  setTeacherMembershipActive: (schoolId: string, teacherId: string, isActive: boolean) =>
-    setTeacherMembershipActive(schoolId, teacherId, isActive),
+  setTeacherMembershipActive: (
+    schoolId: string,
+    teacherId: string,
+    rev: number,
+    isActive: boolean,
+  ) => setTeacherMembershipActive(schoolId, teacherId, rev, isActive),
   removeTeacherFromSchool: (schoolId: string, teacherId: string) =>
     removeTeacherFromSchool(schoolId, teacherId),
   assignTeacherCampus: (schoolId: string, teacherId: string, campusId: string) =>
@@ -72,6 +78,32 @@ vi.mock("../../ipc/setup", () => ({
   listCycles: vi.fn(() => Promise.resolve([])),
   listPeriodStructures: vi.fn(() => Promise.resolve([])),
   gridPreview: vi.fn(() => Promise.resolve(null)),
+  // Stage B. Empty by default: a suite that is about something else should not have
+  // to describe a curriculum, and one that is about this panel overrides them.
+  listDepartments: vi.fn(() => Promise.resolve([])),
+  listSubjects: vi.fn(() => Promise.resolve([])),
+  listTeacherDepartments: vi.fn(() => Promise.resolve([])),
+  listQualifications: vi.fn(() => Promise.resolve([])),
+  listSubjectTeachers: vi.fn(() => Promise.resolve([])),
+  listDepartmentTeachers: vi.fn(() => Promise.resolve([])),
+  departmentDependents: vi.fn(() =>
+    Promise.resolve({ total: 0, subjects: 0, teachers: 0 }),
+  ),
+  subjectDependents: vi.fn(() => Promise.resolve({ total: 0, qualifiedTeachers: 0 })),
+  addQualification: vi.fn(() => Promise.resolve({})),
+  removeQualification: vi.fn(() => Promise.resolve()),
+  addTeacherDepartment: vi.fn(() => Promise.resolve({})),
+  removeTeacherDepartment: vi.fn(() => Promise.resolve()),
+  createDepartment: vi.fn(() => Promise.resolve({})),
+  updateDepartment: vi.fn(() => Promise.resolve({})),
+  deleteDepartment: vi.fn(() => Promise.resolve()),
+  createSubject: vi.fn(() => Promise.resolve({})),
+  updateSubject: vi.fn(() => Promise.resolve({})),
+  deleteSubject: vi.fn(() => Promise.resolve()),
+  isConflict: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { kind?: string }).kind === "conflict",
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
       ? String((error as { message: unknown }).message)
@@ -368,7 +400,14 @@ describe("a teacher's schools", () => {
     await user.click(within(dialog).getByRole("button", { name: "Mark as left" }));
 
     await waitFor(() => expect(setTeacherMembershipActive).toHaveBeenCalled());
-    expect(setTeacherMembershipActive).toHaveBeenCalledWith(NORTH.id, ADA.id, false);
+    // The MEMBERSHIP's revision, not the teacher's: `teacher_school` is the row that
+    // changes, and nothing about the person does.
+    expect(setTeacherMembershipActive).toHaveBeenCalledWith(
+      NORTH.id,
+      ADA.id,
+      expect.any(Number),
+      false,
+    );
     expect(removeTeacherFromSchool).not.toHaveBeenCalled();
   });
 
@@ -381,7 +420,12 @@ describe("a teacher's schools", () => {
     await user.click(within(panel).getByRole("button", { name: "Mark as teaching" }));
 
     await waitFor(() => expect(setTeacherMembershipActive).toHaveBeenCalled());
-    expect(setTeacherMembershipActive).toHaveBeenCalledWith(NORTH.id, ADA.id, true);
+    expect(setTeacherMembershipActive).toHaveBeenCalledWith(
+      NORTH.id,
+      ADA.id,
+      expect.any(Number),
+      true,
+    );
   });
 
   it("removes a non-home membership, and says what survives it", async () => {

@@ -21,10 +21,29 @@
  * A rejected save leaves the form open with the typed values intact, so nothing the user
  * entered is lost. A `duplicate` failure marks the offending field; everything else shows
  * as a banner above the form.
+ *
+ * ## A stale revision is refused, not retried — Stage B
+ *
+ * Every update and delete sends the `rev` of the row on screen, so a save built on a
+ * version somebody else has since changed is rejected rather than applied. What the panel
+ * does with that rejection is the whole of the user-facing half of
+ * [ADR 0027](../../../../../docs/adr/0027-revisions-are-checked-on-write.md) §6:
+ *
+ * - **Nothing is retried.** Re-sending with the current revision would complete exactly
+ *   the overwrite the check prevented, with the user's agreement neither asked for nor
+ *   given.
+ * - **Nothing the user typed is discarded.** Their edit now exists in no other place, so
+ *   the form stays open, filled in. Replacing it with the other person's version to "show
+ *   them the latest" would destroy the one copy of their work.
+ * - **The message says that nothing was saved**, in those words, because a screen that
+ *   looks saved and is not is the failure this whole mechanism exists to prevent.
+ * - **Reloading is offered, never performed.** The button re-reads the table underneath;
+ *   when to take it is the user's decision, because only they know whether their change or
+ *   the other one should survive.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { describeSetupError, offendingField } from "../../ipc/setup";
+import { describeSetupError, isConflict, offendingField } from "../../ipc/setup";
 import { isValid, type Draft, type Problems } from "../validation";
 import { EntityForm, type FieldSpec } from "./Field";
 import {
@@ -68,8 +87,21 @@ export interface CrudSpec<T extends { id: string }, I> {
   readonly toInput: (draft: Draft) => I;
   readonly list: () => Promise<T[]>;
   readonly create: (input: I) => Promise<T>;
-  readonly update: (id: string, input: I) => Promise<T>;
-  readonly remove: (id: string) => Promise<void>;
+  /**
+   * Saves an edit to a row **that this panel is looking at**.
+   *
+   * Takes the row rather than its identifier, because Stage B made the row's `rev` a
+   * precondition on every write and the row is where that number lives. Each caller pulls
+   * it out itself — `row.rev` for a plain record, `row.building.rev` for a projection that
+   * nests one — which is why this is not simply `(id, rev, input)`.
+   *
+   * Rejects with a `conflict` {@link SetupError} when somebody else saved first. The panel
+   * keeps the form open with every typed value intact and offers to re-read; see
+   * {@link CrudPanel}'s own header.
+   */
+  readonly update: (row: T, input: I) => Promise<T>;
+  /** Deletes a row this panel is looking at, at the revision it was read at. */
+  readonly remove: (row: T) => Promise<void>;
   /** What the empty state says. Must name the next action. */
   readonly emptyHint: ReactNode;
   /** Extra warning in the delete confirmation, when this row deserves one. */
@@ -157,6 +189,15 @@ export function CrudPanel<T extends { id: string }, I>(props: {
   const [problems, setProblems] = useState<Problems>({});
   const [pendingDelete, setPendingDelete] = useState<T | null>(null);
   const [pendingSave, setPendingSave] = useState<ReactNode | null>(null);
+  /**
+   * Why the last write was refused as out of date, when it was.
+   *
+   * Held apart from {@link error} because it is the only failure that comes with something
+   * to *do* about it, and because it must not be cleared by the next keystroke: a user
+   * reading "reload before saving" while their edit sits in the form needs the sentence to
+   * stay put.
+   */
+  const [stale, setStale] = useState<string | null>(null);
 
   const blocked = spec.blockedBy ?? null;
   const [nonce, setNonce] = useState(0);
@@ -170,7 +211,10 @@ export function CrudPanel<T extends { id: string }, I>(props: {
   latest.current = spec;
 
   /** Re-reads the list. Stable, so it is safe to pass to a child or an effect. */
-  const reload = useCallback(() => setNonce((n) => n + 1), []);
+  const reload = useCallback(() => {
+    setStale(null);
+    setNonce((n) => n + 1);
+  }, []);
 
   useEffect(() => {
     if (blocked !== null) {
@@ -245,7 +289,7 @@ export function CrudPanel<T extends { id: string }, I>(props: {
     try {
       const input = spec.toInput(draft);
       if (editing.row) {
-        await spec.update(editing.row.id, input);
+        await spec.update(editing.row, input);
       } else {
         await spec.create(input);
       }
@@ -255,8 +299,16 @@ export function CrudPanel<T extends { id: string }, I>(props: {
     } catch (e: unknown) {
       // The backend is authoritative. If it named a field, mark that field; otherwise
       // show the message. Either way the form stays open with the values intact.
+      //
+      // A revision conflict is the one failure that also needs an *action*, because the
+      // message asks the user to reload and a banner cannot do that for them. It is shown
+      // as its own banner with that button, and the form is deliberately left exactly as
+      // it is: their edit now exists nowhere else, and discarding it to show them the
+      // other person's version would lose the very thing the check protected.
       const field = offendingField(e);
-      if (field) {
+      if (isConflict(e)) {
+        setStale(describeSetupError(e));
+      } else if (field) {
         const key = fieldKeyFor(fieldsOf(spec, draft), field);
         setProblems({ [key]: describeSetupError(e) });
       } else {
@@ -293,7 +345,7 @@ export function CrudPanel<T extends { id: string }, I>(props: {
     setBusy(true);
     setError(null);
     try {
-      await spec.remove(pendingDelete.id);
+      await spec.remove(pendingDelete);
       setPendingDelete(null);
       reload();
       onChanged?.();
@@ -301,7 +353,8 @@ export function CrudPanel<T extends { id: string }, I>(props: {
       // A RESTRICT refusal is the common case and its message explains what is in the
       // way, so it belongs on the page rather than inside a dialogue that is closing.
       setPendingDelete(null);
-      setError(describeSetupError(e));
+      if (isConflict(e)) setStale(describeSetupError(e));
+      else setError(describeSetupError(e));
     } finally {
       setBusy(false);
     }
@@ -341,6 +394,19 @@ export function CrudPanel<T extends { id: string }, I>(props: {
       />
 
       {error && <Banner tone="error">{error}</Banner>}
+
+      {/* The revision refusal, with the one thing that resolves it. Deliberately above the
+          form rather than inside it: it is not about a field, and the form below still
+          holds the user's unsaved values — which is the whole reason this is a banner with
+          a button and not a dialogue that would have to take them away. */}
+      {stale !== null && (
+        <Banner tone="warning">
+          <span>{stale}</span>{" "}
+          <button type="button" className="linkish" onClick={reload}>
+            Reload {spec.plural}
+          </button>
+        </Banner>
+      )}
 
       {editing && (
         <EntityForm

@@ -14,6 +14,7 @@
 
 use evara_core::calendar::WorkingDays;
 
+use crate::repo::Expected;
 use crate::repo::structure::{
     AcademicYearInput, BuildingInput, CampusInput, ResourceInput, RoomInput, RoomTypeInput,
     SchoolInput, TermInput,
@@ -206,7 +207,7 @@ fn a_school_can_be_set_up_from_an_empty_project_and_survives_a_reopen() {
         workspace
             .time_model()
             .expect("open")
-            .delete_cycle_day(school, day)
+            .delete_cycle_day(school, day, Expected::Any)
             .expect("a brand-new day is referenced by nothing");
     }
 
@@ -505,7 +506,7 @@ fn removing_a_cycle_day_takes_the_whole_guarded_route() {
     let refused = workspace
         .time_model()
         .expect("open")
-        .delete_cycle_day(school, days[2])
+        .delete_cycle_day(school, days[2], Expected::Any)
         .expect_err("the grid holds the day");
     assert!(
         matches!(refused, DbError::StillReferenced { .. }),
@@ -556,7 +557,7 @@ fn removing_a_cycle_day_takes_the_whole_guarded_route() {
     workspace
         .time_model()
         .expect("open")
-        .delete_cycle_day(school, days[2])
+        .delete_cycle_day(school, days[2], Expected::Any)
         .expect("with its slot gone, the day can go");
     assert_eq!(
         workspace

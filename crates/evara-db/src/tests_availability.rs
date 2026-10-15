@@ -19,6 +19,7 @@ use uuid::Uuid;
 
 use evara_core::calendar::WorkingDays;
 
+use crate::repo::Expected;
 use crate::repo::availability::{AvailabilityEntity, AvailabilityRuleInput, AvailabilityStatus};
 use crate::repo::people::{GroupKind, StudentGroupInput, TeacherInput};
 use crate::repo::structure::{CampusInput, RoomInput, SchoolInput};
@@ -549,6 +550,7 @@ fn deactivating_a_teacher_keeps_their_availability() {
         .people()
         .update_teacher(
             teacher.id,
+            Expected::Any,
             &TeacherInput {
                 school_id: fixture.school_id,
                 code: teacher.code.clone(),

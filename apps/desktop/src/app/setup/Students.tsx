@@ -372,12 +372,13 @@ export function Students(props: { school: School; context?: SetupContext }) {
     // without inventing a second source of truth. `create_student` writes a home spell
     // in the same transaction, and `update_student` mirrors onto the existing one.
     create: (input) => createStudent(input).then((row) => ({ ...row, enrolment: null })),
-    update: (id, input) =>
-      updateStudent(id, input).then((row) => ({
-        ...row,
-        enrolment: (roll.items ?? []).find((known) => known.id === id)?.enrolment ?? null,
+    update: (row, input) =>
+      updateStudent(row.id, row.rev, input).then((saved) => ({
+        ...saved,
+        enrolment:
+          (roll.items ?? []).find((known) => known.id === row.id)?.enrolment ?? null,
       })),
-    remove: (id) => deleteStudent(school.id, id),
+    remove: (row) => deleteStudent(school.id, row.id, row.rev),
     rowActions: [
       { label: "Enrolment", onClick: (row) => setChosenId(row.id) },
       {

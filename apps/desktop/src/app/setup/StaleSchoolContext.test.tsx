@@ -45,23 +45,28 @@ const listStudents = vi.fn<(schoolId: string) => Promise<Student[]>>();
 const listSchoolStudents = vi.fn<(schoolId: string) => Promise<StudentInSchool[]>>();
 const listYearLevels = vi.fn<(schoolId: string) => Promise<YearLevel[]>>();
 const listCampuses = vi.fn<(schoolId: string) => Promise<Campus[]>>();
-const updateTeacher = vi.fn<(id: string, input: unknown) => Promise<Teacher>>();
-const updateStudent = vi.fn<(id: string, input: unknown) => Promise<Student>>();
-const deleteTeacher = vi.fn<(schoolId: string, id: string) => Promise<void>>();
+const updateTeacher = vi.fn<(id: string, rev: number, input: unknown) => Promise<Teacher>>();
+const updateStudent = vi.fn<(id: string, rev: number, input: unknown) => Promise<Student>>();
+const deleteTeacher = vi.fn<(schoolId: string, id: string, rev: number) => Promise<void>>();
 const listEnrolmentHistory = vi.fn<(studentId: string) => Promise<StudentEnrolment[]>>();
 const updateEnrolment =
-  vi.fn<(schoolId: string, id: string, input: unknown) => Promise<StudentEnrolment>>();
+  vi.fn<
+    (schoolId: string, id: string, rev: number, input: unknown) => Promise<StudentEnrolment>
+  >();
 
 vi.mock("../../ipc/setup", () => ({
   listTeachers: (schoolId: string) => listTeachers(schoolId),
   listSchoolTeachers: (schoolId: string) => listSchoolTeachers(schoolId),
   createTeacher: vi.fn(() => Promise.resolve({})),
-  updateTeacher: (id: string, input: unknown) => updateTeacher(id, input),
-  deleteTeacher: (schoolId: string, id: string) => deleteTeacher(schoolId, id),
+  updateTeacher: (id: string, rev: number, input: unknown) =>
+    updateTeacher(id, rev, input),
+  deleteTeacher: (schoolId: string, id: string, rev: number) =>
+    deleteTeacher(schoolId, id, rev),
   listStudents: (schoolId: string) => listStudents(schoolId),
   listSchoolStudents: (schoolId: string) => listSchoolStudents(schoolId),
   createStudent: vi.fn(() => Promise.resolve({})),
-  updateStudent: (id: string, input: unknown) => updateStudent(id, input),
+  updateStudent: (id: string, rev: number, input: unknown) =>
+    updateStudent(id, rev, input),
   deleteStudent: vi.fn(() => Promise.resolve()),
   listYearLevels: (schoolId: string) => listYearLevels(schoolId),
   createYearLevel: vi.fn(() => Promise.resolve({})),
@@ -70,8 +75,8 @@ vi.mock("../../ipc/setup", () => ({
   listCampuses: (schoolId: string) => listCampuses(schoolId),
   listGroupsForStudent: vi.fn(() => Promise.resolve([])),
   listEnrolmentHistory: (studentId: string) => listEnrolmentHistory(studentId),
-  updateEnrolment: (schoolId: string, id: string, input: unknown) =>
-    updateEnrolment(schoolId, id, input),
+  updateEnrolment: (schoolId: string, id: string, rev: number, input: unknown) =>
+    updateEnrolment(schoolId, id, rev, input),
   enrolStudent: vi.fn(() => Promise.resolve({})),
   leaveSchool: vi.fn(() => Promise.resolve({})),
   transferStudent: vi.fn(() => Promise.resolve({})),
@@ -89,6 +94,32 @@ vi.mock("../../ipc/setup", () => ({
   listCycles: vi.fn(() => Promise.resolve([])),
   listPeriodStructures: vi.fn(() => Promise.resolve([])),
   gridPreview: vi.fn(() => Promise.resolve(null)),
+  // Stage B. Empty by default: a suite that is about something else should not have
+  // to describe a curriculum, and one that is about this panel overrides them.
+  listDepartments: vi.fn(() => Promise.resolve([])),
+  listSubjects: vi.fn(() => Promise.resolve([])),
+  listTeacherDepartments: vi.fn(() => Promise.resolve([])),
+  listQualifications: vi.fn(() => Promise.resolve([])),
+  listSubjectTeachers: vi.fn(() => Promise.resolve([])),
+  listDepartmentTeachers: vi.fn(() => Promise.resolve([])),
+  departmentDependents: vi.fn(() =>
+    Promise.resolve({ total: 0, subjects: 0, teachers: 0 }),
+  ),
+  subjectDependents: vi.fn(() => Promise.resolve({ total: 0, qualifiedTeachers: 0 })),
+  addQualification: vi.fn(() => Promise.resolve({})),
+  removeQualification: vi.fn(() => Promise.resolve()),
+  addTeacherDepartment: vi.fn(() => Promise.resolve({})),
+  removeTeacherDepartment: vi.fn(() => Promise.resolve()),
+  createDepartment: vi.fn(() => Promise.resolve({})),
+  updateDepartment: vi.fn(() => Promise.resolve({})),
+  deleteDepartment: vi.fn(() => Promise.resolve()),
+  createSubject: vi.fn(() => Promise.resolve({})),
+  updateSubject: vi.fn(() => Promise.resolve({})),
+  deleteSubject: vi.fn(() => Promise.resolve()),
+  isConflict: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { kind?: string }).kind === "conflict",
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
       ? String((error as { message: unknown }).message)
@@ -247,11 +278,13 @@ describe("a teacher form open when the school changes", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateTeacher).toHaveBeenCalled());
-    expect(updateTeacher).toHaveBeenCalledWith("t-south", expect.objectContaining({
-      schoolId: SOUTH.id,
-    }));
+    expect(updateTeacher).toHaveBeenCalledWith(
+      "t-south",
+      expect.any(Number),
+      expect.objectContaining({ schoolId: SOUTH.id }),
+    );
     for (const call of updateTeacher.mock.calls) {
-      expect((call[1] as { schoolId: string }).schoolId).not.toBe(NORTH.id);
+      expect((call[2] as { schoolId: string }).schoolId).not.toBe(NORTH.id);
     }
   });
 

@@ -39,14 +39,15 @@ const listSchoolTeachers = vi.fn<(schoolId: string) => Promise<TeacherInSchool[]
 const listStudents = vi.fn<(schoolId: string) => Promise<Student[]>>();
 const listSchoolStudents = vi.fn<(schoolId: string) => Promise<StudentInSchool[]>>();
 const listYearLevels = vi.fn<(schoolId: string) => Promise<YearLevel[]>>();
-const updateTeacher = vi.fn<(id: string, input: unknown) => Promise<Teacher>>();
+const updateTeacher = vi.fn<(id: string, rev: number, input: unknown) => Promise<Teacher>>();
 const listEnrolmentHistory = vi.fn<(studentId: string) => Promise<StudentEnrolment[]>>();
 
 vi.mock("../../ipc/setup", () => ({
   listTeachers: (schoolId: string) => listTeachers(schoolId),
   listSchoolTeachers: (schoolId: string) => listSchoolTeachers(schoolId),
   createTeacher: vi.fn(() => Promise.resolve({})),
-  updateTeacher: (id: string, input: unknown) => updateTeacher(id, input),
+  updateTeacher: (id: string, rev: number, input: unknown) =>
+    updateTeacher(id, rev, input),
   deleteTeacher: vi.fn(() => Promise.resolve()),
   listStudents: (schoolId: string) => listStudents(schoolId),
   listSchoolStudents: (schoolId: string) => listSchoolStudents(schoolId),
@@ -81,6 +82,32 @@ vi.mock("../../ipc/setup", () => ({
   listCycles: vi.fn(() => Promise.resolve([])),
   listPeriodStructures: vi.fn(() => Promise.resolve([])),
   gridPreview: vi.fn(() => Promise.resolve(null)),
+  // Stage B. Empty by default: a suite that is about something else should not have
+  // to describe a curriculum, and one that is about this panel overrides them.
+  listDepartments: vi.fn(() => Promise.resolve([])),
+  listSubjects: vi.fn(() => Promise.resolve([])),
+  listTeacherDepartments: vi.fn(() => Promise.resolve([])),
+  listQualifications: vi.fn(() => Promise.resolve([])),
+  listSubjectTeachers: vi.fn(() => Promise.resolve([])),
+  listDepartmentTeachers: vi.fn(() => Promise.resolve([])),
+  departmentDependents: vi.fn(() =>
+    Promise.resolve({ total: 0, subjects: 0, teachers: 0 }),
+  ),
+  subjectDependents: vi.fn(() => Promise.resolve({ total: 0, qualifiedTeachers: 0 })),
+  addQualification: vi.fn(() => Promise.resolve({})),
+  removeQualification: vi.fn(() => Promise.resolve()),
+  addTeacherDepartment: vi.fn(() => Promise.resolve({})),
+  removeTeacherDepartment: vi.fn(() => Promise.resolve()),
+  createDepartment: vi.fn(() => Promise.resolve({})),
+  updateDepartment: vi.fn(() => Promise.resolve({})),
+  deleteDepartment: vi.fn(() => Promise.resolve()),
+  createSubject: vi.fn(() => Promise.resolve({})),
+  updateSubject: vi.fn(() => Promise.resolve({})),
+  deleteSubject: vi.fn(() => Promise.resolve()),
+  isConflict: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { kind?: string }).kind === "conflict",
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
       ? String((error as { message: unknown }).message)

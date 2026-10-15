@@ -101,6 +101,12 @@ vi.mock("./YearLevels", () => ({
 vi.mock("./StudentGroups", () => ({
   StudentGroups: () => <div>stub:groups</div>,
 }));
+vi.mock("./Departments", () => ({
+  Departments: () => <div>stub:departments</div>,
+}));
+vi.mock("./Subjects", () => ({
+  Subjects: () => <div>stub:subjects</div>,
+}));
 
 const { SchoolSetup, SECTIONS } = await import("./SchoolSetup");
 
@@ -143,7 +149,7 @@ function steps(): string[] {
 }
 
 describe("the section list", () => {
-  it("is the fifteen steps of setup, in configuration order", () => {
+  it("is the seventeen steps of setup, in configuration order", () => {
     expect(SECTIONS.map((s) => s.id)).toEqual([
       // Which institution. Everything after this is about one of them.
       "schools",
@@ -155,7 +161,10 @@ describe("the section list", () => {
       // The shape of a school year, then the stages within it.
       "years",
       "yearLevels",
-      // What is taught. Stage C.
+      // What is taught. Departments and Subjects are Stage B; Lessons is Stage C, and
+      // comes after them because a lesson is taught *of* a subject.
+      "departments",
+      "subjects",
       "lessons",
       // Who.
       "teachers",
@@ -218,9 +227,14 @@ describe("the section list", () => {
  * reason, has no `render`, and cannot be opened.
  */
 describe("the Lessons entry", () => {
-  it("is in the list, between year levels and teachers", () => {
+  it("is in the list, after the subjects it will be taught of", () => {
     const of = (id: string) => SECTIONS.findIndex((s) => s.id === id);
-    expect(of("lessons")).toBe(of("yearLevels") + 1);
+    // Stage B inserted Departments and Subjects between Year levels and Lessons, which is
+    // the dependency order: `course.subject_id` references a subject, so the subject has
+    // to exist first. Lessons still sits immediately before the people it is assigned to.
+    expect(of("departments")).toBe(of("yearLevels") + 1);
+    expect(of("subjects")).toBe(of("departments") + 1);
+    expect(of("lessons")).toBe(of("subjects") + 1);
     expect(of("lessons")).toBe(of("teachers") - 1);
   });
 
@@ -264,13 +278,15 @@ describe("the sidebar", () => {
   it("offers every section, Resources and Year levels included", async () => {
     await open();
 
-    expect(steps()).toHaveLength(15);
+    expect(steps()).toHaveLength(17);
     expect(within(nav()).getByRole("button", { name: /Resources/i })).toBeTruthy();
     expect(within(nav()).getByRole("button", { name: /^Schools/ })).toBeTruthy();
     expect(within(nav()).getByRole("button", { name: /^Year levels/ })).toBeTruthy();
+    expect(within(nav()).getByRole("button", { name: /^Departments/ })).toBeTruthy();
+    expect(within(nav()).getByRole("button", { name: /^Subjects/ })).toBeTruthy();
   });
 
-  it("numbers the steps 1-15 with no gap", async () => {
+  it("numbers the steps 1-17 with no gap", async () => {
     await open();
 
     // The numbers come from array position, so this is what proves the reorder and the two
@@ -279,8 +295,8 @@ describe("the sidebar", () => {
       .getAllByRole("button")
       .map((b) => b.querySelector(".navIndex")?.textContent);
     expect(indices).toEqual([
-      "1", "2", "3", "4", "5", "6", "7", "8",
-      "9", "10", "11", "12", "13", "14", "15",
+      "1", "2", "3", "4", "5", "6", "7", "8", "9",
+      "10", "11", "12", "13", "14", "15", "16", "17",
     ]);
   });
 
@@ -340,6 +356,10 @@ describe("navigating between the sections", () => {
     expect(current[0]?.textContent).toContain("Rooms and room types");
   });
 
+  // Fifteen clicks through a full render each, which is comfortably the slowest test in
+  // the suite and was already close to the 5s default before Stage B added two sections.
+  // Raised rather than trimmed: the value of this test is that it walks *every* step, and
+  // sampling some of them would not catch a section that renders the wrong screen.
   it("walks the whole workflow end to end, in the configuration order", async () => {
     await open();
 
@@ -352,6 +372,8 @@ describe("navigating between the sections", () => {
       "Resources",
       "Academic years and terms",
       "Year levels",
+      "Departments",
+      "Subjects",
       "Teachers",
       "Students",
       "Student groups",
@@ -376,6 +398,8 @@ describe("navigating between the sections", () => {
       "stub:resources",
       "stub:years",
       "stub:yearLevels",
+      "stub:departments",
+      "stub:subjects",
       "stub:teachers",
       "stub:students",
       "stub:groups",
@@ -384,7 +408,7 @@ describe("navigating between the sections", () => {
       "stub:calendar",
       "stub:grid",
     ]);
-  });
+  }, 20_000);
 });
 
 describe("before any school exists", () => {
@@ -396,14 +420,14 @@ describe("before any school exists", () => {
     render(<SchoolSetup />);
     await screen.findByText(/^stub:schools:/);
 
-    // Thirteen school-owned sections, of which Lessons is disabled for its own reason.
+    // Fifteen school-owned sections, of which Lessons is disabled for its own reason.
     const locked = within(nav())
       .getAllByRole("button")
       .filter((b) => b.hasAttribute("disabled"));
-    expect(locked).toHaveLength(13);
+    expect(locked).toHaveLength(15);
     expect(
       locked.filter((b) => b.textContent?.includes("Needs a school")),
-    ).toHaveLength(12);
+    ).toHaveLength(14);
     expect(locked.filter((b) => b.textContent?.includes("Coming later"))).toHaveLength(1);
   });
 

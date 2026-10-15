@@ -2052,3 +2052,38 @@ dialog.confirm h3 {
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--border);
 }
+
+/* ---- Stage B: the curriculum sub-sections ------------------------------- */
+
+/*
+ * A group within a `subPanel`, for the two halves of a teacher's curriculum and for the
+ * per-school groups inside the qualification list. Not another `subPanel`: nesting the
+ * same surface and border twice reads as two unrelated cards rather than as one panel
+ * with two parts, and the thing being communicated here is that they belong together and
+ * are nevertheless different.
+ */
+.subSection + .subSection {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.subSection > .muted {
+  margin: 4px 0 12px;
+  max-width: 76ch;
+}
+
+/*
+ * One school's rows inside a project-wide list. The heading carries the school's name, so
+ * a qualification at another school is never shown as though it were this school's.
+ */
+.schoolGroup + .schoolGroup {
+  margin-top: 16px;
+}
+
+.schoolGroup .subHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+}

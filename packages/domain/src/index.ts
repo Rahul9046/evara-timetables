@@ -16,7 +16,7 @@
  * type guards, discriminated-union helpers and display formatting.
  *
  * Type generation was wired up in Phase 1E. `./generated/` now holds the whole IPC
- * contract — seventy-four types, written by `npm run types:generate` and verified by
+ * contract — eighty-seven types, written by `npm run types:generate` and verified by
  * `npm run types:check`, which CI runs. See
  * [ADR 0009](../../../docs/adr/0009-typescript-type-generation.md) and
  * [ADR 0012](../../../docs/adr/0012-records-are-the-ipc-contract.md).
@@ -46,6 +46,9 @@ export type {
   CycleKind,
   CycleRotation,
   CycleShape,
+  Department,
+  DepartmentDependents,
+  DepartmentInput,
   EnrolmentStatus,
   GridCell,
   GridPreview,
@@ -62,6 +65,8 @@ export type {
   PeriodStructureInput,
   PlanFingerprint,
   PlannedSlot,
+  QualifiedSubject,
+  QualifiedTeacher,
   Resource,
   ResourceInput,
   Room,
@@ -83,11 +88,19 @@ export type {
   StudentGroupMemberInput,
   StudentInSchool,
   StudentInput,
+  Subject,
+  SubjectDependents,
+  SubjectInput,
   Teacher,
   TeacherCampus,
   TeacherCampusInput,
+  TeacherDepartment,
+  TeacherDepartmentInput,
+  TeacherDepartmentView,
   TeacherInSchool,
   TeacherInput,
+  TeacherQualification,
+  TeacherQualificationInput,
   TeacherSchool,
   TeacherSchoolInput,
   Term,

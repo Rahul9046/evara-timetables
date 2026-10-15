@@ -15,7 +15,7 @@ tempted to undo it without knowing why.
 | [0007](0007-rusqlite-refinery.md) | rusqlite + refinery, bundled SQLite, one connection factory | Accepted |
 | [0008](0008-installation-identity-and-project-lifecycle.md) | Installation identity, settings database, `.evaraproj` | Accepted |
 | [0009](0009-typescript-type-generation.md) | `ts-rs` for generated TypeScript types | Accepted |
-| [0010](0010-structure-deletion-semantics.md) | RESTRICT ownership, SET NULL classification; opaque driver errors | Accepted |
+| [0010](0010-structure-deletion-semantics.md) | RESTRICT ownership, SET NULL classification; opaque driver errors | Accepted — one deliberate departure, for `subject.department_id`, in [0025](0025-teacher-qualifications-across-school-owned-subjects.md) §6 |
 | [0011](0011-stable-timeslot-identity.md) | Timeslot logical identity; materialisation never deletes | Accepted |
 | [0012](0012-records-are-the-ipc-contract.md) | Repository records are the IPC contract; no parallel DTO layer | Accepted |
 | [0013](0013-buildings-shared-across-campuses.md) | A building may serve many campuses; `building_campus` is the association set | Accepted |
@@ -30,6 +30,9 @@ tempted to undo it without knowing why.
 | [0022](0022-resources-shared-across-campuses.md) | A resource may serve many campuses, and so many schools; one identity, so availability is global | Accepted |
 | [0023](0023-the-interface-scopes-to-one-school.md) | The interface scopes to one school, chosen once; project-wide reads are composed, and a certain refusal is explained rather than offered | Accepted |
 | [0024](0024-setup-is-ordered-by-what-a-school-knows.md) | School Setup is ordered by what a school knows rather than by dependency; a hidden field is carried, not dropped | Accepted |
+| [0025](0025-teacher-qualifications-across-school-owned-subjects.md) | A qualification is a property of the person and names one school's subject; no project-wide subject catalogue | Accepted |
+| [0026](0026-teacher-departments-are-a-narrowing-of-membership.md) | A teacher's department is a narrowing of school membership, and is its own table — not `teacher.department_id` | Accepted |
+| [0027](0027-revisions-are-checked-on-write.md) | A write states the revision it was built on; a stale one is refused, never merged | Accepted |
 
 Statuses: **Proposed** (awaiting a decision), **Accepted**, **Superseded by NNNN**,
 **Deprecated**. Accepted records are not edited to reflect a change of mind — a new

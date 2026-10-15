@@ -46,9 +46,9 @@ vi.mock("../../ipc/setup", () => ({
   listRoomTypes: () => listRoomTypes(),
   listRooms: (campusId: string) => listRooms(campusId),
   createRoom: (input: unknown, shared: unknown) => createRoom(input, shared),
-  updateRoom: (id: string, input: unknown) => {
+  updateRoom: (id: string, rev: number, input: unknown) => {
     order.push("update");
-    return updateRoom(id, input);
+    return updateRoom(id, rev, input);
   },
   shareRoom: (roomId: string, campusId: string) => {
     order.push(`share:${campusId}`);
@@ -62,6 +62,32 @@ vi.mock("../../ipc/setup", () => ({
   createRoomType: vi.fn(() => Promise.resolve({})),
   updateRoomType: vi.fn(() => Promise.resolve({})),
   deleteRoomType: vi.fn(() => Promise.resolve()),
+  // Stage B. Empty by default: a suite that is about something else should not have
+  // to describe a curriculum, and one that is about this panel overrides them.
+  listDepartments: vi.fn(() => Promise.resolve([])),
+  listSubjects: vi.fn(() => Promise.resolve([])),
+  listTeacherDepartments: vi.fn(() => Promise.resolve([])),
+  listQualifications: vi.fn(() => Promise.resolve([])),
+  listSubjectTeachers: vi.fn(() => Promise.resolve([])),
+  listDepartmentTeachers: vi.fn(() => Promise.resolve([])),
+  departmentDependents: vi.fn(() =>
+    Promise.resolve({ total: 0, subjects: 0, teachers: 0 }),
+  ),
+  subjectDependents: vi.fn(() => Promise.resolve({ total: 0, qualifiedTeachers: 0 })),
+  addQualification: vi.fn(() => Promise.resolve({})),
+  removeQualification: vi.fn(() => Promise.resolve()),
+  addTeacherDepartment: vi.fn(() => Promise.resolve({})),
+  removeTeacherDepartment: vi.fn(() => Promise.resolve()),
+  createDepartment: vi.fn(() => Promise.resolve({})),
+  updateDepartment: vi.fn(() => Promise.resolve({})),
+  deleteDepartment: vi.fn(() => Promise.resolve()),
+  createSubject: vi.fn(() => Promise.resolve({})),
+  updateSubject: vi.fn(() => Promise.resolve({})),
+  deleteSubject: vi.fn(() => Promise.resolve()),
+  isConflict: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { kind?: string }).kind === "conflict",
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
       ? String((error as { message: unknown }).message)
@@ -436,7 +462,7 @@ describe("editing the share set", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateRoom).toHaveBeenCalled());
-    expect(updateRoom.mock.calls[0]?.[1]).toMatchObject({ name: "Great Hall" });
+    expect(updateRoom.mock.calls[0]?.[2]).toMatchObject({ name: "Great Hall" });
     expect(shareRoom).not.toHaveBeenCalled();
     expect(unshareRoom).not.toHaveBeenCalled();
   });
@@ -453,7 +479,7 @@ describe("editing the share set", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateRoom).toHaveBeenCalled());
-    expect(updateRoom.mock.calls[0]?.[1]).not.toHaveProperty("sharedCampusIds");
+    expect(updateRoom.mock.calls[0]?.[2]).not.toHaveProperty("sharedCampusIds");
   });
 
   it("withdraws before changing the room, and shares after it", async () => {

@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 use evara_core::calendar::WorkingDays;
 
+use crate::repo::Expected;
 use crate::repo::structure::{BuildingInput, CampusInput, RoomInput, SchoolInput};
 use crate::tests_support;
 use crate::workspace::Workspace;
@@ -455,10 +456,11 @@ fn renaming_is_blocked_by_a_collision_on_any_campus_it_serves() {
         .create_building(&building(south, "Library"), &[])
         .expect("create south library");
 
-    let outcome = project
-        .db()
-        .structure()
-        .update_building(shared.id, &building(north, "Library"));
+    let outcome = project.db().structure().update_building(
+        shared.id,
+        Expected::Any,
+        &building(north, "Library"),
+    );
 
     assert!(
         matches!(outcome, Err(DbError::DuplicateValue { .. })),
@@ -480,7 +482,7 @@ fn renaming_a_shared_building_renames_it_everywhere() {
     project
         .db()
         .structure()
-        .update_building(shared.id, &building(north, "Sports Hall"))
+        .update_building(shared.id, Expected::Any, &building(north, "Sports Hall"))
         .expect("rename");
 
     for campus in [north, south] {
@@ -610,7 +612,7 @@ fn withdrawing_a_share_succeeds_once_the_rooms_are_reassigned() {
     project
         .db()
         .structure()
-        .update_room(south_room.id, &room(south, "S1", None))
+        .update_room(south_room.id, Expected::Any, &room(south, "S1", None))
         .expect("clear the room's building");
 
     tests_support::unshare_building_here(project.db(), shared.id, south)

@@ -63,11 +63,35 @@ connection factory in `evara-db`, covered by a test.
 | `id` | `TEXT PRIMARY KEY` | UUIDv7, lowercase hyphenated. Time-ordered so index locality is good and insertion order is recoverable. Stable across export/import. |
 | `created_at` | `TEXT NOT NULL` | ISO-8601 UTC, millisecond precision. Sorts lexicographically. |
 | `updated_at` | `TEXT NOT NULL` | Written by the repository on every update, not by a trigger — see [OPEN-DECISIONS](OPEN-DECISIONS.md) D17. |
-| `rev` | `INTEGER NOT NULL DEFAULT 1` | Incremented **by the repository**, never by a trigger — see [OPEN-DECISIONS](OPEN-DECISIONS.md) D17. Optimistic concurrency now, merge input later. |
+| `rev` | `INTEGER NOT NULL DEFAULT 1` | Incremented **by the repository**, never by a trigger — see [OPEN-DECISIONS](OPEN-DECISIONS.md) D17. **Checked on write since `V14`'s stage** — see below. Merge input later. |
 | `deleted_at` | `TEXT NULL` | Soft delete, only on tables a future sync must tombstone. |
 
 Natural keys (`code`) are unique *within* their parent, never the primary key — schools
 rename and reuse codes.
+
+#### `rev` is a precondition, not only a record
+
+Since Stage B every update and delete the interface can reach puts the caller's revision in
+the statement:
+
+```sql
+UPDATE room SET ..., updated_at = ?, rev = rev + 1 WHERE id = ? AND rev = ?
+DELETE FROM room                                   WHERE id = ? AND rev = ?
+```
+
+A row that has moved on matches nothing, so nothing is written — no column changes, no
+revision is consumed, and no change-log trigger fires. The failure is reported as
+`DbError::Conflict`, deliberately distinct from `NotFound`: the record is still there, and
+the next step is to re-read it rather than to give up.
+
+`repo::update` and `repo::delete` own the clause, as they already own `rev = rev + 1`, so a
+repository cannot write the domain columns without it.
+[adr/0027](adr/0027-revisions-are-checked-on-write.md) records the full inventory —
+which categories of mutation carry a revision, which carry something stronger, and the four
+where last-write-wins is the deliberate answer. It also notes the one consequence for this
+table: because `rev` now has two readers, D17's "no self-updating triggers" rule is
+load-bearing rather than tidy. A trigger that bumped `rev` would make every second write in
+a transaction conflict with itself.
 
 ### Sync-readiness
 
@@ -118,6 +142,31 @@ one transaction**, so a failure leaves the project untouched rather than half-mi
 > a shipped file makes every existing project refuse to open. Corrections ship as a new
 > numbered migration.
 
+The set as shipped:
+
+| | What it adds | Rebuilds a table | Backfills |
+| --- | --- | --- | --- |
+| `V1`–`V2` | bootstrap, installation identity | no | — |
+| `V3`–`V4` | Structure: the static half, then the time model | no | — |
+| `V5`–`V6` | `building_campus`, `room_campus` | no | yes, from the home campus |
+| `V7`–`V9` | school working days, school logo, cycle kind | no | yes |
+| `V10`–`V11` | the People group, then `availability` | no | — |
+| `V12` | several schools per project | **yes**, `school` | — |
+| `V13` | shared identities: membership, eligibility, enrolment history, `resource_campus` | no | yes, from what each row already said |
+| `V14` | the Curriculum prerequisites: `department`, `subject`, `teacher_qualification`, `teacher_department` | no | **no** |
+
+`V12` is the only migration that has ever rebuilt a table, and
+`backup::FIRST_REBUILDING_MIGRATION` is set to 12 because of it: a project below that
+version gets a **verified** safety copy before the upgrade proceeds, and the upgrade is
+refused outright if the copy cannot be made or read back
+([adr/0020](adr/0020-in-place-table-rebuild.md)). A project already at or past 12 needs no
+copy, which is why `V13` and `V14` left the constant alone.
+
+`V14` has **no backfill on purpose**: a project that has never been asked what it teaches
+has no departments and no subjects, and inventing a "General" department would be putting
+words in a school's mouth. `tests_curriculum::a_v13_project_upgrades_without_touching_a_single_row`
+asserts that every row, revision and timestamp survives the upgrade unchanged.
+
 ### Project metadata and installation identity
 
 `app_meta` is a key/value table rather than `PRAGMA user_version`, because several
@@ -166,8 +215,8 @@ extraction; references run downward in this table only.
 | Group | Owns | Depends on |
 | --- | --- | --- |
 | **Structure** | school, campus, building, building_campus, room, room_campus, room_type, resource, resource_campus, academic_year, term, cycle, cycle_day, period_structure, period, timeslot, calendar_day | — |
-| **People** | teacher, teacher_school, teacher_campus, department, teacher_qualification, year_level, student, student_school_enrolment, student_group, student_group_member | Structure |
-| **Curriculum** | subject, course, class_section, class_teacher, class_group, enrolment, course_request | Structure, People |
+| **People** | teacher, teacher_school, teacher_campus, year_level, student, student_school_enrolment, student_group, student_group_member | Structure |
+| **Curriculum** | department, subject, teacher_qualification, teacher_department, course, class_section, class_teacher, class_group, enrolment, course_request | Structure, People |
 | **Activities** | activity, activity_teacher, activity_group, activity_room_candidate, activity_resource, line, line_member, activity_link, activity_link_member, availability | Structure, People, Curriculum |
 | **Scheduling** | timetable, timetable_entry, constraint_instance, constraint_ref, solve_run, violation | all of the above |
 | **Operations** | absence, coverage | Scheduling |
@@ -482,13 +531,11 @@ written that way and need no change, so two schools may each hold their own "Gra
 their own ordinal 1 as two records with two identifiers.
 
 ```sql
-department (id, school_id, name, code)
 teacher (id, school_id, code NULL, given_name, family_name, email NULL,
          home_campus_id NULL, fte_percent INTEGER,
          max_periods_per_day INTEGER NULL, max_periods_per_cycle INTEGER NULL,
          max_consecutive_periods INTEGER NULL, notes, is_active,
          UNIQUE(school_id, code) WHERE code IS NOT NULL)
-teacher_qualification (teacher_id, subject_id, PRIMARY KEY(teacher_id, subject_id))
 
 year_level (id, school_id, name, ordinal)
 student (id, school_id, code NULL, given_name, family_name, email NULL,
@@ -530,8 +577,12 @@ sketch above:
 - `student_group_member` carries its own `id` and audit columns rather than a composite
   primary key, so it is visible to the change-log triggers — the same reason
   `building_campus` does, recorded in V5.
-- `department`, `subject` and `teacher_qualification` arrive with Curriculum, not here, and
-  `teacher.department_id` with them.
+- `department`, `subject`, `teacher_qualification` and `teacher_department` arrive with
+  Curriculum in `V14`, and are documented in §5 rather than here. **`teacher.department_id`
+  is not added at all** — see [adr/0026](adr/0026-teacher-departments-are-a-narrowing-of-membership.md),
+  which records why a single column on a project-level identity cannot say "Mathematics at
+  Northgate, Science at Southmoor" and is therefore the wrong shape rather than a deferred
+  one.
 
 `delete_student_group` removes its own membership rows and refuses while child groups
 remain; `delete_student` refuses while the student is in any group, because a membership is
@@ -605,16 +656,74 @@ What each of those says, and the reasoning is in
   confirmation can say what is in the way.
 
 **Not in V13**, and not implied by it: a project-wide teacher code (the blocker and the
-better alternative are in ADR 0021's *Known limitation*), `teacher_qualification`,
-`department`, project-level availability, and cross-school scheduling.
+better alternative are in ADR 0021's *Known limitation*), project-level availability, and
+cross-school scheduling. `teacher_qualification` and `department` were on this list and
+arrived in `V14`; see §5.
 
 ---
 
 ## 5. Curriculum
 
+### What `V14` implements — departments, subjects and qualifications
+
+The curriculum prerequisites, one stage ahead of the lessons that read them: Stage C's
+`course` references a subject and cannot be designed around a table that does not exist.
+Two decisions are recorded as ADRs because neither is obvious —
+[adr/0025](adr/0025-teacher-qualifications-across-school-owned-subjects.md) for
+qualifications and [adr/0026](adr/0026-teacher-departments-are-a-narrowing-of-membership.md)
+for departments.
+
 ```sql
-subject (id, school_id, name, code, colour, department_id NULL,
-         default_room_type_id NULL, UNIQUE(school_id, code))
+-- How ONE school organises the teaching of its curriculum. Never shared: two schools may
+-- each hold a "Mathematics Department" as two records with two identifiers.
+department (id, school_id, name, code NULL, description NULL,
+            UNIQUE(school_id, name),
+            UNIQUE(school_id, code) WHERE code IS NOT NULL)
+
+-- What a school teaches. School-owned, so Northgate's Mathematics and Southmoor's are two
+-- subjects; they may share a name AND a code without colliding, and nothing merges them.
+subject (id, school_id, department_id NULL -> department, name, code NULL, description NULL,
+         UNIQUE(school_id, name),
+         UNIQUE(school_id, code) WHERE code IS NOT NULL)
+
+-- A property of the PERSON, naming one school-owned subject. No school_id: the subject
+-- supplies it. No membership requirement: a teacher who leaves does not become unqualified.
+teacher_qualification (id, teacher_id, subject_id, UNIQUE(teacher_id, subject_id))
+
+-- A NARROWING of school membership, modelled on teacher_campus. A trigger pair refuses a
+-- department of a school the teacher does not belong to; removing the membership clears it.
+teacher_department (id, teacher_id, department_id, UNIQUE(teacher_id, department_id))
+```
+
+Three departures from the sketch below, each deliberate:
+
+- **`subject.department_id` is `ON DELETE RESTRICT`**, not ADR 0010's `SET NULL` for an
+  optional classification. ADR 0025 §6 argues it: a database-level `SET NULL` rewrites rows
+  without incrementing `rev`, which is R10 in [OPEN-DECISIONS](OPEN-DECISIONS.md) and
+  contradicts the revision contract [adr/0027](adr/0027-revisions-are-checked-on-write.md)
+  installs in the same stage. `delete_department` refuses while any subject or teacher
+  refers to it, with `Curriculum::department_dependents` naming the counts first.
+- **`subject.colour` and `subject.default_room_type_id` are absent.** A colour is a
+  rendering decision belonging with the renderer in Phase 7; a default room type is a
+  scheduling default belonging with `course.required_room_type_id` in Stage C, where there
+  is something to default. Either is one nullable `ALTER TABLE` — the cheap direction.
+- **`subject` is unique on `name` as well as `code`**, because `code` is optional. The
+  documented sketch has `UNIQUE(school_id, code)` alone, which would let a school with no
+  codes enter "Mathematics" twice.
+
+`teacher_qualification` and `teacher_department` are **first-class entities** with their own
+UUIDv7 `id`, audit columns and change-log triggers, rather than composite-key junctions —
+the reason `V5`, `V6`, `V10` and `V13` all give: the triggers read `NEW.id` and `NEW.rev`,
+and `repo::update` / `repo::delete` address rows by `id`.
+
+**Not in `V14`**, and not implied by it: qualification levels or certification expiry
+(ADR 0025's *Known limitation*), a head of department or a primary-department flag
+(ADR 0026's), a department hierarchy, a project-wide subject catalogue (rejected in ADR 0025
+§2), and everything below.
+
+### The rest of the group, as documented and not yet built
+
+```sql
 
 -- What is taught: "Year 9 Mathematics".
 course (id, school_id, subject_id -> subject, name, code, year_level_id NULL,

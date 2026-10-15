@@ -39,13 +39,14 @@ const listRoomTypes = vi.fn<(schoolId: string) => Promise<RoomType[]>>();
 const shareBuilding = vi.fn<(buildingId: string, campusId: string) => Promise<void>>();
 const unshareBuilding =
   vi.fn<(schoolId: string, buildingId: string, campusId: string) => Promise<void>>();
-const deleteBuilding = vi.fn<(schoolId: string, id: string) => Promise<void>>();
-const updateBuilding = vi.fn<(id: string, input: unknown) => Promise<Building>>();
+const deleteBuilding = vi.fn<(schoolId: string, id: string, rev: number) => Promise<void>>();
+const updateBuilding =
+  vi.fn<(id: string, rev: number, input: unknown) => Promise<Building>>();
 const shareRoom = vi.fn<(roomId: string, campusId: string) => Promise<void>>();
 const unshareRoom =
   vi.fn<(schoolId: string, roomId: string, campusId: string) => Promise<void>>();
-const deleteRoom = vi.fn<(schoolId: string, id: string) => Promise<void>>();
-const updateRoom = vi.fn<(id: string, input: unknown) => Promise<Room>>();
+const deleteRoom = vi.fn<(schoolId: string, id: string, rev: number) => Promise<void>>();
+const updateRoom = vi.fn<(id: string, rev: number, input: unknown) => Promise<Room>>();
 
 vi.mock("../../ipc/setup", () => ({
   listCampuses: (schoolId: string) => listCampuses(schoolId),
@@ -54,15 +55,18 @@ vi.mock("../../ipc/setup", () => ({
   deleteCampus: vi.fn(() => Promise.resolve()),
   listBuildings: (campusId: string) => listBuildings(campusId),
   createBuilding: vi.fn(() => Promise.resolve({})),
-  updateBuilding: (id: string, input: unknown) => updateBuilding(id, input),
-  deleteBuilding: (schoolId: string, id: string) => deleteBuilding(schoolId, id),
+  updateBuilding: (id: string, rev: number, input: unknown) =>
+    updateBuilding(id, rev, input),
+  deleteBuilding: (schoolId: string, id: string, rev: number) =>
+    deleteBuilding(schoolId, id, rev),
   shareBuilding: (buildingId: string, campusId: string) => shareBuilding(buildingId, campusId),
   unshareBuilding: (schoolId: string, buildingId: string, campusId: string) =>
     unshareBuilding(schoolId, buildingId, campusId),
   listRooms: (campusId: string) => listRooms(campusId),
   createRoom: vi.fn(() => Promise.resolve({})),
-  updateRoom: (id: string, input: unknown) => updateRoom(id, input),
-  deleteRoom: (schoolId: string, id: string) => deleteRoom(schoolId, id),
+  updateRoom: (id: string, rev: number, input: unknown) => updateRoom(id, rev, input),
+  deleteRoom: (schoolId: string, id: string, rev: number) =>
+    deleteRoom(schoolId, id, rev),
   shareRoom: (roomId: string, campusId: string) => shareRoom(roomId, campusId),
   unshareRoom: (schoolId: string, roomId: string, campusId: string) =>
     unshareRoom(schoolId, roomId, campusId),
@@ -77,6 +81,32 @@ vi.mock("../../ipc/setup", () => ({
   listCycles: vi.fn(() => Promise.resolve([])),
   listPeriodStructures: vi.fn(() => Promise.resolve([])),
   gridPreview: vi.fn(() => Promise.resolve(null)),
+  // Stage B. Empty by default: a suite that is about something else should not have
+  // to describe a curriculum, and one that is about this panel overrides them.
+  listDepartments: vi.fn(() => Promise.resolve([])),
+  listSubjects: vi.fn(() => Promise.resolve([])),
+  listTeacherDepartments: vi.fn(() => Promise.resolve([])),
+  listQualifications: vi.fn(() => Promise.resolve([])),
+  listSubjectTeachers: vi.fn(() => Promise.resolve([])),
+  listDepartmentTeachers: vi.fn(() => Promise.resolve([])),
+  departmentDependents: vi.fn(() =>
+    Promise.resolve({ total: 0, subjects: 0, teachers: 0 }),
+  ),
+  subjectDependents: vi.fn(() => Promise.resolve({ total: 0, qualifiedTeachers: 0 })),
+  addQualification: vi.fn(() => Promise.resolve({})),
+  removeQualification: vi.fn(() => Promise.resolve()),
+  addTeacherDepartment: vi.fn(() => Promise.resolve({})),
+  removeTeacherDepartment: vi.fn(() => Promise.resolve()),
+  createDepartment: vi.fn(() => Promise.resolve({})),
+  updateDepartment: vi.fn(() => Promise.resolve({})),
+  deleteDepartment: vi.fn(() => Promise.resolve()),
+  createSubject: vi.fn(() => Promise.resolve({})),
+  updateSubject: vi.fn(() => Promise.resolve({})),
+  deleteSubject: vi.fn(() => Promise.resolve()),
+  isConflict: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { kind?: string }).kind === "conflict",
   describeSetupError: (error: unknown) =>
     typeof error === "object" && error !== null && "message" in error
       ? String((error as { message: unknown }).message)
@@ -157,7 +187,7 @@ beforeEach(() => {
   shareBuilding.mockResolvedValue(undefined);
   unshareBuilding.mockResolvedValue(undefined);
   deleteBuilding.mockResolvedValue(undefined);
-  updateBuilding.mockImplementation((id, input) =>
+  updateBuilding.mockImplementation((id, _rev, input) =>
     Promise.resolve({
       id,
       campusId: NORTH_MAIN.id,
@@ -168,7 +198,7 @@ beforeEach(() => {
   shareRoom.mockResolvedValue(undefined);
   unshareRoom.mockResolvedValue(undefined);
   deleteRoom.mockResolvedValue(undefined);
-  updateRoom.mockImplementation((id, input) =>
+  updateRoom.mockImplementation((id, _rev, input) =>
     Promise.resolve({ id, ...(input as Record<string, unknown>), ...STAMP } as Room),
   );
 });
@@ -325,7 +355,7 @@ describe("sharing a building across schools", () => {
     await waitFor(() => expect(unshareBuilding).toHaveBeenCalledTimes(1));
     expect(unshareBuilding.mock.calls[0]?.[2]).not.toBe(NORTH_MAIN.id);
     // And the rename that went with it named the real home campus, not the viewed one.
-    expect(updateBuilding.mock.calls[0]?.[1]).toMatchObject({ campusId: NORTH_MAIN.id });
+    expect(updateBuilding.mock.calls[0]?.[2]).toMatchObject({ campusId: NORTH_MAIN.id });
   });
 
   it("explains instead of offering a delete while another school shares it", async () => {

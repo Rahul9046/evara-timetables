@@ -138,8 +138,8 @@ export function CampusesAndBuildings(props: { school: School; context?: SetupCon
       }),
       list: () => listCampuses(school.id),
       create: createCampus,
-      update: updateCampus,
-      remove: (id) => deleteCampus(school.id, id),
+      update: (row, input) => updateCampus(row.id, row.rev, input),
+      remove: (row) => deleteCampus(school.id, row.id, row.rev),
       emptyHint:
         "A school needs at least one campus before rooms or bell schedules can be recorded against it. A single-site school has exactly one.",
       deleteNote: () => (
@@ -290,10 +290,11 @@ export function CampusesAndBuildings(props: { school: School; context?: SetupCon
       // call here. The repository is the authority on each step and refuses the ones that
       // are not allowed; a refusal leaves the earlier steps applied, which is why the
       // panel re-reads the list after every mutation rather than patching it.
-      update: async (id, input) => {
-        const existing = (await loadBuildings()).find((row) => row.id === id);
+      update: async (row, input) => {
+        const id = row.id;
+        const existing = (await loadBuildings()).find((other) => other.id === id);
         const home = existing?.campusId ?? input.campusId;
-        const building = await updateBuilding(id, {
+        const building = await updateBuilding(id, row.rev, {
           campusId: home,
           name: input.name,
         });
@@ -311,7 +312,7 @@ export function CampusesAndBuildings(props: { school: School; context?: SetupCon
 
         return { ...building, campusIds: [home, ...after] };
       },
-      remove: (id) => deleteBuilding(school.id, id),
+      remove: (row) => deleteBuilding(school.id, row.id, row.rev),
       // Withdrawing a share is reversible but it is not nothing: a campus loses a building
       // its rooms may be organised around. Asking first is the same courtesy a delete gets.
       confirmSubmit: (draft, row) => {

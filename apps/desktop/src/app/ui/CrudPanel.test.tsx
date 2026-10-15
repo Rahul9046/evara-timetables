@@ -25,6 +25,8 @@ interface Widget {
   id: string;
   name: string;
   code: string;
+  /** The precondition every write carries since Stage B. */
+  rev: number;
 }
 
 interface WidgetInput {
@@ -32,7 +34,9 @@ interface WidgetInput {
   code: string;
 }
 
-const ONE: Widget = { id: "w-1", name: "Main", code: "MAIN" };
+// `rev` is deliberately neither 0 nor 1: a panel sending a default instead of the
+// row's own revision would otherwise pass by coincidence.
+const ONE: Widget = { id: "w-1", name: "Main", code: "MAIN", rev: 4 };
 
 function spec(overrides: Partial<CrudSpec<Widget, WidgetInput>> = {}): CrudSpec<
   Widget,
@@ -199,8 +203,8 @@ describe("editing", () => {
     expect(screen.getByLabelText(/^Code/)).toHaveProperty("value", "MAIN");
   });
 
-  it("sends the identifier alongside the input", async () => {
-    const update = vi.fn(() => Promise.resolve(ONE));
+  it("sends the row itself, so the write carries its revision", async () => {
+    const update = vi.fn((_row: Widget, _input: WidgetInput) => Promise.resolve(ONE));
     render(<CrudPanel spec={spec({ update })} />);
 
     await userEvent.click(await screen.findByRole("button", { name: /Edit Main/i }));
@@ -209,9 +213,13 @@ describe("editing", () => {
     await userEvent.type(name, "Main Site");
     await userEvent.click(screen.getByRole("button", { name: /Save changes/i }));
 
+    // The row, not its identifier. A spec needs the `rev` as well as the `id` to send a
+    // precondition, and `rev` lives one level down on the projections some screens use —
+    // so the panel hands over the whole row and each spec takes what it needs.
     await waitFor(() => {
-      expect(update).toHaveBeenCalledWith("w-1", { name: "Main Site", code: "MAIN" });
+      expect(update).toHaveBeenCalledWith(ONE, { name: "Main Site", code: "MAIN" });
     });
+    expect(update.mock.calls[0]?.[0]).toMatchObject({ id: "w-1", rev: 4 });
   });
 
   it("abandons nothing on cancel", async () => {
@@ -335,7 +343,8 @@ describe("deleting", () => {
     const dialog = await screen.findByRole("dialog");
     await userEvent.click(within(dialog).getByRole("button", { name: /^Delete campus$/i }));
 
-    await waitFor(() => expect(remove).toHaveBeenCalledWith("w-1"));
+    // Likewise for a delete, where losing somebody else's edit is irreversible.
+    await waitFor(() => expect(remove).toHaveBeenCalledWith(ONE));
     await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
   });
 

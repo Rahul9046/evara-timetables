@@ -69,6 +69,33 @@ pub enum SetupError {
         message: String,
     },
 
+    /// Somebody else changed the record after this window read it.
+    ///
+    /// The optimistic-concurrency refusal, new in Stage B. **Nothing was written**, which
+    /// is the first thing the message says, because the one unacceptable outcome is a
+    /// screen that looks saved and is not.
+    ///
+    /// Its own kind rather than [`SetupError::Invalid`] because the response is specific
+    /// and is not an apology: show the user what the record says now, keep what they
+    /// typed, and let them decide. Distinct from [`SetupError::NotFound`] because the
+    /// record is still there — telling somebody it has gone would send them looking for
+    /// something that exists. Distinct from [`SetupError::ReviewRequired`], which is the
+    /// grid's version of the same idea and is about a recomputed plan rather than one
+    /// row's revision.
+    ///
+    /// The revisions are carried for diagnostics and for a test to assert. Nothing should
+    /// branch on the gap between them: one behind and twelve behind want the same answer.
+    Conflict {
+        /// What kind of record it was.
+        entity: String,
+        /// Revision this window was holding.
+        expected_rev: i64,
+        /// Revision the record is actually at.
+        actual_rev: i64,
+        /// Message to show.
+        message: String,
+    },
+
     /// A uniqueness rule was broken.
     ///
     /// Carries `field` so the form can mark the offending input rather than showing a
@@ -131,6 +158,22 @@ impl From<DbError> for SetupError {
                 message: format!(
                     "This {entity} cannot be deleted while other records still depend on it. \
                      Remove or reassign those records first, then try again."
+                ),
+            },
+            DbError::Conflict {
+                entity,
+                expected,
+                actual,
+            } => Self::Conflict {
+                entity: entity.to_owned(),
+                expected_rev: expected,
+                actual_rev: actual,
+                // Worded once, here, because every screen's answer is the same and three
+                // screens phrasing it three ways would be three different promises about
+                // whether anything was saved.
+                message: format!(
+                    "This {entity} has changed since you opened it, so nothing was saved. \
+                     Reload the latest version before saving."
                 ),
             },
             DbError::DuplicateValue { entity, field } => Self::Duplicate {

@@ -307,8 +307,9 @@ export function ResourcesAndSharing(props: { school: School; context?: SetupCont
       // from the shares. Including either would send a call the backend refuses by name:
       // withdrawing a resource's home campus is exactly what `unshare_resource` is there
       // to prevent.
-      update: async (id, draft) => {
-        const existing = (await loadResources()).find((row) => row.id === id);
+      update: async (row, draft) => {
+        const id = row.id;
+        const existing = (await loadResources()).find((other) => other.id === id);
         const oldHome = existing?.campusId ?? null;
         const newHome = draft.input.campusId;
 
@@ -327,7 +328,7 @@ export function ResourcesAndSharing(props: { school: School; context?: SetupCont
         for (const campusId of before) {
           if (!after.has(campusId)) await unshareResource(school.id, id, campusId);
         }
-        const saved = await updateResource(id, draft.input);
+        const saved = await updateResource(id, row.rev, draft.input);
         for (const campusId of after) {
           if (!before.has(campusId)) await shareResource(school.id, id, campusId);
         }
@@ -336,7 +337,7 @@ export function ResourcesAndSharing(props: { school: School; context?: SetupCont
         if (saved.campusId !== null) campusIds.unshift(saved.campusId);
         return { ...saved, campusIds };
       },
-      remove: (id) => deleteResource(school.id, id),
+      remove: (row) => deleteResource(school.id, row.id, row.rev),
       editBlockedBy: (row) =>
         row.schoolId === school.id
           ? null

@@ -36,13 +36,14 @@ use rusqlite::{OptionalExtension, Transaction};
 use uuid::Uuid;
 
 use super::availability::{AvailabilityEntity, clear_for_entity};
+use super::curriculum::{associations_of, qualifications_of};
 use super::membership::{
     EnrolmentStatus, StudentEnrolmentInput, eligibility_of_teacher, enrolments_of_student,
     insert_enrolment, insert_membership, memberships_of_teacher, mirror_student_onto_enrolment,
     other_employers, other_schools_attended,
 };
 use super::row::{entity, opt_text, text};
-use super::{Stamp, delete, require_same_school, translate, update};
+use super::{Expected, Stamp, delete, require_same_school, translate, update};
 use crate::Database;
 use crate::error::{DbError, Result};
 
@@ -311,7 +312,12 @@ impl People<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`] or [`DbError::DuplicateValue`].
-    pub fn update_year_level(&mut self, id: Uuid, input: &YearLevelInput) -> Result<YearLevel> {
+    pub fn update_year_level(
+        &mut self,
+        id: Uuid,
+        expected: Expected,
+        input: &YearLevelInput,
+    ) -> Result<YearLevel> {
         self.db.write(|tx| {
             require_same_school(tx, "year level", "year_level", id, input.school_id)?;
             update(
@@ -319,6 +325,7 @@ impl People<'_> {
                 "year level",
                 "year_level",
                 id,
+                expected,
                 "name = ?, ordinal = ?",
                 &[&input.name, &input.ordinal],
             )
@@ -338,7 +345,12 @@ impl People<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`] if no such year level exists.
-    pub fn delete_year_level(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+    pub fn delete_year_level(
+        &mut self,
+        school_id: Uuid,
+        id: Uuid,
+        expected: Expected,
+    ) -> Result<()> {
         self.db.write(|tx| {
             require_same_school(tx, "year level", "year_level", id, school_id)?;
             detach_year_level(tx, "student", id)?;
@@ -347,7 +359,7 @@ impl People<'_> {
             // authoritative one. Leaving it to the schema's SET NULL would change rows
             // without incrementing `rev`, which is the thing this helper exists to avoid.
             detach_year_level(tx, "student_school_enrolment", id)?;
-            delete(tx, "year level", "year_level", id)
+            delete(tx, "year level", "year_level", id, expected)
         })
     }
 }
@@ -373,6 +385,7 @@ fn detach_year_level(tx: &Transaction<'_>, table: &'static str, year_level_id: U
             table,
             table,
             id,
+            Expected::Any,
             "year_level_id = ?",
             &[&None::<String>],
         )?;
@@ -509,7 +522,12 @@ impl People<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`] or [`DbError::DuplicateValue`].
-    pub fn update_teacher(&mut self, id: Uuid, input: &TeacherInput) -> Result<Teacher> {
+    pub fn update_teacher(
+        &mut self,
+        id: Uuid,
+        expected: Expected,
+        input: &TeacherInput,
+    ) -> Result<Teacher> {
         self.db.write(|tx| {
             require_same_school(tx, "teacher", "teacher", id, input.school_id)?;
             update(
@@ -517,6 +535,7 @@ impl People<'_> {
                 "teacher",
                 "teacher",
                 id,
+                expected,
                 TEACHER_ASSIGNMENTS,
                 rusqlite::params![
                     &input.code,
@@ -576,7 +595,7 @@ impl People<'_> {
     /// - [`DbError::NotFound`] if no such teacher exists.
     /// - [`DbError::WrongSchool`] if another school created them.
     /// - [`DbError::StillReferenced`] if another school still employs them.
-    pub fn delete_teacher(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+    pub fn delete_teacher(&mut self, school_id: Uuid, id: Uuid, expected: Expected) -> Result<()> {
         self.db.write(|tx| {
             // Both checks before anything is cleared, not after: these rows are the
             // teacher's, and clearing a shared teacher's availability and *then* refusing
@@ -588,13 +607,49 @@ impl People<'_> {
             }
 
             clear_for_entity(tx, AvailabilityEntity::Teacher, id)?;
+            // V14's two. A qualification and a department association both have the person
+            // on one end of them, so neither means anything once that person is gone --
+            // the same judgement `delete_student_group` makes about its own memberships.
+            // Through `super::delete`, so each removal is a truthful change-log entry
+            // rather than a silent orphan; `Expected::Any` because these are cascades
+            // inside somebody else's transaction and the user never saw their revisions.
+            for qualification in qualifications_of(tx, id)? {
+                delete(
+                    tx,
+                    "qualification",
+                    "teacher_qualification",
+                    qualification,
+                    Expected::Any,
+                )?;
+            }
+            for association in associations_of(tx, id)? {
+                delete(
+                    tx,
+                    "department association",
+                    "teacher_department",
+                    association,
+                    Expected::Any,
+                )?;
+            }
             for eligibility in eligibility_of_teacher(tx, id)? {
-                delete(tx, "campus eligibility", "teacher_campus", eligibility)?;
+                delete(
+                    tx,
+                    "campus eligibility",
+                    "teacher_campus",
+                    eligibility,
+                    Expected::Any,
+                )?;
             }
             for membership in memberships_of_teacher(tx, id)? {
-                delete(tx, "school membership", "teacher_school", membership)?;
+                delete(
+                    tx,
+                    "school membership",
+                    "teacher_school",
+                    membership,
+                    Expected::Any,
+                )?;
             }
-            delete(tx, "teacher", "teacher", id)
+            delete(tx, "teacher", "teacher", id, expected)
         })
     }
 }
@@ -751,7 +806,12 @@ impl People<'_> {
     ///
     /// [`DbError::NotFound`], [`DbError::DuplicateValue`], or [`DbError::Invalid`] if the
     /// placement belongs to another school.
-    pub fn update_student(&mut self, id: Uuid, input: &StudentInput) -> Result<Student> {
+    pub fn update_student(
+        &mut self,
+        id: Uuid,
+        expected: Expected,
+        input: &StudentInput,
+    ) -> Result<Student> {
         self.db.write(|tx| {
             require_same_school(tx, "student", "student", id, input.school_id)?;
             update(
@@ -759,6 +819,7 @@ impl People<'_> {
                 "student",
                 "student",
                 id,
+                expected,
                 STUDENT_ASSIGNMENTS,
                 rusqlite::params![
                     &input.code,
@@ -797,7 +858,7 @@ impl People<'_> {
     ///
     /// [`DbError::StillReferenced`] in either case; [`DbError::WrongSchool`] if another
     /// school created them.
-    pub fn delete_student(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+    pub fn delete_student(&mut self, school_id: Uuid, id: Uuid, expected: Expected) -> Result<()> {
         self.db.write(|tx| {
             require_same_school(tx, "student", "student", id, school_id)?;
             if other_schools_attended(tx, id, school_id)? > 0 {
@@ -819,9 +880,15 @@ impl People<'_> {
             }
 
             for enrolment in enrolments_of_student(tx, id)? {
-                delete(tx, "enrolment", "student_school_enrolment", enrolment)?;
+                delete(
+                    tx,
+                    "enrolment",
+                    "student_school_enrolment",
+                    enrolment,
+                    Expected::Any,
+                )?;
             }
-            delete(tx, "student", "student", id)
+            delete(tx, "student", "student", id, expected)
         })
     }
 }
@@ -920,6 +987,7 @@ impl People<'_> {
     pub fn update_student_group(
         &mut self,
         id: Uuid,
+        expected: Expected,
         input: &StudentGroupInput,
     ) -> Result<StudentGroup> {
         self.db.write(|tx| {
@@ -934,6 +1002,7 @@ impl People<'_> {
                 "student group",
                 "student_group",
                 id,
+                expected,
                 STUDENT_GROUP_ASSIGNMENTS,
                 rusqlite::params![
                     &input.name,
@@ -978,7 +1047,12 @@ impl People<'_> {
     /// # Errors
     ///
     /// [`DbError::NotFound`], or [`DbError::StillReferenced`] if it still has child groups.
-    pub fn delete_student_group(&mut self, school_id: Uuid, id: Uuid) -> Result<()> {
+    pub fn delete_student_group(
+        &mut self,
+        school_id: Uuid,
+        id: Uuid,
+        expected: Expected,
+    ) -> Result<()> {
         self.db.write(|tx| {
             require_same_school(tx, "student group", "student_group", id, school_id)?;
             let children: i64 = tx.query_row(
@@ -1008,10 +1082,16 @@ impl People<'_> {
             };
             for raw in members {
                 let member_id = super::row::parse_id_text("student_group_member.id", &raw)?;
-                delete(tx, "group membership", "student_group_member", member_id)?;
+                delete(
+                    tx,
+                    "group membership",
+                    "student_group_member",
+                    member_id,
+                    Expected::Any,
+                )?;
             }
 
-            delete(tx, "student group", "student_group", id)
+            delete(tx, "student group", "student_group", id, expected)
         })
     }
 }
@@ -1217,7 +1297,13 @@ impl People<'_> {
                 entity: "group membership",
             })?;
             let id = super::row::parse_id_text("student_group_member.id", &raw)?;
-            delete(tx, "group membership", "student_group_member", id)
+            delete(
+                tx,
+                "group membership",
+                "student_group_member",
+                id,
+                Expected::Any,
+            )
         })
     }
 

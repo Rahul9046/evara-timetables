@@ -38,6 +38,9 @@ import type {
   CycleDayInput,
   CycleInput,
   CycleShape,
+  Department,
+  DepartmentDependents,
+  DepartmentInput,
   GridPreview,
   LogoLimits,
   MaterialisationPlan,
@@ -48,6 +51,8 @@ import type {
   PeriodStructure,
   PeriodStructureInput,
   PlanFingerprint,
+  QualifiedSubject,
+  QualifiedTeacher,
   Resource,
   ResourceInput,
   Room,
@@ -69,10 +74,16 @@ import type {
   StudentGroupMemberInput,
   StudentInSchool,
   StudentInput,
+  Subject,
+  SubjectDependents,
+  SubjectInput,
   Teacher,
   TeacherCampus,
+  TeacherDepartment,
+  TeacherDepartmentView,
   TeacherInSchool,
   TeacherInput,
+  TeacherQualification,
   TeacherSchool,
   TeacherSchoolInput,
   Term,
@@ -128,6 +139,21 @@ export function isStillReferenced(error: unknown): boolean {
   return isSetupError(error) && error.kind === "stillReferenced";
 }
 
+/**
+ * Whether somebody else changed the record after this window read it.
+ *
+ * The one failure a form must handle differently from every other, because **nothing was
+ * written** and the user's typed values are still the only copy of their edit. The answer
+ * is to keep them, say what happened, and offer to re-read — never to retry with a fresh
+ * revision, which would complete the overwrite the check exists to prevent.
+ *
+ * Stage B's addition. Until it, two windows on one campus file silently overwrote each
+ * other and the second save won.
+ */
+export function isConflict(error: unknown): boolean {
+  return isSetupError(error) && error.kind === "conflict";
+}
+
 // --------------------------------------------------------------------------- school
 
 /** Creates a school. A project may hold several since V12. */
@@ -157,13 +183,27 @@ export function schoolDependents(id: string): Promise<SchoolDependents> {
 }
 
 /** Deletes a school that owns nothing. Refused while it still owns anything. */
-export function deleteSchool(id: string): Promise<void> {
-  return invoke<void>("setup_school_delete", { id });
+export function deleteSchool(
+  id: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_school_delete", {
+    id,
+    expectedRev,
+  });
 }
 
 /** Replaces the school's details. */
-export function updateSchool(id: string, input: SchoolInput): Promise<School> {
-  return invoke<School>("setup_school_update", { id, input });
+export function updateSchool(
+  id: string,
+  expectedRev: number,
+  input: SchoolInput,
+): Promise<School> {
+  return invoke<School>("setup_school_update", {
+    id,
+    expectedRev,
+    input,
+  });
 }
 
 // ---------------------------------------------------------------------- school logo
@@ -226,13 +266,29 @@ export function listCampuses(schoolId: string): Promise<Campus[]> {
 }
 
 /** Replaces a campus's details. */
-export function updateCampus(id: string, input: CampusInput): Promise<Campus> {
-  return invoke<Campus>("setup_campus_update", { id, input });
+export function updateCampus(
+  id: string,
+  expectedRev: number,
+  input: CampusInput,
+): Promise<Campus> {
+  return invoke<Campus>("setup_campus_update", {
+    id,
+    expectedRev,
+    input,
+  });
 }
 
 /** Deletes a campus. Refused while it still owns buildings, rooms or resources. */
-export function deleteCampus(schoolId: string, id: string): Promise<void> {
-  return invoke<void>("setup_campus_delete", { schoolId, id });
+export function deleteCampus(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_campus_delete", {
+    schoolId,
+    id,
+    expectedRev,
+  });
 }
 
 // ------------------------------------------------------------------------- building
@@ -271,8 +327,16 @@ export function listBuildingCampuses(buildingId: string): Promise<string[]> {
 }
 
 /** Replaces a building's details. Its home campus never changes. */
-export function updateBuilding(id: string, input: BuildingInput): Promise<Building> {
-  return invoke<Building>("setup_building_update", { id, input });
+export function updateBuilding(
+  id: string,
+  expectedRev: number,
+  input: BuildingInput,
+): Promise<Building> {
+  return invoke<Building>("setup_building_update", {
+    id,
+    expectedRev,
+    input,
+  });
 }
 
 /** Shares an existing building with another campus. */
@@ -295,8 +359,16 @@ export function unshareBuilding(
 }
 
 /** Deletes a building. Its rooms survive, detached rather than deleted. */
-export function deleteBuilding(schoolId: string, id: string): Promise<void> {
-  return invoke<void>("setup_building_delete", { schoolId, id });
+export function deleteBuilding(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_building_delete", {
+    schoolId,
+    id,
+    expectedRev,
+  });
 }
 
 // ------------------------------------------------------------------------ room type
@@ -317,13 +389,29 @@ export function listRoomTypes(schoolId: string): Promise<RoomType[]> {
 }
 
 /** Replaces a room type's details. */
-export function updateRoomType(id: string, input: RoomTypeInput): Promise<RoomType> {
-  return invoke<RoomType>("setup_room_type_update", { id, input });
+export function updateRoomType(
+  id: string,
+  expectedRev: number,
+  input: RoomTypeInput,
+): Promise<RoomType> {
+  return invoke<RoomType>("setup_room_type_update", {
+    id,
+    expectedRev,
+    input,
+  });
 }
 
 /** Deletes a room type. Rooms that used it survive, unclassified. */
-export function deleteRoomType(schoolId: string, id: string): Promise<void> {
-  return invoke<void>("setup_room_type_delete", { schoolId, id });
+export function deleteRoomType(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_room_type_delete", {
+    schoolId,
+    id,
+    expectedRev,
+  });
 }
 
 // ----------------------------------------------------------------------------- room
@@ -366,8 +454,16 @@ export function listRoomCampuses(roomId: string): Promise<string[]> {
  *
  * Refused when the new building is not available to a campus the room serves.
  */
-export function updateRoom(id: string, input: RoomInput): Promise<Room> {
-  return invoke<Room>("setup_room_update", { id, input });
+export function updateRoom(
+  id: string,
+  expectedRev: number,
+  input: RoomInput,
+): Promise<Room> {
+  return invoke<Room>("setup_room_update", {
+    id,
+    expectedRev,
+    input,
+  });
 }
 
 /** Shares an existing room with another campus. */
@@ -390,8 +486,16 @@ export function unshareRoom(
 }
 
 /** Deletes a room. Its campus associations go with it. */
-export function deleteRoom(schoolId: string, id: string): Promise<void> {
-  return invoke<void>("setup_room_delete", { schoolId, id });
+export function deleteRoom(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_room_delete", {
+    schoolId,
+    id,
+    expectedRev,
+  });
 }
 
 // ------------------------------------------------------------------------- resource
@@ -412,13 +516,29 @@ export function listResources(schoolId: string): Promise<Resource[]> {
 }
 
 /** Replaces a resource's details. */
-export function updateResource(id: string, input: ResourceInput): Promise<Resource> {
-  return invoke<Resource>("setup_resource_update", { id, input });
+export function updateResource(
+  id: string,
+  expectedRev: number,
+  input: ResourceInput,
+): Promise<Resource> {
+  return invoke<Resource>("setup_resource_update", {
+    id,
+    expectedRev,
+    input,
+  });
 }
 
 /** Deletes a resource. */
-export function deleteResource(schoolId: string, id: string): Promise<void> {
-  return invoke<void>("setup_resource_delete", { schoolId, id });
+export function deleteResource(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_resource_delete", {
+    schoolId,
+    id,
+    expectedRev,
+  });
 }
 
 // -------------------------------------------------------------------- academic year
@@ -441,14 +561,27 @@ export function listAcademicYears(schoolId: string): Promise<AcademicYear[]> {
 /** Replaces an academic year's details. */
 export function updateAcademicYear(
   id: string,
+  expectedRev: number,
   input: AcademicYearInput,
 ): Promise<AcademicYear> {
-  return invoke<AcademicYear>("setup_academic_year_update", { id, input });
+  return invoke<AcademicYear>("setup_academic_year_update", {
+    id,
+    expectedRev,
+    input,
+  });
 }
 
 /** Deletes an academic year. Refused while it still has terms. */
-export function deleteAcademicYear(schoolId: string, id: string): Promise<void> {
-  return invoke<void>("setup_academic_year_delete", { schoolId, id });
+export function deleteAcademicYear(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_academic_year_delete", {
+    schoolId,
+    id,
+    expectedRev,
+  });
 }
 
 // ----------------------------------------------------------------------------- term
@@ -469,13 +602,29 @@ export function listTerms(academicYearId: string): Promise<Term[]> {
 }
 
 /** Replaces a term's details. */
-export function updateTerm(id: string, input: TermInput): Promise<Term> {
-  return invoke<Term>("setup_term_update", { id, input });
+export function updateTerm(
+  id: string,
+  expectedRev: number,
+  input: TermInput,
+): Promise<Term> {
+  return invoke<Term>("setup_term_update", {
+    id,
+    expectedRev,
+    input,
+  });
 }
 
 /** Deletes a term. Refused while a timeslot or calendar day still names it. */
-export function deleteTerm(schoolId: string, id: string): Promise<void> {
-  return invoke<void>("setup_term_delete", { schoolId, id });
+export function deleteTerm(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_term_delete", {
+    schoolId,
+    id,
+    expectedRev,
+  });
 }
 
 // ---------------------------------------------------------------------------- cycle
@@ -496,13 +645,29 @@ export function listCycles(schoolId: string): Promise<Cycle[]> {
 }
 
 /** Replaces a cycle's details. */
-export function updateCycle(id: string, input: CycleInput): Promise<Cycle> {
-  return invoke<Cycle>("setup_cycle_update", { id, input });
+export function updateCycle(
+  id: string,
+  expectedRev: number,
+  input: CycleInput,
+): Promise<Cycle> {
+  return invoke<Cycle>("setup_cycle_update", {
+    id,
+    expectedRev,
+    input,
+  });
 }
 
 /** Deletes a cycle. Refused while it still has days or timeslots. */
-export function deleteCycle(schoolId: string, id: string): Promise<void> {
-  return invoke<void>("setup_cycle_delete", { schoolId, id });
+export function deleteCycle(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_cycle_delete", {
+    schoolId,
+    id,
+    expectedRev,
+  });
 }
 
 /**
@@ -550,13 +715,29 @@ export function listCycleDays(cycleId: string): Promise<CycleDay[]> {
 }
 
 /** Replaces a cycle day's details. */
-export function updateCycleDay(id: string, input: CycleDayInput): Promise<CycleDay> {
-  return invoke<CycleDay>("setup_cycle_day_update", { id, input });
+export function updateCycleDay(
+  id: string,
+  expectedRev: number,
+  input: CycleDayInput,
+): Promise<CycleDay> {
+  return invoke<CycleDay>("setup_cycle_day_update", {
+    id,
+    expectedRev,
+    input,
+  });
 }
 
 /** Deletes a cycle day. Refused while a timeslot or mapped date still names it. */
-export function deleteCycleDay(schoolId: string, id: string): Promise<void> {
-  return invoke<void>("setup_cycle_day_delete", { schoolId, id });
+export function deleteCycleDay(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_cycle_day_delete", {
+    schoolId,
+    id,
+    expectedRev,
+  });
 }
 
 // ----------------------------------------------------------------- period structure
@@ -581,14 +762,27 @@ export function listPeriodStructures(schoolId: string): Promise<PeriodStructure[
 /** Replaces a bell schedule's details. */
 export function updatePeriodStructure(
   id: string,
+  expectedRev: number,
   input: PeriodStructureInput,
 ): Promise<PeriodStructure> {
-  return invoke<PeriodStructure>("setup_period_structure_update", { id, input });
+  return invoke<PeriodStructure>("setup_period_structure_update", {
+    id,
+    expectedRev,
+    input,
+  });
 }
 
 /** Deletes a bell schedule. Refused while it still has periods. */
-export function deletePeriodStructure(schoolId: string, id: string): Promise<void> {
-  return invoke<void>("setup_period_structure_delete", { schoolId, id });
+export function deletePeriodStructure(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_period_structure_delete", {
+    schoolId,
+    id,
+    expectedRev,
+  });
 }
 
 // --------------------------------------------------------------------------- period
@@ -609,13 +803,29 @@ export function listPeriods(periodStructureId: string): Promise<Period[]> {
 }
 
 /** Replaces a period's details. */
-export function updatePeriod(id: string, input: PeriodInput): Promise<Period> {
-  return invoke<Period>("setup_period_update", { id, input });
+export function updatePeriod(
+  id: string,
+  expectedRev: number,
+  input: PeriodInput,
+): Promise<Period> {
+  return invoke<Period>("setup_period_update", {
+    id,
+    expectedRev,
+    input,
+  });
 }
 
 /** Deletes a period. Refused while a timeslot was materialised from it. */
-export function deletePeriod(schoolId: string, id: string): Promise<void> {
-  return invoke<void>("setup_period_delete", { schoolId, id });
+export function deletePeriod(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_period_delete", {
+    schoolId,
+    id,
+    expectedRev,
+  });
 }
 
 // --------------------------------------------------------------------- calendar day
@@ -647,14 +857,27 @@ export function listCalendarDays(
 /** Replaces a calendar day's details. */
 export function updateCalendarDay(
   id: string,
+  expectedRev: number,
   input: CalendarDayInput,
 ): Promise<CalendarDay> {
-  return invoke<CalendarDay>("setup_calendar_day_update", { id, input });
+  return invoke<CalendarDay>("setup_calendar_day_update", {
+    id,
+    expectedRev,
+    input,
+  });
 }
 
 /** Deletes a calendar day. The dates around it are untouched. */
-export function deleteCalendarDay(schoolId: string, id: string): Promise<void> {
-  return invoke<void>("setup_calendar_day_delete", { schoolId, id });
+export function deleteCalendarDay(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_calendar_day_delete", {
+    schoolId,
+    id,
+    expectedRev,
+  });
 }
 
 /**
@@ -751,14 +974,27 @@ export function listYearLevels(schoolId: string): Promise<YearLevel[]> {
 /** Replaces a year level's details. */
 export function updateYearLevel(
   id: string,
+  expectedRev: number,
   input: YearLevelInput,
 ): Promise<YearLevel> {
-  return invoke<YearLevel>("setup_year_level_update", { id, input });
+  return invoke<YearLevel>("setup_year_level_update", {
+    id,
+    expectedRev,
+    input,
+  });
 }
 
 /** Deletes a year level, detaching anything classified by it. */
-export function deleteYearLevel(schoolId: string, id: string): Promise<void> {
-  return invoke<void>("setup_year_level_delete", { schoolId, id });
+export function deleteYearLevel(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_year_level_delete", {
+    schoolId,
+    id,
+    expectedRev,
+  });
 }
 
 // -------------------------------------------------------------------------- teacher
@@ -784,13 +1020,29 @@ export function listTeachers(schoolId: string): Promise<Teacher[]> {
 }
 
 /** Replaces a teacher's details. Their identity is unchanged. */
-export function updateTeacher(id: string, input: TeacherInput): Promise<Teacher> {
-  return invoke<Teacher>("setup_teacher_update", { id, input });
+export function updateTeacher(
+  id: string,
+  expectedRev: number,
+  input: TeacherInput,
+): Promise<Teacher> {
+  return invoke<Teacher>("setup_teacher_update", {
+    id,
+    expectedRev,
+    input,
+  });
 }
 
 /** Deletes a teacher. */
-export function deleteTeacher(schoolId: string, id: string): Promise<void> {
-  return invoke<void>("setup_teacher_delete", { schoolId, id });
+export function deleteTeacher(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_teacher_delete", {
+    schoolId,
+    id,
+    expectedRev,
+  });
 }
 
 // -------------------------------------------------------------------------- student
@@ -811,8 +1063,16 @@ export function listStudents(schoolId: string): Promise<Student[]> {
 }
 
 /** Replaces a student's details. Their identity is unchanged. */
-export function updateStudent(id: string, input: StudentInput): Promise<Student> {
-  return invoke<Student>("setup_student_update", { id, input });
+export function updateStudent(
+  id: string,
+  expectedRev: number,
+  input: StudentInput,
+): Promise<Student> {
+  return invoke<Student>("setup_student_update", {
+    id,
+    expectedRev,
+    input,
+  });
 }
 
 /**
@@ -821,8 +1081,16 @@ export function updateStudent(id: string, input: StudentInput): Promise<Student>
  * Rejects when they are still in one; {@link listGroupsForStudent} is how a screen finds
  * that out before offering the action rather than after it.
  */
-export function deleteStudent(schoolId: string, id: string): Promise<void> {
-  return invoke<void>("setup_student_delete", { schoolId, id });
+export function deleteStudent(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_student_delete", {
+    schoolId,
+    id,
+    expectedRev,
+  });
 }
 
 // -------------------------------------------------------------------- student group
@@ -847,14 +1115,27 @@ export function listStudentGroups(schoolId: string): Promise<StudentGroup[]> {
 /** Replaces a group's details. */
 export function updateStudentGroup(
   id: string,
+  expectedRev: number,
   input: StudentGroupInput,
 ): Promise<StudentGroup> {
-  return invoke<StudentGroup>("setup_student_group_update", { id, input });
+  return invoke<StudentGroup>("setup_student_group_update", {
+    id,
+    expectedRev,
+    input,
+  });
 }
 
 /** Deletes a group and the memberships that only existed because of it. */
-export function deleteStudentGroup(schoolId: string, id: string): Promise<void> {
-  return invoke<void>("setup_student_group_delete", { schoolId, id });
+export function deleteStudentGroup(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_student_group_delete", {
+    schoolId,
+    id,
+    expectedRev,
+  });
 }
 
 // ----------------------------------------------------------------------- membership
@@ -1001,11 +1282,13 @@ export function listSchoolTeachers(schoolId: string): Promise<TeacherInSchool[]>
 export function setTeacherMembershipActive(
   schoolId: string,
   teacherId: string,
+  expectedRev: number,
   isActive: boolean,
 ): Promise<TeacherSchool> {
   return invoke<TeacherSchool>("setup_teacher_membership_set_active", {
     schoolId,
     teacherId,
+    expectedRev,
     isActive,
   });
 }
@@ -1078,18 +1361,30 @@ export function currentEnrolment(
 export function updateEnrolment(
   schoolId: string,
   id: string,
+  expectedRev: number,
   input: StudentEnrolmentInput,
 ): Promise<StudentEnrolment> {
-  return invoke<StudentEnrolment>("setup_enrolment_update", { schoolId, id, input });
+  return invoke<StudentEnrolment>("setup_enrolment_update", {
+    schoolId,
+    id,
+    expectedRev,
+    input,
+  });
 }
 
 /** Records that a student has left one school. The spell is kept, not deleted. */
 export function leaveSchool(
   schoolId: string,
   studentId: string,
+  expectedRev: number,
   leftOn: string | null,
 ): Promise<StudentEnrolment> {
-  return invoke<StudentEnrolment>("setup_enrolment_leave", { schoolId, studentId, leftOn });
+  return invoke<StudentEnrolment>("setup_enrolment_leave", {
+    schoolId,
+    studentId,
+    expectedRev,
+    leftOn,
+  });
 }
 
 /**
@@ -1102,12 +1397,14 @@ export function transferStudent(
   fromSchoolId: string,
   toSchoolId: string,
   studentId: string,
+  expectedRev: number,
   arriving: StudentEnrolmentInput,
 ): Promise<StudentEnrolment> {
   return invoke<StudentEnrolment>("setup_student_transfer", {
     fromSchoolId,
     toSchoolId,
     studentId,
+    expectedRev,
     arriving,
   });
 }
@@ -1135,4 +1432,210 @@ export function unshareResource(
   campusId: string,
 ): Promise<void> {
   return invoke<void>("setup_resource_unshare", { schoolId, resourceId, campusId });
+}
+
+// ------------------------------------------------------------------------- department
+
+/** Creates a department in one school. Never shared with another. */
+export function createDepartment(input: DepartmentInput): Promise<Department> {
+  return invoke<Department>("setup_department_create", { input });
+}
+
+/** One department by identifier, or null. */
+export function getDepartment(id: string): Promise<Department | null> {
+  return invoke<Department | null>("setup_department_get", { id });
+}
+
+/** Every department of one school, by name. */
+export function listDepartments(schoolId: string): Promise<Department[]> {
+  return invoke<Department[]>("setup_department_list", { schoolId });
+}
+
+/** Replaces a department's details. */
+export function updateDepartment(
+  id: string,
+  expectedRev: number,
+  input: DepartmentInput,
+): Promise<Department> {
+  return invoke<Department>("setup_department_update", {
+    id,
+    expectedRev,
+    input,
+  });
+}
+
+/**
+ * What a department still holds, so a confirmation can explain before it asks.
+ *
+ * Read before Delete is offered rather than after it fails — the pattern
+ * {@link schoolDependents} established and ADR 0023 §4 made ordinary.
+ */
+export function departmentDependents(id: string): Promise<DepartmentDependents> {
+  return invoke<DepartmentDependents>("setup_department_dependents", { id });
+}
+
+/** Every teacher in one department, by name. */
+export function listDepartmentTeachers(
+  schoolId: string,
+  departmentId: string,
+): Promise<Teacher[]> {
+  return invoke<Teacher[]>("setup_department_teachers", { schoolId, departmentId });
+}
+
+/** Deletes a department nothing refers to. Refused, with counts, while anything does. */
+export function deleteDepartment(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_department_delete", {
+    schoolId,
+    id,
+    expectedRev,
+  });
+}
+
+// ---------------------------------------------------------------------------- subject
+
+/** Creates a subject in one school, optionally in one of its departments. */
+export function createSubject(input: SubjectInput): Promise<Subject> {
+  return invoke<Subject>("setup_subject_create", { input });
+}
+
+/** One subject by identifier, or null. */
+export function getSubject(id: string): Promise<Subject | null> {
+  return invoke<Subject | null>("setup_subject_get", { id });
+}
+
+/**
+ * Every subject of one school, by name.
+ *
+ * Two schools' Mathematics are two subjects with two identifiers. Nothing merges them on a
+ * matching name, so this must be re-read when the selected school changes.
+ */
+export function listSubjects(schoolId: string): Promise<Subject[]> {
+  return invoke<Subject[]>("setup_subject_list", { schoolId });
+}
+
+/** Replaces a subject's details, including which department teaches it. */
+export function updateSubject(
+  id: string,
+  expectedRev: number,
+  input: SubjectInput,
+): Promise<Subject> {
+  return invoke<Subject>("setup_subject_update", {
+    id,
+    expectedRev,
+    input,
+  });
+}
+
+/** What a subject still holds. */
+export function subjectDependents(id: string): Promise<SubjectDependents> {
+  return invoke<SubjectDependents>("setup_subject_dependents", { id });
+}
+
+/** Every teacher qualified to teach one subject, by name. */
+export function listSubjectTeachers(
+  schoolId: string,
+  subjectId: string,
+): Promise<QualifiedTeacher[]> {
+  return invoke<QualifiedTeacher[]>("setup_subject_teachers", { schoolId, subjectId });
+}
+
+/** Deletes a subject nobody is qualified for. Refused while anybody is. */
+export function deleteSubject(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_subject_delete", {
+    schoolId,
+    id,
+    expectedRev,
+  });
+}
+
+// --------------------------------------------------------------------- qualifications
+
+/**
+ * Records that a teacher can teach one of this school's subjects.
+ *
+ * Requires no school membership and creates none: a qualification is a fact about a
+ * person, and employing them is a different decision made on a different control.
+ */
+export function addQualification(
+  schoolId: string,
+  teacherId: string,
+  subjectId: string,
+): Promise<TeacherQualification> {
+  return invoke<TeacherQualification>("setup_qualification_add", {
+    schoolId,
+    teacherId,
+    subjectId,
+  });
+}
+
+/**
+ * Every subject one teacher is qualified to teach, across every school.
+ *
+ * Project-wide, including schools they no longer work at — those are precisely the rows
+ * somebody would otherwise enter twice. The caller groups by the subject's owning school.
+ */
+export function listQualifications(teacherId: string): Promise<QualifiedSubject[]> {
+  return invoke<QualifiedSubject[]>("setup_qualification_list", { teacherId });
+}
+
+/**
+ * Withdraws a qualification. Always an explicit action, never a side effect.
+ *
+ * Addressed by its two ends, which is what a teacher's subject list has in hand.
+ */
+export function removeQualification(
+  schoolId: string,
+  teacherId: string,
+  subjectId: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_qualification_remove", {
+    schoolId,
+    teacherId,
+    subjectId,
+    expectedRev,
+  });
+}
+
+// ------------------------------------------------------------- department associations
+
+/** Puts a teacher in one of this school's departments. Refused unless it employs them. */
+export function addTeacherDepartment(
+  schoolId: string,
+  teacherId: string,
+  departmentId: string,
+): Promise<TeacherDepartment> {
+  return invoke<TeacherDepartment>("setup_teacher_department_add", {
+    schoolId,
+    teacherId,
+    departmentId,
+  });
+}
+
+/** Every department one teacher belongs to, across every school. */
+export function listTeacherDepartments(teacherId: string): Promise<TeacherDepartmentView[]> {
+  return invoke<TeacherDepartmentView[]>("setup_teacher_department_list", { teacherId });
+}
+
+/** Takes a teacher out of a department. Their membership and qualifications stay. */
+export function removeTeacherDepartment(
+  schoolId: string,
+  teacherId: string,
+  departmentId: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_teacher_department_remove", {
+    schoolId,
+    teacherId,
+    departmentId,
+    expectedRev,
+  });
 }

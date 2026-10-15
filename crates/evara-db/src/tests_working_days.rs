@@ -17,6 +17,7 @@
 use evara_core::calendar::{WorkingDays, WorkingDaysError};
 use uuid::Uuid;
 
+use crate::repo::Expected;
 use crate::repo::structure::SchoolInput;
 use crate::repo::time_model::{CalendarDayInput, CalendarDayKind, CycleDayInput};
 use crate::tests_support;
@@ -65,6 +66,7 @@ fn a_sunday_to_thursday_week_survives_a_round_trip() {
         .structure()
         .update_school(
             id,
+            Expected::Any,
             &SchoolInput {
                 name: "Northgate Secondary".to_owned(),
                 code: None,
@@ -92,6 +94,7 @@ fn every_possible_week_survives_a_round_trip() {
             .structure()
             .update_school(
                 id,
+                Expected::Any,
                 &SchoolInput {
                     name: "Northgate Secondary".to_owned(),
                     code: None,
@@ -119,6 +122,7 @@ fn a_six_day_week_is_storable() {
         .structure()
         .update_school(
             id,
+            Expected::Any,
             &SchoolInput {
                 name: "Northgate Secondary".to_owned(),
                 code: None,
@@ -141,6 +145,7 @@ fn changing_the_week_consumes_one_revision_and_leaves_the_rest_alone() {
         .structure()
         .update_school(
             before.id,
+            Expected::Any,
             &SchoolInput {
                 name: before.name.clone(),
                 code: None,
@@ -502,6 +507,7 @@ fn changing_the_working_week_does_not_touch_a_single_calendar_mapping() {
             .structure()
             .update_school(
                 id,
+                Expected::Any,
                 &SchoolInput {
                     name: "Northgate Secondary".to_owned(),
                     code: None,
@@ -549,6 +555,7 @@ fn cycle_day_identities_are_untouched_by_a_change_of_week() {
         .structure()
         .update_school(
             id,
+            Expected::Any,
             &SchoolInput {
                 name: "Northgate Secondary".to_owned(),
                 code: None,
@@ -598,6 +605,7 @@ fn a_missing_school_update_is_still_not_found() {
     let mut project = Project::new();
     let outcome = project.db().structure().update_school(
         Uuid::nil(),
+        Expected::Any,
         &SchoolInput {
             name: "Nobody".to_owned(),
             code: None,

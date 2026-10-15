@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 use evara_core::calendar::WorkingDays;
 
+use crate::repo::Expected;
 use crate::repo::structure::{BuildingInput, CampusInput, RoomInput, SchoolInput};
 use crate::tests_support;
 use crate::workspace::Workspace;
@@ -417,10 +418,11 @@ fn a_code_collision_on_any_campus_it_serves_blocks_a_rename() {
         .create_room(&room(south, "GYM", None), &[])
         .expect("create a south room");
 
-    let clash = project
-        .db()
-        .structure()
-        .update_room(shared.id, &room(north, "GYM", None));
+    let clash =
+        project
+            .db()
+            .structure()
+            .update_room(shared.id, Expected::Any, &room(north, "GYM", None));
 
     assert!(
         matches!(
@@ -450,7 +452,7 @@ fn renaming_a_shared_room_renames_it_everywhere() {
     project
         .db()
         .structure()
-        .update_room(shared.id, &renamed)
+        .update_room(shared.id, Expected::Any, &renamed)
         .expect("rename");
 
     let south_listing = project.db().structure().rooms(south).expect("list");
@@ -690,10 +692,11 @@ fn a_shared_room_cannot_be_moved_into_a_building_that_does_not_reach_its_campuse
         .create_room(&room(north, "HALL", None), &[south])
         .expect("create shared room with no building");
 
-    let outcome = project
-        .db()
-        .structure()
-        .update_room(shared_room.id, &room(north, "HALL", Some(local_block.id)));
+    let outcome = project.db().structure().update_room(
+        shared_room.id,
+        Expected::Any,
+        &room(north, "HALL", Some(local_block.id)),
+    );
 
     let Err(DbError::Invalid { message }) = outcome else {
         panic!("moving a shared room into a local building must be refused");
@@ -735,7 +738,7 @@ fn clearing_a_shared_rooms_building_is_always_allowed() {
     project
         .db()
         .structure()
-        .update_room(shared_room.id, &room(north, "SC1", None))
+        .update_room(shared_room.id, Expected::Any, &room(north, "SC1", None))
         .expect("a room with no building is a normal state, on any number of campuses");
 
     assert!(visible(&mut project, south).contains(&shared_room.id));

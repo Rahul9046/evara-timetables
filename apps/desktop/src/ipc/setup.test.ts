@@ -29,6 +29,9 @@ const OTHER = "018f3a2c-0000-7000-8000-000000000002";
 /// Deliberately unlike `ID` and `OTHER`: a payload that sent the record identifier
 /// where the school belongs would otherwise pass.
 const SCHOOL = "018f3a2c-0000-7000-8000-00000000000a";
+/// A revision that is neither 0 nor 1, so a wrapper quietly sending a default rather than
+/// the caller's value fails here instead of passing by coincidence.
+const REV = 7;
 
 describe("command names and payloads", () => {
   /**
@@ -42,7 +45,7 @@ describe("command names and payloads", () => {
     ["setup_school_list", () => setup.listSchools(), undefined],
     ["setup_school_get", () => setup.getSchool(ID), { id: ID }],
     ["setup_school_dependents", () => setup.schoolDependents(ID), { id: ID }],
-    ["setup_school_delete", () => setup.deleteSchool(ID), { id: ID }],
+    ["setup_school_delete", () => setup.deleteSchool(ID, REV), { id: ID, expectedRev: REV }],
     // Every school-owned list carries the school it is about. A missing key here would be
     // a list that returned another institution's rows, which is the whole risk of V12.
     ["setup_campus_list", () => setup.listCampuses(ID), { schoolId: ID }],
@@ -112,22 +115,34 @@ describe("command names and payloads", () => {
    * sends it, which is the half no Rust test can see.
    */
   it.each([
-    ["setup_campus_delete", () => setup.deleteCampus(SCHOOL, ID)],
-    ["setup_building_delete", () => setup.deleteBuilding(SCHOOL, ID)],
-    ["setup_room_type_delete", () => setup.deleteRoomType(SCHOOL, ID)],
-    ["setup_room_delete", () => setup.deleteRoom(SCHOOL, ID)],
-    ["setup_resource_delete", () => setup.deleteResource(SCHOOL, ID)],
-    ["setup_academic_year_delete", () => setup.deleteAcademicYear(SCHOOL, ID)],
-    ["setup_term_delete", () => setup.deleteTerm(SCHOOL, ID)],
-    ["setup_cycle_delete", () => setup.deleteCycle(SCHOOL, ID)],
-    ["setup_cycle_day_delete", () => setup.deleteCycleDay(SCHOOL, ID)],
-    ["setup_period_structure_delete", () => setup.deletePeriodStructure(SCHOOL, ID)],
-    ["setup_period_delete", () => setup.deletePeriod(SCHOOL, ID)],
-    ["setup_calendar_day_delete", () => setup.deleteCalendarDay(SCHOOL, ID)],
-  ])("%s names the school and the identifier", async (command, call) => {
-    await call();
-    expect(invoke).toHaveBeenCalledWith(command, { schoolId: SCHOOL, id: ID });
-  });
+    ["setup_campus_delete", () => setup.deleteCampus(SCHOOL, ID, REV)],
+    ["setup_building_delete", () => setup.deleteBuilding(SCHOOL, ID, REV)],
+    ["setup_room_type_delete", () => setup.deleteRoomType(SCHOOL, ID, REV)],
+    ["setup_room_delete", () => setup.deleteRoom(SCHOOL, ID, REV)],
+    ["setup_resource_delete", () => setup.deleteResource(SCHOOL, ID, REV)],
+    ["setup_academic_year_delete", () => setup.deleteAcademicYear(SCHOOL, ID, REV)],
+    ["setup_term_delete", () => setup.deleteTerm(SCHOOL, ID, REV)],
+    ["setup_cycle_delete", () => setup.deleteCycle(SCHOOL, ID, REV)],
+    ["setup_cycle_day_delete", () => setup.deleteCycleDay(SCHOOL, ID, REV)],
+    ["setup_period_structure_delete", () => setup.deletePeriodStructure(SCHOOL, ID, REV)],
+    ["setup_period_delete", () => setup.deletePeriod(SCHOOL, ID, REV)],
+    ["setup_calendar_day_delete", () => setup.deleteCalendarDay(SCHOOL, ID, REV)],
+    ["setup_department_delete", () => setup.deleteDepartment(SCHOOL, ID, REV)],
+    ["setup_subject_delete", () => setup.deleteSubject(SCHOOL, ID, REV)],
+  ])(
+    "%s names the school, the identifier and the revision",
+    async (command, call) => {
+      await call();
+      // The revision is as much a part of a delete's contract as the school is. A delete
+      // that sent only an identifier would destroy a row on the strength of what it said
+      // when the screen was drawn, which is the one lost update that cannot be undone.
+      expect(invoke).toHaveBeenCalledWith(command, {
+        schoolId: SCHOOL,
+        id: ID,
+        expectedRev: REV,
+      });
+    },
+  );
 
   /** Every single-record read. */
   it.each([
@@ -160,8 +175,8 @@ describe("command names and payloads", () => {
     });
   });
 
-  it("sends both the identifier and the input on an update", async () => {
-    await setup.updateCampus(ID, {
+  it("sends the identifier, the revision and the input on an update", async () => {
+    await setup.updateCampus(ID, REV, {
       schoolId: OTHER,
       name: "Main",
       code: "MAIN",
@@ -169,6 +184,7 @@ describe("command names and payloads", () => {
     });
     expect(invoke).toHaveBeenCalledWith("setup_campus_update", {
       id: ID,
+      expectedRev: REV,
       input: { schoolId: OTHER, name: "Main", code: "MAIN", address: null },
     });
   });
@@ -176,7 +192,7 @@ describe("command names and payloads", () => {
   it("sends nulls for cleared optional references rather than omitting them", async () => {
     // Omitting a key would make serde fail on a non-optional field, and would be
     // indistinguishable from "leave it alone" — which these commands never mean.
-    await setup.updateRoom(ID, {
+    await setup.updateRoom(ID, REV, {
       campusId: OTHER,
       buildingId: null,
       roomTypeId: null,
@@ -456,10 +472,11 @@ describe("shared identities across the boundary", () => {
   });
 
   it("names the school when it activates or deactivates a membership", async () => {
-    await setup.setTeacherMembershipActive(SCHOOL, ID, false);
+    await setup.setTeacherMembershipActive(SCHOOL, ID, REV, false);
     expect(invoke).toHaveBeenCalledWith("setup_teacher_membership_set_active", {
       schoolId: SCHOOL,
       teacherId: ID,
+      expectedRev: REV,
       isActive: false,
     });
   });
@@ -519,24 +536,26 @@ describe("shared identities across the boundary", () => {
   });
 
   it("names the school and the spell on an enrolment update", async () => {
-    await setup.updateEnrolment(SCHOOL, OTHER, spell);
+    await setup.updateEnrolment(SCHOOL, OTHER, REV, spell);
     expect(invoke).toHaveBeenCalledWith("setup_enrolment_update", {
       schoolId: SCHOOL,
       id: OTHER,
+      expectedRev: REV,
       input: spell,
     });
   });
 
   it("sends a leaving date, and sends null when there is none", async () => {
-    await setup.leaveSchool(SCHOOL, ID, "2027-07-20");
+    await setup.leaveSchool(SCHOOL, ID, REV, "2027-07-20");
     expect(invoke).toHaveBeenCalledWith("setup_enrolment_leave", {
       schoolId: SCHOOL,
       studentId: ID,
+      expectedRev: REV,
       leftOn: "2027-07-20",
     });
 
     invoke.mockClear();
-    await setup.leaveSchool(SCHOOL, ID, null);
+    await setup.leaveSchool(SCHOOL, ID, REV, null);
     // `null`, not an omitted key and not today: `left_on` is optional because plenty of
     // schools do not record the day somebody left.
     const payload = invoke.mock.calls[0]?.[1] as Record<string, unknown>;
@@ -546,11 +565,15 @@ describe("shared identities across the boundary", () => {
 
   it("names both schools on a transfer, in the order the command expects", async () => {
     const arriving = { ...spell, schoolId: OTHER };
-    await setup.transferStudent(SCHOOL, OTHER, ID, arriving);
+    await setup.transferStudent(SCHOOL, OTHER, ID, REV, arriving);
     expect(invoke).toHaveBeenCalledWith("setup_student_transfer", {
       fromSchoolId: SCHOOL,
       toSchoolId: OTHER,
       studentId: ID,
+      // One precondition, on the leaving spell, because that is the only existing row a
+      // transfer rewrites. Splitting the call to give each half its own would be exactly
+      // the two-transaction version ADR 0021 §7 refused.
+      expectedRev: REV,
       arriving,
     });
   });
