@@ -499,6 +499,63 @@ Three things depend on it, and [adr/0029](adr/0029-a-lesson-is-a-course-a-sectio
 this product category — "spread these four Mathematics periods across four different days" —
 addresses the occurrences individually and needs them to be individual rows.
 
+### D31 — Where does the spreadsheet import engine live? ✅ RESOLVED 2026-10-15 (Stage D)
+
+**Three crates. A new `evara-import` for the bytes, `evara-core::import` for the vocabulary,
+and the engine itself inside `evara-db`.**
+
+This one was decided by reading the code rather than by preference. `Database::write` is
+`pub(crate)` and hands out a `rusqlite::Transaction`, so **an atomic multi-entity write is
+only expressible from inside `evara-db`** — a public repository method opens its own
+transaction, and composing twelve of them would be twelve transactions and eleven places to
+fail half-way. An import that created forty teachers and failed on the forty-first has to
+leave none of them, so the engine has nowhere else to go.
+
+The *parser* is not there, because it carries `calamine`, `csv` and `rust_xlsxwriter` and the
+crate whose charter is SQL has no business linking three file-format libraries. The
+*vocabulary* is in `evara-core` because two crates share it and neither can own it: a type
+either of them owned would make the other depend on it, and both directions are wrong.
+
+`evara-project` and `evara-integrations` were both considered and rejected on what they say
+about themselves — the first is for `.evara` and says so, the second depends on `evara-core`
+alone and so could not write at all.
+[adr/0030](adr/0030-an-import-is-a-reviewed-plan.md) §1–2.
+
+### D32 — When an imported row looks like a record Evara already holds, what happens? ✅ RESOLVED 2026-10-15 (Stage D)
+
+**A code matches. A name asks.**
+
+The two mistakes available here do not have symmetric costs, which is what settles it. A
+duplicate is visible, embarrassing and repairable — the school sees two Ada Lovelaces and
+deletes one. A wrong merge is invisible and permanent: the overwritten data is gone and
+nothing records that two people were ever involved.
+
+So a code is matched within its school, because that is what the uniqueness indexes already
+make it; a name is evidence and produces a `Conflict` the user answers, with four equally
+weighted answers and no default. Reuse of a person across schools is *offered* on the
+narrowest evidence available — the same code **and** both names — and still never assumed,
+because two schools in a trust can both number their staff from `T-0001`.
+
+Fuzzy matching was rejected outright: it converts a conflict a user would have answered
+correctly into a merge nobody reviewed, and the failure is silent.
+[adr/0031](adr/0031-import-identity-matching.md).
+
+### D33 — How is an activity row matched, when an activity has no natural key? ✅ RESOLVED 2026-10-15 (Stage D)
+
+**By multiplicity, and an import never deletes one.**
+
+ADR 0029 made one `activity` row one occurrence, so four single periods of a section are four
+identical rows with nothing unique between them. An activities row is therefore matched by
+counting how many occurrences of its shape — section, duration, label — the section already
+holds: equal is `Unchanged`, fewer is a create of the difference with a warning naming the
+arithmetic, and **more is a `Conflict`**.
+
+The last arm is the decision. Deciding which two of six lessons to destroy, and destroying
+their future placements with them, is not something a spreadsheet cell does; `split_index` is
+never renumbered, and `tests_import::activities_are_counted_to_a_target_and_never_deleted`
+asserts the count is still six after the refusal.
+[adr/0031](adr/0031-import-identity-matching.md) §7.
+
 The interface still asks the two numbers a school thinks in and states their product, so the
 model's shape is not the user's problem. Writing `count` rows is a **creation** under
 ADR 0027 §5, so no new concurrency model was needed — which is the practical payoff of rows

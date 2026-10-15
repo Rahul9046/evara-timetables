@@ -373,6 +373,145 @@ impl People<'_> {
     }
 }
 
+/// Writes one teacher row.
+///
+/// Extracted from [`People::create_teacher`] so an import can write several kinds of record
+/// inside one transaction — see `super::import`. The public method and the importer go
+/// through this one statement, so a new column cannot reach one path and miss the other.
+pub(crate) fn insert_teacher(
+    tx: &Transaction<'_>,
+    stamp: &Stamp,
+    input: &TeacherInput,
+) -> Result<()> {
+    tx.execute(
+        "INSERT INTO teacher (id, school_id, code, given_name, family_name, email,
+             home_campus_id, fte_percent, max_periods_per_day, max_periods_per_cycle,
+             max_consecutive_periods, notes, is_active, created_at, updated_at, rev)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        rusqlite::params![
+            text(stamp.id),
+            text(input.school_id),
+            &input.code,
+            &input.given_name,
+            &input.family_name,
+            &input.email,
+            opt_text(input.home_campus_id),
+            input.fte_percent,
+            input.max_periods_per_day,
+            input.max_periods_per_cycle,
+            input.max_consecutive_periods,
+            &input.notes,
+            input.is_active,
+            &stamp.created_at,
+            &stamp.updated_at,
+            stamp.rev,
+        ],
+    )
+    .map_err(|error| translate(error, "teacher"))?;
+    Ok(())
+}
+
+/// Writes one student row.
+///
+/// Extracted from [`People::create_student`] so an import can write several kinds of record
+/// inside one transaction — see `super::import`. The public method and the importer go
+/// through this one statement, so a new column cannot reach one path and miss the other.
+pub(crate) fn insert_student(
+    tx: &Transaction<'_>,
+    stamp: &Stamp,
+    input: &StudentInput,
+) -> Result<()> {
+    tx.execute(
+        "INSERT INTO student (id, school_id, code, given_name, family_name, email,
+             year_level_id, campus_id, is_active, created_at, updated_at, rev)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        rusqlite::params![
+            text(stamp.id),
+            text(input.school_id),
+            &input.code,
+            &input.given_name,
+            &input.family_name,
+            &input.email,
+            opt_text(input.year_level_id),
+            opt_text(input.campus_id),
+            input.is_active,
+            &stamp.created_at,
+            &stamp.updated_at,
+            stamp.rev,
+        ],
+    )
+    .map_err(|error| translate(error, "student"))?;
+    Ok(())
+}
+
+/// Writes one teacher's domain columns, at the revision the caller expects.
+///
+/// Extracted from [`People::update_teacher`] so an import can compose several writes inside one
+/// transaction — see `super::import`. Both paths go through this one statement, so a new
+/// column cannot reach one and miss the other. The school check and anything the public
+/// method does *around* the write stay there, because the importer has already done its own.
+pub(crate) fn update_teacher_row(
+    tx: &Transaction<'_>,
+    id: Uuid,
+    expected: Expected,
+    input: &TeacherInput,
+) -> Result<()> {
+    update(
+        tx,
+        "teacher",
+        "teacher",
+        id,
+        expected,
+        TEACHER_ASSIGNMENTS,
+        rusqlite::params![
+            &input.code,
+            &input.given_name,
+            &input.family_name,
+            &input.email,
+            opt_text(input.home_campus_id),
+            input.fte_percent,
+            input.max_periods_per_day,
+            input.max_periods_per_cycle,
+            input.max_consecutive_periods,
+            &input.notes,
+            input.is_active,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Writes one student's domain columns, at the revision the caller expects.
+///
+/// Extracted from [`People::update_student`] so an import can compose several writes inside one
+/// transaction — see `super::import`. Both paths go through this one statement, so a new
+/// column cannot reach one and miss the other. The school check and anything the public
+/// method does *around* the write stay there, because the importer has already done its own.
+pub(crate) fn update_student_row(
+    tx: &Transaction<'_>,
+    id: Uuid,
+    expected: Expected,
+    input: &StudentInput,
+) -> Result<()> {
+    update(
+        tx,
+        "student",
+        "student",
+        id,
+        expected,
+        STUDENT_ASSIGNMENTS,
+        rusqlite::params![
+            &input.code,
+            &input.given_name,
+            &input.family_name,
+            &input.email,
+            opt_text(input.year_level_id),
+            opt_text(input.campus_id),
+            input.is_active,
+        ],
+    )?;
+    Ok(())
+}
+
 /// Clears `year_level_id` on every row of one table that names this year level.
 ///
 /// Goes through [`update`] per row rather than one bulk `UPDATE`, so each row's `rev` is
@@ -433,31 +572,7 @@ impl People<'_> {
         let stamp = Stamp::new();
         let membership = Stamp::new();
         self.db.write(|tx| {
-            tx.execute(
-                "INSERT INTO teacher (id, school_id, code, given_name, family_name, email,
-                     home_campus_id, fte_percent, max_periods_per_day, max_periods_per_cycle,
-                     max_consecutive_periods, notes, is_active, created_at, updated_at, rev)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                rusqlite::params![
-                    text(stamp.id),
-                    text(input.school_id),
-                    &input.code,
-                    &input.given_name,
-                    &input.family_name,
-                    &input.email,
-                    opt_text(input.home_campus_id),
-                    input.fte_percent,
-                    input.max_periods_per_day,
-                    input.max_periods_per_cycle,
-                    input.max_consecutive_periods,
-                    &input.notes,
-                    input.is_active,
-                    &stamp.created_at,
-                    &stamp.updated_at,
-                    stamp.rev,
-                ],
-            )
-            .map_err(|error| translate(error, "teacher"))?;
+            insert_teacher(tx, &stamp, input)?;
 
             // The membership inherits the project-level flag, which is what the V13
             // backfill did for every teacher that already existed: before memberships,
@@ -539,27 +654,8 @@ impl People<'_> {
     ) -> Result<Teacher> {
         self.db.write(|tx| {
             require_same_school(tx, "teacher", "teacher", id, input.school_id)?;
-            update(
-                tx,
-                "teacher",
-                "teacher",
-                id,
-                expected,
-                TEACHER_ASSIGNMENTS,
-                rusqlite::params![
-                    &input.code,
-                    &input.given_name,
-                    &input.family_name,
-                    &input.email,
-                    opt_text(input.home_campus_id),
-                    input.fte_percent,
-                    input.max_periods_per_day,
-                    input.max_periods_per_cycle,
-                    input.max_consecutive_periods,
-                    &input.notes,
-                    input.is_active,
-                ],
-            )
+            update_teacher_row(tx, id, expected, input)?;
+            Ok(())
         })?;
         self.teacher(id)?
             .ok_or(DbError::NotFound { entity: "teacher" })
@@ -706,26 +802,7 @@ impl People<'_> {
         let stamp = Stamp::new();
         let enrolment = Stamp::new();
         self.db.write(|tx| {
-            tx.execute(
-                "INSERT INTO student (id, school_id, code, given_name, family_name, email,
-                     year_level_id, campus_id, is_active, created_at, updated_at, rev)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                rusqlite::params![
-                    text(stamp.id),
-                    text(input.school_id),
-                    &input.code,
-                    &input.given_name,
-                    &input.family_name,
-                    &input.email,
-                    opt_text(input.year_level_id),
-                    opt_text(input.campus_id),
-                    input.is_active,
-                    &stamp.created_at,
-                    &stamp.updated_at,
-                    stamp.rev,
-                ],
-            )
-            .map_err(|error| translate(error, "student"))?;
+            insert_student(tx, &stamp, input)?;
 
             insert_enrolment(
                 tx,
@@ -838,23 +915,7 @@ impl People<'_> {
     ) -> Result<Student> {
         self.db.write(|tx| {
             require_same_school(tx, "student", "student", id, input.school_id)?;
-            update(
-                tx,
-                "student",
-                "student",
-                id,
-                expected,
-                STUDENT_ASSIGNMENTS,
-                rusqlite::params![
-                    &input.code,
-                    &input.given_name,
-                    &input.family_name,
-                    &input.email,
-                    opt_text(input.year_level_id),
-                    opt_text(input.campus_id),
-                    input.is_active,
-                ],
-            )?;
+            update_student_row(tx, id, expected, input)?;
             mirror_student_onto_enrolment(tx, id)
         })?;
         self.student(id)?

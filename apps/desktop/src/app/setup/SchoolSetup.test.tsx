@@ -153,7 +153,7 @@ function steps(): string[] {
 }
 
 describe("the section list", () => {
-  it("is the seventeen steps of setup, in configuration order", () => {
+  it("is the eighteen steps of setup, in configuration order", () => {
     expect(SECTIONS.map((s) => s.id)).toEqual([
       // Which institution. Everything after this is about one of them.
       "schools",
@@ -180,6 +180,9 @@ describe("the section list", () => {
       "periods",
       "calendar",
       "grid",
+      // Stage D, appended rather than inserted: an import fills the sections above rather
+      // than sitting between any two of them. Appended, so nothing before it moved.
+      "import",
     ]);
   });
 
@@ -283,7 +286,7 @@ describe("the sidebar", () => {
   it("offers every section, Resources and Year levels included", async () => {
     await open();
 
-    expect(steps()).toHaveLength(17);
+    expect(steps()).toHaveLength(18);
     expect(within(nav()).getByRole("button", { name: /Resources/i })).toBeTruthy();
     expect(within(nav()).getByRole("button", { name: /^Schools/ })).toBeTruthy();
     expect(within(nav()).getByRole("button", { name: /^Year levels/ })).toBeTruthy();
@@ -291,17 +294,17 @@ describe("the sidebar", () => {
     expect(within(nav()).getByRole("button", { name: /^Subjects/ })).toBeTruthy();
   });
 
-  it("numbers the steps 1-17 with no gap", async () => {
+  it("numbers the steps 1-18 with no gap", async () => {
     await open();
 
-    // The numbers come from array position, so this is what proves the reorder and the two
+    // The numbers come from array position, so this is what proves the reorder and the
     // insertions renumbered rather than leaving a hole.
     const indices = within(nav())
       .getAllByRole("button")
       .map((b) => b.querySelector(".navIndex")?.textContent);
     expect(indices).toEqual([
       "1", "2", "3", "4", "5", "6", "7", "8", "9",
-      "10", "11", "12", "13", "14", "15", "16", "17",
+      "10", "11", "12", "13", "14", "15", "16", "17", "18",
     ]);
   });
 
@@ -426,16 +429,18 @@ describe("before any school exists", () => {
     render(<SchoolSetup />);
     await screen.findByText(/^stub:schools:/);
 
-    // Fifteen school-owned sections, all locked for the one reason there now is. Stage C
+    // Sixteen school-owned sections, all locked for the one reason there now is. Stage C
     // removed the second: Lessons used to be disabled for a reason adding a school would
-    // not change, and conflating the two would have promised something untrue.
+    // not change, and conflating the two would have promised something untrue. Stage D's
+    // Import Data is the sixteenth, and is locked for the same one reason — an import
+    // needs a school to import into, which is the whole of why it takes one explicitly.
     const locked = within(nav())
       .getAllByRole("button")
       .filter((b) => b.hasAttribute("disabled"));
-    expect(locked).toHaveLength(15);
+    expect(locked).toHaveLength(16);
     expect(
       locked.filter((b) => b.textContent?.includes("Needs a school")),
-    ).toHaveLength(15);
+    ).toHaveLength(16);
     expect(locked.filter((b) => b.textContent?.includes("Coming later"))).toHaveLength(0);
   });
 

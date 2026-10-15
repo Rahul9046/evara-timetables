@@ -486,14 +486,14 @@ pub struct TaughtSection {
     pub school_id: Uuid,
 }
 
-const COURSE_COLUMNS: &str = "id, subject_id, year_level_id, term_id, name, code, description, \
+pub(crate) const COURSE_COLUMNS: &str = "id, subject_id, year_level_id, term_id, name, code, description, \
      periods_per_cycle, default_duration_periods, required_room_type_id, \
      created_at, updated_at, rev";
 const COURSE_ASSIGNMENTS: &str = "year_level_id = ?, term_id = ?, name = ?, code = ?, \
      description = ?, periods_per_cycle = ?, default_duration_periods = ?, \
      required_room_type_id = ?";
 
-const CLASS_SECTION_COLUMNS: &str =
+pub(crate) const CLASS_SECTION_COLUMNS: &str =
     "id, course_id, name, code, campus_id, created_at, updated_at, rev";
 const CLASS_SECTION_ASSIGNMENTS: &str = "name = ?, code = ?, campus_id = ?";
 
@@ -546,28 +546,7 @@ impl Lessons<'_> {
             require_course_references(tx, input, school_id)?;
             require_course_code_free(tx, school_id, input.code.as_deref(), None)?;
 
-            tx.execute(
-                "INSERT INTO course (id, subject_id, year_level_id, term_id, name, code,
-                     description, periods_per_cycle, default_duration_periods,
-                     required_room_type_id, created_at, updated_at, rev)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                rusqlite::params![
-                    text(stamp.id),
-                    text(input.subject_id),
-                    opt_text(input.year_level_id),
-                    opt_text(input.term_id),
-                    &input.name,
-                    &input.code,
-                    &input.description,
-                    input.periods_per_cycle,
-                    input.default_duration_periods,
-                    opt_text(input.required_room_type_id),
-                    &stamp.created_at,
-                    &stamp.updated_at,
-                    stamp.rev,
-                ],
-            )
-            .map_err(|error| translate(error, "course"))?;
+            insert_course(tx, &stamp, input)?;
             Ok(())
         })?;
         self.course(stamp.id)?
@@ -648,24 +627,8 @@ impl Lessons<'_> {
             require_school_owner(tx, "course", COURSE_OWNER, id, school_id)?;
             require_course_references(tx, input, school_id)?;
             require_course_code_free(tx, school_id, input.code.as_deref(), Some(id))?;
-            update(
-                tx,
-                "course",
-                "course",
-                id,
-                expected,
-                COURSE_ASSIGNMENTS,
-                rusqlite::params![
-                    opt_text(input.year_level_id),
-                    opt_text(input.term_id),
-                    &input.name,
-                    &input.code,
-                    &input.description,
-                    input.periods_per_cycle,
-                    input.default_duration_periods,
-                    opt_text(input.required_room_type_id),
-                ],
-            )
+            update_course_row(tx, id, expected, input)?;
+            Ok(())
         })?;
         self.course(id)?
             .ok_or(DbError::NotFound { entity: "course" })
@@ -723,6 +686,73 @@ impl Lessons<'_> {
     }
 }
 
+/// Writes one course row.
+///
+/// Extracted from [`Lessons::create_course`] so an import can write several kinds of record
+/// inside one transaction — see `super::import`. The public method and the importer go
+/// through this one statement, so a new column cannot reach one path and miss the other.
+pub(crate) fn insert_course(
+    tx: &Transaction<'_>,
+    stamp: &Stamp,
+    input: &CourseInput,
+) -> Result<()> {
+    tx.execute(
+        "INSERT INTO course (id, subject_id, year_level_id, term_id, name, code,
+             description, periods_per_cycle, default_duration_periods,
+             required_room_type_id, created_at, updated_at, rev)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        rusqlite::params![
+            text(stamp.id),
+            text(input.subject_id),
+            opt_text(input.year_level_id),
+            opt_text(input.term_id),
+            &input.name,
+            &input.code,
+            &input.description,
+            input.periods_per_cycle,
+            input.default_duration_periods,
+            opt_text(input.required_room_type_id),
+            &stamp.created_at,
+            &stamp.updated_at,
+            stamp.rev,
+        ],
+    )
+    .map_err(|error| translate(error, "course"))?;
+    Ok(())
+}
+
+/// Writes one course's domain columns, at the revision the caller expects.
+///
+/// Extracted from [`Lessons::update_course`] so an import can compose several writes inside one
+/// transaction — see `super::import`. Both paths go through this one statement, so a new
+/// column cannot reach one and miss the other. The school check and anything the public
+/// method does *around* the write stay there, because the importer has already done its own.
+pub(crate) fn update_course_row(
+    tx: &Transaction<'_>,
+    id: Uuid,
+    expected: Expected,
+    input: &CourseInput,
+) -> Result<()> {
+    update(
+        tx,
+        "course",
+        "course",
+        id,
+        expected,
+        COURSE_ASSIGNMENTS,
+        rusqlite::params![
+            opt_text(input.year_level_id),
+            opt_text(input.term_id),
+            &input.name,
+            &input.code,
+            &input.description,
+            input.periods_per_cycle,
+            input.default_duration_periods,
+            opt_text(input.required_room_type_id),
+        ],
+    )?;
+    Ok(())
+}
 // ----------------------------------------------------------------------- class section
 
 impl Lessons<'_> {
@@ -743,22 +773,7 @@ impl Lessons<'_> {
             require_school_owner(tx, "course", COURSE_OWNER, input.course_id, school_id)?;
             require_campus_in_school(tx, input.campus_id, school_id)?;
 
-            tx.execute(
-                "INSERT INTO class_section (id, course_id, name, code, campus_id,
-                     created_at, updated_at, rev)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                rusqlite::params![
-                    text(stamp.id),
-                    text(input.course_id),
-                    &input.name,
-                    &input.code,
-                    opt_text(input.campus_id),
-                    &stamp.created_at,
-                    &stamp.updated_at,
-                    stamp.rev,
-                ],
-            )
-            .map_err(|error| translate(error, "class section"))?;
+            insert_class_section(tx, &stamp, input)?;
             Ok(())
         })?;
         self.class_section(stamp.id)?.ok_or(DbError::NotFound {
@@ -898,15 +913,8 @@ impl Lessons<'_> {
                     });
                 }
             }
-            update(
-                tx,
-                "class section",
-                "class_section",
-                id,
-                expected,
-                CLASS_SECTION_ASSIGNMENTS,
-                rusqlite::params![&input.name, &input.code, opt_text(input.campus_id)],
-            )
+            update_class_section_row(tx, id, expected, input)?;
+            Ok(())
         })?;
         self.class_section(id)?.ok_or(DbError::NotFound {
             entity: "class section",
@@ -994,6 +1002,58 @@ impl Lessons<'_> {
     }
 }
 
+/// Writes one class section row.
+///
+/// Extracted from [`Lessons::create_class_section`] so an import can write several kinds of record
+/// inside one transaction — see `super::import`. The public method and the importer go
+/// through this one statement, so a new column cannot reach one path and miss the other.
+pub(crate) fn insert_class_section(
+    tx: &Transaction<'_>,
+    stamp: &Stamp,
+    input: &ClassSectionInput,
+) -> Result<()> {
+    tx.execute(
+        "INSERT INTO class_section (id, course_id, name, code, campus_id,
+             created_at, updated_at, rev)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        rusqlite::params![
+            text(stamp.id),
+            text(input.course_id),
+            &input.name,
+            &input.code,
+            opt_text(input.campus_id),
+            &stamp.created_at,
+            &stamp.updated_at,
+            stamp.rev,
+        ],
+    )
+    .map_err(|error| translate(error, "class section"))?;
+    Ok(())
+}
+
+/// Writes one class section's domain columns, at the revision the caller expects.
+///
+/// Extracted from [`Lessons::update_class_section`] so an import can compose several writes inside one
+/// transaction — see `super::import`. Both paths go through this one statement, so a new
+/// column cannot reach one and miss the other. The school check and anything the public
+/// method does *around* the write stay there, because the importer has already done its own.
+pub(crate) fn update_class_section_row(
+    tx: &Transaction<'_>,
+    id: Uuid,
+    expected: Expected,
+    input: &ClassSectionInput,
+) -> Result<()> {
+    update(
+        tx,
+        "class section",
+        "class_section",
+        id,
+        expected,
+        CLASS_SECTION_ASSIGNMENTS,
+        rusqlite::params![&input.name, &input.code, opt_text(input.campus_id)],
+    )?;
+    Ok(())
+}
 // --------------------------------------------------------------------- teacher staffing
 
 impl Lessons<'_> {
@@ -2296,7 +2356,7 @@ fn require_student_at_school(
 /// numbering rule lives in one place. `split_index` continues from `MAX + 1` and is never
 /// reused, so an occurrence deleted and replaced does not inherit a number another row's
 /// change-log history is about.
-fn insert_occurrences(
+pub(crate) fn insert_occurrences(
     tx: &Transaction<'_>,
     class_section_id: Uuid,
     name: Option<&str>,

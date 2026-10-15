@@ -30,6 +30,7 @@ with the solver and constraint engine compiled in rather than running as a servi
 | [SOLVER.md](docs/SOLVER.md) | Solver architecture, scoring, manual-move validation, repair, infeasibility explanation |
 | [CONSTRAINTS.md](docs/CONSTRAINTS.md) | Constraint registry, levels, vendor mapping |
 | [PROJECT-FORMAT.md](docs/PROJECT-FORMAT.md) | The portable `*.evara` project format |
+| [IMPORT.md](docs/IMPORT.md) | Importing a roster from a spreadsheet: formats, mapping, matching |
 | [ROADMAP.md](docs/ROADMAP.md) | Milestone 1, phase by phase |
 | [OPEN-DECISIONS.md](docs/OPEN-DECISIONS.md) | Open decisions and technical risks |
 | [adr/](docs/adr/) | Architecture decision records |

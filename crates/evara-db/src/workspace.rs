@@ -301,6 +301,15 @@ impl Workspace {
         Ok(self.open.as_mut().ok_or(DbError::NoProjectOpen)?.lessons())
     }
 
+    /// The import engine for the open project.
+    ///
+    /// # Errors
+    ///
+    /// [`DbError::NoProjectOpen`] if nothing is open.
+    pub fn import(&mut self) -> Result<crate::import::Import<'_>> {
+        Ok(self.open.as_mut().ok_or(DbError::NoProjectOpen)?.import())
+    }
+
     /// The availability repository for the open project.
     ///
     /// # Errors

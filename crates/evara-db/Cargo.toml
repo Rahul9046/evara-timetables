@@ -31,3 +31,9 @@ ts-rs = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# For one test only: `tests_import::every_required_field_matches_the_template` reads the
+# template's own field list so the copy in `import::evara_import_fields` cannot drift from
+# it. A *library* dependency this way round is not allowed -- `evara-import` is the parser
+# and knows nothing about SQL -- but a test may read the other crate's answer rather than
+# restate it, which is the whole point of the check.
+evara-import = { workspace = true }

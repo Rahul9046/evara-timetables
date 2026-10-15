@@ -670,12 +670,44 @@ Phase 2's remaining work is sequenced as stages, which is how the multi-school a
 | **A** | **School Setup UX restructuring** | ✅ **complete** |
 | **B** | **Subjects, departments, teacher qualifications, `rev` checking** | ✅ **complete** |
 | **C** | **Lessons and activity modelling** (`V15`) | ✅ **complete** |
-| D | Excel roster imports | next |
+| **D** | **Spreadsheet roster imports** | ✅ **complete** |
 
 Lessons appeared in the School Setup navigation from Stage A, disabled and labelled, so the
 order read correctly before there was a screen behind it. Stage C built that screen, so all
 seventeen sections now render one and the `comingLater` mechanism is gone — a branch nothing
 takes is a branch nothing tests.
+
+Stage D appended an **eighteenth** section, Import data, rather than inserting one. An
+import is a way of *filling* the seventeen above rather than a step between any two of them,
+and a school reaches for it at whatever point it has a file — so it has no place in the
+order, and giving it one would have moved every section after it for no gain.
+
+### Stage D — spreadsheet roster imports
+
+**Complete.** Ten kinds of record — teachers, students, departments, subjects, courses,
+class sections, class teachers, class groups, class enrolments and activities — read from an
+`.xlsx` workbook or a `.csv` file, previewed as a plan, and applied in one transaction.
+Downloadable templates for each, with code columns formatted as text. No migration: Stage D
+adds no table, no column and no trigger.
+
+[ADR 0030](adr/0030-an-import-is-a-reviewed-plan.md) is the architecture — the new
+`evara-import` crate, why the engine is in `evara-db`, and the five guarantees (preview
+writes nothing, apply is atomic, the reviewed plan is the plan that runs, nothing is created
+to fill a gap, an unmapped column is silence). [ADR 0031](adr/0031-import-identity-matching.md)
+is the matching policy, in one sentence: *a code matches, a name asks*.
+
+> **Three ways this is wider than the line above, stated rather than buried.** The entry
+> said *Excel roster imports*, and this delivery reads **CSV as well** — the same engine
+> reads both, the format is decided in one function, and the difference is forty lines of
+> parser; the After-Milestone-1 list below is corrected accordingly. It covers **ten kinds
+> rather than the three a roster is** — one generic engine covers all of them, so building
+> three and leaving seven would have been less useful rather than less work. And `.xls` is
+> **refused by name**, with the remedy: the legacy binary format needs a second parser and
+> a second set of quirks, and every spreadsheet can save as `.xlsx`.
+>
+> Not delivered, deliberately: no formula evaluation, no import of availability, the time
+> model, rooms, buildings or resources, and no vendor-specific column dictionaries — those
+> are `evara-integrations`, after Milestone 1.
 
 ## After Milestone 1
 
@@ -683,5 +715,9 @@ Rough order, not a commitment: individual student sectioning and course requests
 (`request-*`, `section-*`); the remaining relationship and multi-campus constraints;
 relaxation-based infeasibility suggestions ([SOLVER.md](SOLVER.md) §8 Layer 3); the
 daily-operations layer (absence, substitutions, room changes, merges, yard duties);
-CSV import; then vendor adapters in `evara-integrations`, one at a time, each behind a
-feature flag and its own fixtures.
+then vendor adapters in `evara-integrations`, one at a time, each behind a feature flag and
+its own fixtures.
+
+*CSV import left this list in Stage D, which reads `.csv` alongside `.xlsx` through the same
+engine. What remains for `evara-integrations` is vendor-specific column dictionaries and
+export formats, not the reading of delimited text.*

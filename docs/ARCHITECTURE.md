@@ -52,9 +52,19 @@ Status: **design phase.** This document is the target architecture. See
                             └─────────────────┘
 ```
 
-Two further crates sit at the edges: `evara-report` (timetable projections → HTML/CSV/PDF)
-and `evara-integrations` (future external adapters, empty and feature-gated).
+Three further crates sit at the edges: `evara-report` (timetable projections →
+HTML/CSV/PDF), `evara-import` (spreadsheet bytes → a parsed table, and the downloadable
+templates) and `evara-integrations` (future external adapters, empty and feature-gated).
 `evara-cli` is a headless binary used for tests, fixtures and solver benchmarking.
+
+`evara-import` is the one with a dependency set nothing else should inherit — `calamine`,
+`csv`, `rust_xlsxwriter` — which is why it is its own crate rather than a module of
+`evara-db`: the crate whose charter is SQL has no business also linking three file-format
+libraries. It depends on `evara-core` alone and knows nothing about schools. The import
+*engine* — resolving a row to a record, planning, and applying the plan in one transaction —
+is in `evara-db`, because `Database::write` is `pub(crate)` and an atomic multi-entity write
+is only expressible from inside it. See [adr/0030](adr/0030-an-import-is-a-reviewed-plan.md)
+§1–2.
 
 ### Why the backend is Rust, not TypeScript
 
@@ -96,9 +106,13 @@ never a second hand-maintained model.
    materialised problem **in memory** and returns a solution. It never opens a database.
 4. `evara-db` is the only crate that knows SQL. It loads a `Problem` for the solver and
    persists a `Solution` back.
-5. `evara-integrations` may depend on `evara-core` and nothing else. Import adapters
+5. `evara-import` may depend on `evara-core` and nothing else. It turns bytes into an
+   `evara_core::import::SourceTable` and writes templates; it never opens a file, never
+   reaches the network, never evaluates a formula and never runs a macro. It is given bytes
+   and a name — the name only to choose a parser.
+6. `evara-integrations` may depend on `evara-core` and nothing else. Import adapters
    produce core types; the core never references a vendor.
-6. `src-tauri` orchestrates. Business logic does not live in command handlers.
+7. `src-tauri` orchestrates. Business logic does not live in command handlers.
 
 A rule in the UI, SQL in the solver, or a vendor name in the core are all architecture
 bugs.
@@ -138,6 +152,7 @@ in the UI: it looks like the thing and is not.
 | [SOLVER.md](SOLVER.md) | Solver architecture, algorithms, explanation and repair |
 | [CONSTRAINTS.md](CONSTRAINTS.md) | Constraint registry, levels, parameters |
 | [PROJECT-FORMAT.md](PROJECT-FORMAT.md) | The `*.evara` portable project format |
+| [IMPORT.md](IMPORT.md) | Spreadsheet roster imports: formats, mapping, matching |
 | [ROADMAP.md](ROADMAP.md) | Milestone 1 broken into implementation phases |
 | [OPEN-DECISIONS.md](OPEN-DECISIONS.md) | Risks and decisions still to be made |
 | [adr/](adr/) | Accepted architecture decision records |

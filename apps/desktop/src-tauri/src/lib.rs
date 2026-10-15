@@ -42,6 +42,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             workspace: Mutex::new(workspace),
+            imports: commands::import::ImportSessions::default(),
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_info,
@@ -54,6 +55,17 @@ pub fn run() {
             commands::project::project_forget_recent,
             commands::project::project_extension,
             commands::project::project_default_folder,
+            // Spreadsheet roster import — Stage D.
+            commands::import::import_kinds,
+            commands::import::import_template,
+            commands::import::import_begin,
+            commands::import::import_sheet,
+            commands::import::import_current,
+            commands::import::import_preview,
+            commands::import::import_apply,
+            commands::import::import_report,
+            commands::import::import_save,
+            commands::import::import_cancel,
             // School Setup, availability — Phase 2.
             commands::availability::setup_availability_set,
             commands::availability::setup_availability_clear,

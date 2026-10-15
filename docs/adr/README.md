@@ -35,6 +35,8 @@ tempted to undo it without knowing why.
 | [0027](0027-revisions-are-checked-on-write.md) | A write states the revision it was built on; a stale one is refused, never merged | Accepted |
 | [0028](0028-assigning-a-lesson-warns-about-qualifications.md) | Assigning a lesson requires employment and campus eligibility; a missing qualification warns | Accepted — amends [0025](0025-teacher-qualifications-across-school-owned-subjects.md) §4 |
 | [0029](0029-a-lesson-is-a-course-a-section-and-its-occurrences.md) | A lesson is a course, a class section, and one row per occurrence; no table in the chain holds a `school_id` | Accepted |
+| [0030](0030-an-import-is-a-reviewed-plan.md) | An import is a reviewed plan applied in one transaction; preview writes nothing and nothing is created to fill a gap | Accepted |
+| [0031](0031-import-identity-matching.md) | A code matches, a name asks; reuse across schools is offered and never assumed | Accepted |
 
 Statuses: **Proposed** (awaiting a decision), **Accepted**, **Superseded by NNNN**,
 **Deprecated**. Accepted records are not edited to reflect a change of mind — a new

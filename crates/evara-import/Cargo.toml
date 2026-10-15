@@ -1,0 +1,23 @@
+[package]
+name = "evara-import"
+description = "Reads spreadsheets and CSV into Evara's source-table vocabulary, and writes the downloadable templates."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# `evara-core` and nothing else of ours. The crate that reads a worksheet has no business
+# knowing what a school is — resolving a row against a project is `evara-db`'s, because it
+# is a database question. ADR 0030 §2.
+evara-core = { workspace = true }
+calamine = { workspace = true }
+csv = { workspace = true }
+rust_xlsxwriter = { workspace = true }
+thiserror = { workspace = true }

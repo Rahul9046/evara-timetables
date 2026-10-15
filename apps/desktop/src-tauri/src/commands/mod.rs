@@ -12,6 +12,9 @@
 //! | `report` | 7, 10 | timetable projections and rendered output |
 //! | `io` | 9 | `*.evara` export and import |
 //!
+//! Stage D adds `import`, which is the spreadsheet roster import rather than the `io` row
+//! above: that one is `.evara`, Evara's own portable format, and is a different feature.
+//!
 //! Phase 1B added the project lifecycle. Phase 1E adds School Setup: `structure`,
 //! `time_model` and `grid`, which together are the `crud` row above for the Structure and
 //! Time Model groups.
@@ -20,6 +23,7 @@ pub mod availability;
 pub mod curriculum;
 pub mod error;
 pub mod grid;
+pub mod import;
 pub mod lessons;
 pub mod membership;
 pub mod people;
@@ -71,7 +75,7 @@ pub fn app_info() -> Result<AppInfo, String> {
     Ok(AppInfo {
         version: env!("CARGO_PKG_VERSION"),
         debug: cfg!(debug_assertions),
-        phase: "2 — stage C, lessons and activities",
+        phase: "2 — stage D, spreadsheet roster imports",
     })
 }
 

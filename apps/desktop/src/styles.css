@@ -2087,3 +2087,157 @@ dialog.confirm h3 {
   gap: 8px;
   margin: 0 0 6px;
 }
+
+/* ---- Stage D: the spreadsheet import ----------------------------------- */
+
+/*
+ * The import is a wizard rather than a form, so each step is an ordinary `subPanel` and
+ * what is styled here is the three things a form does not have: a tall mapping table, a
+ * sample of the file as read, and a per-row decision.
+ */
+
+/* A labelled control on its own line: the record type, and the worksheet. */
+.importKinds {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.importKinds label {
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.importActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 12px 0 4px;
+}
+
+/*
+ * Field on the left, column on the right, purpose last. Three columns rather than a
+ * two-column form because the hint is the part that stops a school mapping the wrong
+ * column, and putting it in a tooltip would hide it from exactly the person who needs it.
+ */
+.importMapping,
+.importSample,
+.importRows {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.importMapping th,
+.importMapping td,
+.importSample th,
+.importSample td,
+.importRows th,
+.importRows td {
+  border: 1px solid var(--border-subtle);
+  padding: 7px 9px;
+  vertical-align: top;
+  text-align: left;
+}
+
+.importMapping thead th,
+.importSample thead th,
+.importRows thead th {
+  background: var(--bg);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.importMapping tbody th,
+.importSample tbody th,
+.importRows tbody th {
+  background: var(--bg);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* The sample can be wider than the panel; it scrolls rather than stretching the page. */
+.importSample,
+.importRows {
+  display: block;
+  overflow-x: auto;
+  margin-top: 8px;
+}
+
+.importMapping .muted,
+.importRows .muted {
+  margin: 0;
+  font-size: 11.5px;
+}
+
+.importRows p + p {
+  margin-top: 4px;
+}
+
+/* The tally. Figures first, because the figure is what a user reads. */
+.importCounts {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 10px 0 14px;
+  padding: 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.importCount strong {
+  color: var(--text);
+  font-size: 15px;
+  margin-right: 3px;
+}
+
+/* A count that is the reason Apply is unavailable says so by colour as well as by
+   position — never only by colour: the Apply button carries the reason in its `title`. */
+.importCount--warn strong {
+  color: var(--warn);
+}
+
+.importCount--bad strong {
+  color: var(--bad);
+}
+
+/*
+ * The four answers to a conflicted row, side by side and all equally available. No
+ * default and no primary styling: Evara has no opinion about which is right, and making
+ * one look like the expected answer would be an opinion.
+ */
+.importChoices {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: stretch;
+}
+
+.importChoices button {
+  font-size: 11.5px;
+  padding: 5px 9px;
+  white-space: nowrap;
+}
+
+/*
+ * The five promises the section opens with. A list rather than a paragraph because each
+ * one is a separate guarantee a school can check, and because the one they will look for
+ * — "will this overwrite what we already have?" — has to be findable at a glance.
+ */
+.importPromises {
+  margin: 10px 0 0;
+  padding-left: 20px;
+  max-width: 76ch;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.importPromises strong {
+  color: var(--text);
+}

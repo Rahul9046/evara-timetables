@@ -29,6 +29,13 @@ pub struct AppState {
     /// `Mutex` because commands may run concurrently and a SQLite connection is not
     /// shareable between threads.
     pub workspace: Mutex<Workspace>,
+    /// The one import in progress, if any.
+    ///
+    /// Its own lock rather than a field inside the workspace: an import session holds a
+    /// parsed file and no connection, it outlives individual commands, and a reader of
+    /// the mapper must not be blocked behind a write somewhere else in the application.
+    /// Cleared when the project closes — see [`project_close`].
+    pub imports: crate::commands::import::ImportSessions,
 }
 
 /// A lifecycle failure, in a form the interface can act on.
@@ -233,6 +240,10 @@ pub fn project_open(state: State<'_, AppState>, path: PathBuf) -> CommandResult<
 /// Returns whether anything was open, so closing twice is not an error.
 #[tauri::command]
 pub fn project_close(state: State<'_, AppState>) -> CommandResult<bool> {
+    // The import session names a school of the project being closed, so it cannot survive
+    // it. Cleared first: a failure to take the lock must not leave a session pointing at a
+    // project that is already gone.
+    state.imports.clear();
     let mut workspace = lock(&state)?;
     Ok(workspace.close_project())
 }
