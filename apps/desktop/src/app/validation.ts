@@ -266,17 +266,44 @@ export function validateYearLevel(draft: Draft): Problems {
 }
 
 /**
- * A teacher.
+ * A teacher, as the setup form asks for them.
  *
  * Only the two names are required. A staff code is optional because plenty of schools do
  * not issue one, and an email is optional because Evara has no accounts and never sends
  * anything — requiring either would be asking for data to satisfy a form rather than the
  * school.
+ *
+ * **The four workload values are deliberately not checked here.** Stage A took them off the
+ * form; they are carried from the stored record into the draft and back out unchanged, so
+ * they are no longer *input*, and validating them would be validating something the user
+ * can neither see nor correct. An error attached to an absent field is worse than no
+ * check: it is a form that will not submit with nothing on screen to explain why.
+ *
+ * Their `CHECK` constraints in `V10` — `fte_percent BETWEEN 0 AND 100` and `>= 0` on each
+ * ceiling — are the authority, as they always were. {@link validateTeacherWorkload} is
+ * waiting for the Phase 4 screen that asks the question properly.
  */
-export function validateTeacher(draft: Draft): Problems {
+export function validateTeacherIdentity(draft: Draft): Problems {
   return problems([
     ["givenName", required(text(draft, "givenName"), "First name")],
     ["familyName", required(text(draft, "familyName"), "Last name")],
+  ]);
+}
+
+/**
+ * The workload half: full-time equivalent and the three load ceilings.
+ *
+ * Not reachable from any screen today — Stage A removed the fields, and Phase 4's load
+ * constraints are what will put them back, on a screen that can show what a ceiling *does*.
+ * Kept because the rules are not obvious and were worked out once: a blank ceiling means
+ * *no ceiling* rather than zero, and FTE is a percentage rather than a fraction because the
+ * Phase 4 constraints sum and compare it as an integer.
+ *
+ * Exported and tested rather than commented out, so it cannot rot unnoticed in the way a
+ * block of dead code would.
+ */
+export function validateTeacherWorkload(draft: Draft): Problems {
+  return problems([
     ["ftePercent", wholeNumber(text(draft, "ftePercent"), "Full-time equivalent", { min: 0, max: 100 })],
     ["maxPeriodsPerDay", optional(text(draft, "maxPeriodsPerDay"), (value, name) => wholeNumber(value, name, { min: 0 }), "Periods per day")],
     ["maxPeriodsPerCycle", optional(text(draft, "maxPeriodsPerCycle"), (value, name) => wholeNumber(value, name, { min: 0 }), "Periods per cycle")],

@@ -129,7 +129,7 @@ vi.mock("../../ipc/setup", () => ({
 }));
 
 const { Teachers } = await import("./Teachers");
-const { StudentsAndYearLevels } = await import("./StudentsAndYearLevels");
+const { Students } = await import("./Students");
 const { StudentGroups } = await import("./StudentGroups");
 
 const SCHOOL = { id: "school-1" } as School;
@@ -300,7 +300,7 @@ describe("Students", () => {
   it("says a timetable can be built without any students", async () => {
     // ADR 0006's promise, visible where someone is deciding whether to type two thousand
     // names. If this copy goes, the promise is invisible and nobody benefits from it.
-    render(<StudentsAndYearLevels school={SCHOOL} />);
+    render(<Students school={SCHOOL} />);
 
     expect(await screen.findByText(/optional/i)).toBeTruthy();
   });
@@ -316,7 +316,7 @@ describe("Students", () => {
       group({ id: "g-2", name: "French elective" }),
     ]);
 
-    render(<StudentsAndYearLevels school={SCHOOL} />);
+    render(<Students school={SCHOOL} />);
     await screen.findByText("Varga");
     await waitFor(() => expect(listGroupsForStudent).toHaveBeenCalledWith("s-1"));
 

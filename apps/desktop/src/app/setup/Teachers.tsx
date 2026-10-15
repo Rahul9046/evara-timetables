@@ -18,11 +18,29 @@
  * accounts, sends nothing, and asking for contact details it will never use is asking a
  * school to type its staff directory into a timetabler for no return.
  *
- * The load ceilings are the same bargain in the other direction: blank means *no ceiling*,
- * not zero, and the hints say so. They are carried now and read by the Phase 4 load
- * constraints; a school that does not cap its teachers simply leaves them empty. Every one
- * of them survives an edit untouched — `toDraft` reads the stored value and `toInput`
- * writes it back, so nothing here can quietly reset a workload setting.
+ * ## The four workload fields are not on this form, and are not gone
+ *
+ * Stage A removes **full-time equivalent**, **most periods per day**, **most periods per
+ * cycle** and **most periods in a row** from the form. Nothing else about them changes:
+ * the columns, the record, the generated types, `TeacherInput` and the command signature
+ * are all untouched, and the Phase 4 load constraints will read exactly the values that
+ * are stored today.
+ *
+ * They went because they are the wrong question at the wrong time. A school setting itself
+ * up is entering a staff list; being asked, per person, for four load ceilings before it
+ * has described a single period is being asked to tune a solver it has not run. Phase 4
+ * owns workload, and will ask on a screen that can show what the answers do.
+ *
+ * **The values survive an edit exactly**, and the mechanism is deliberate rather than
+ * incidental: `toDraft` reads every stored value into the draft and `toInput` writes every
+ * one of them back, whether or not a field renders it. So an edit sends the stored number,
+ * not a default and not a `null` — which is the whole risk of hiding a field from a form
+ * that submits a whole record. `TeacherFormFields.test.tsx` asserts it against a teacher
+ * with four non-default values, because "it should still be in the draft" is exactly the
+ * kind of thing that stays true until somebody tidies up.
+ *
+ * A new teacher gets the schema's own defaults — `fte_percent DEFAULT 100` and three
+ * nullable ceilings, from `V10` — rather than anything this screen invents.
  *
  * ## One teacher, possibly several schools
  *
@@ -79,7 +97,7 @@ import {
   numberOrNull,
   text,
   textOrNull,
-  validateTeacher,
+  validateTeacherIdentity,
 } from "../validation";
 import { AvailabilityPanel } from "./AvailabilityGrid";
 import { PersonSearch, type Candidate } from "./PersonSearch";
@@ -220,6 +238,10 @@ export function Teachers(props: { school: School; context?: SetupContext }) {
       { header: "Last name", render: (row) => row.familyName },
       { header: "First name", render: (row) => row.givenName },
       { header: "Staff code", render: (row) => row.code ?? "—" },
+      // Shown, though no longer asked for. The value is real and Phase 4's load
+      // constraints read it, so a school that set one must be able to see it — and a
+      // column is a far better place for a number nobody needs to change than a form
+      // field on every create.
       { header: "FTE", render: (row) => `${row.ftePercent}%`, numeric: true },
       { header: "Status", render: statusLabel },
       {
@@ -271,39 +293,13 @@ export function Teachers(props: { school: School; context?: SetupContext }) {
         key: "homeCampusId",
         label: "Home campus",
         emptyLabel: "No home campus",
-        hint: "Where they are normally based. Which campuses they may work at is set under “Schools and campuses” below, and is a separate question.",
+        hint: "Optional, and only where they are normally based — not the set of campuses they may work at. That is campus eligibility, under “Schools and campuses” below, and a teacher can be eligible at several sites or at none.",
         choices: campusChoices,
       },
-      {
-        kind: "number",
-        key: "ftePercent",
-        label: "Full-time equivalent (%)",
-        required: true,
-        min: 0,
-        max: 100,
-        hint: "100 is a full timetable, 50 a half one.",
-      },
-      {
-        kind: "number",
-        key: "maxPeriodsPerDay",
-        label: "Most periods per day",
-        min: 0,
-        hint: "Leave blank for no limit.",
-      },
-      {
-        kind: "number",
-        key: "maxPeriodsPerCycle",
-        label: "Most periods per cycle",
-        min: 0,
-        hint: "Leave blank for no limit.",
-      },
-      {
-        kind: "number",
-        key: "maxConsecutivePeriods",
-        label: "Most periods in a row",
-        min: 0,
-        hint: "Leave blank for no limit.",
-      },
+      // Full-time equivalent and the three load ceilings are deliberately absent. They
+      // are still read into the draft by `toDraft` and written back by `toInput`, so an
+      // edit preserves them exactly; see this module's header for why they are not asked
+      // for here.
       { kind: "textarea", key: "notes", label: "Notes" },
       {
         kind: "checkbox",
@@ -313,7 +309,11 @@ export function Teachers(props: { school: School; context?: SetupContext }) {
       },
     ],
     describe: (row) => `${row.givenName} ${row.familyName}`,
-    validate: validateTeacher,
+    // Only the fields on screen. The four workload values are carried through rather than
+    // collected, so validating them as input would be validating something the user cannot
+    // see or fix — and an error pinned to an absent field is an unsubmittable form with no
+    // visible reason. Their `CHECK` constraints remain the authority, as they always were.
+    validate: validateTeacherIdentity,
     toDraft: (row) => ({
       givenName: row?.givenName ?? "",
       familyName: row?.familyName ?? "",
@@ -503,6 +503,18 @@ export function Teachers(props: { school: School; context?: SetupContext }) {
         </Banner>
       )}
 
+      {/* Said once, visibly, rather than left as a surprise. Somebody who set a ceiling in
+          an earlier version and cannot find the field needs to know the value is still
+          there — and somebody who never set one needs to know they are not missing a step.
+          `role="note"` rather than a banner: a standing explanation, not something that
+          just happened. */}
+      <p className="panelNote" role="note">
+        Workload limits — full-time equivalent and the per-day, per-cycle and consecutive
+        period ceilings — are no longer asked for here. Any values already stored are kept
+        exactly as they are and are never changed by editing a teacher; FTE is shown in the
+        table. The screen that sets them arrives with the load constraints.
+      </p>
+
       {schools.length > 1 && (
         <div className="actions">
           <button
@@ -555,6 +567,7 @@ export function Teachers(props: { school: School; context?: SetupContext }) {
         school={school}
         entityKind="TEACHER"
         noun="teacher"
+        onOpenSection={props.context?.openSection}
         options={(staff.items ?? []).map((row) => ({
           id: row.id,
           name: `${row.familyName}, ${row.givenName}${statusLabel(row) === "Active" ? "" : ` (${statusLabel(row).toLowerCase()})`}`,

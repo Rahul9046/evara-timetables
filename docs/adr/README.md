@@ -29,6 +29,7 @@ tempted to undo it without knowing why.
 | [0021](0021-project-level-people-and-school-membership.md) | People belong to the project; membership, eligibility and enrolment belong to the school | Accepted |
 | [0022](0022-resources-shared-across-campuses.md) | A resource may serve many campuses, and so many schools; one identity, so availability is global | Accepted |
 | [0023](0023-the-interface-scopes-to-one-school.md) | The interface scopes to one school, chosen once; project-wide reads are composed, and a certain refusal is explained rather than offered | Accepted |
+| [0024](0024-setup-is-ordered-by-what-a-school-knows.md) | School Setup is ordered by what a school knows rather than by dependency; a hidden field is carried, not dropped | Accepted |
 
 Statuses: **Proposed** (awaiting a decision), **Accepted**, **Superseded by NNNN**,
 **Deprecated**. Accepted records are not edited to reflect a change of mind — a new

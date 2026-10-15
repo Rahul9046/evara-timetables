@@ -133,9 +133,12 @@ preview.
 > It **returns in Stage 0C**, because `V13` changed the answer: ADR 0022 gave resources the
 > campus associations buildings and rooms already had, so lending equipment to another
 > school's campus is now a decision with a visible consequence, and it is unreachable
-> without a screen. Scheduling *against* resources is still Phase 4's. Stage 0C also adds
-> a Schools section, so the workflow is **thirteen** sections — see
-> [adr/0023](adr/0023-the-interface-scopes-to-one-school.md).
+> without a screen. Scheduling *against* resources is still Phase 4's.
+>
+> Stage 0C also added a Schools section; Stage A then split Year levels out of Students and
+> announced Lessons, so the workflow is **fifteen** sections, in configuration rather than
+> dependency order — see [adr/0023](adr/0023-the-interface-scopes-to-one-school.md) for the
+> school scoping, and the Stage A entry below for the order.
 
 Three things in it are more than CRUD:
 
@@ -225,7 +228,8 @@ What it delivers, screen by screen:
   admission number, year level, campus and status are *this* school's. "Enrol an existing
   student" writes a spell rather than a student. A per-student panel edits this school's
   placement, records a departure (with an optional date, never an invented one),
-  re-enrols, and shows the whole history across every school, read-only.
+  re-enrols, and shows the whole history across every school, read-only. *Stage A split
+  this in two: year levels became section 7, and the screen became Students.*
 - **Transfer** — its own workflow, with a destination school, that school's own year levels
   and campuses, a confirmation summary, and one call to `transfer_student` naming both
   schools. Never a leave followed by an enrol. Distinguished from concurrent enrolment in
@@ -259,6 +263,59 @@ seven files; 832 frontend and 517 Rust tests pass.
 > sends it as a precondition, so two windows can still overwrite each other. A
 > frontend-only guarantee would be worse than none, because it would be believed. This is
 > the last item between Phase 2 and done, and the audit places it in Stage B.
+
+**School Setup UX restructuring (Stage A) ✅ complete.** No migration, no new entity, and
+no Rust change: the whole stage is the interface. Three things, and the reorder is the one
+that matters.
+
+**The workflow is reordered from a dependency order into a configuration order.** People
+used to come last, after the grid, on the reasoning that nothing about them depends on it.
+That was defensible and produced a workflow nobody follows — a school knows who it teaches
+long before it has decided what its rotation looks like, and being asked for a six-day
+cycle before being asked for a year level is being asked the abstract question first. The
+fifteen sections now run: which institution (Schools, School details), where it is
+(Campuses, Rooms, Resources), the shape of a school year (Academic years, Year levels),
+what is taught (**Lessons** — Stage C, announced and disabled), who (Teachers, Students,
+Student groups), and when (Cycles, Bell schedules, Calendar, Grid preview).
+
+The one genuine dependency this inverts is **availability**, which is set against a cycle's
+days and a bell schedule's periods and now appears before either exists. It degrades
+correctly rather than silently: the grid says "No cycle yet", names the section, and offers
+a button that opens it — and says that nothing is lost by configuring the rotation
+afterwards, because everything is available until a rule says otherwise.
+
+**Year levels left Students for their own section.** A room type is an attribute of rooms;
+a year level is part of the structure of a school year. It exists whether or not a single
+student is entered — ADR 0006's promise is that a school can timetable from group sizes
+alone, and such a school still has a Grade 8 — and Stage C's lessons and Stage D's Excel
+templates both reference year levels directly. Every Stage 0C student capability moved
+across unchanged: enrolment, departure, re-enrolment, history, transfer, concurrent
+enrolment, and the visiting-student restrictions. The student form reads the selected
+school's levels and, when there are none, says so and offers to open the section — advice
+rather than a block, because a year level is optional on an enrolment.
+
+**The four teacher workload fields are off the form and still in the record.** Full-time
+equivalent and the per-day, per-cycle and consecutive-period ceilings are no longer asked
+for: a school entering a staff list is being asked to tune a solver it has not run. The
+columns, the record, `TeacherInput`, the generated types and the command signature are
+untouched, and the **stored values survive an edit exactly** — `toDraft` reads every one
+into the draft and `toInput` writes every one back, rendered or not. That pass-through is
+the stage's one silent-loss risk, so it is asserted against a teacher with four non-default
+values rather than hoped for; FTE stays visible as a table column, and a note says once
+that the values are kept and are never changed by editing a teacher. Phase 4's load
+constraints will read exactly what is stored today, on a screen that can show what a
+ceiling does.
+
+Section identifiers are the only thing anything addresses a section by — `openSection`, the
+empty states that navigate, the tests — so the reorder changed no behaviour anywhere it was
+not meant to. 58 frontend tests added across three files; 920 frontend and 517 Rust tests
+pass.
+
+> **Not in Stage A, and not implied by it:** Subjects, Departments, teacher qualifications
+> and `rev` checking (**Stage B**); Lessons and activity modelling (**Stage C**, which is
+> what the disabled navigation entry announces); Excel roster imports (**Stage D**). Nothing
+> in this stage creates a lessons table, form, placeholder row or scheduling model, and the
+> navigation entry has no `render` at all so it cannot be opened.
 
 Remaining in this phase:
 
@@ -406,6 +463,25 @@ solver involved.
 **Closes the milestone.**
 
 ---
+
+## The stage sequence after the multi-school foundation
+
+Phase 2's remaining work is sequenced as stages, which is how the multi-school audit
+(`docs/multi-school-architecture-audit.md` §15) planned it and how it has been delivered:
+
+| Stage | Scope | Status |
+| --- | --- | --- |
+| 0A | Multiple schools per project (`V12`) | ✅ complete |
+| 0B | Shared identities and school memberships (`V13`) | ✅ complete |
+| 0C | Multi-school management interface | ✅ complete |
+| **A** | **School Setup UX restructuring** | ✅ **complete** |
+| B | Subjects, departments, teacher qualifications, `rev` checking | next |
+| C | Lessons and activity modelling | after B |
+| D | Excel roster imports | after C |
+
+Lessons already appears in the School Setup navigation, disabled and labelled, so the order
+reads correctly before Stage C builds it. Nothing else about it exists — no table, no form,
+no placeholder row, and no `render`.
 
 ## After Milestone 1
 

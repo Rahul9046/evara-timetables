@@ -2034,3 +2034,21 @@ dialog.confirm h3 {
   padding: 7px 14px;
   font-weight: 600;
 }
+
+/* ============================================================= Stage A — a later step
+
+   A navigation entry that is announced but not built: exactly one, Lessons. It reads as
+   part of the workflow — the order is the thing it is there to communicate — while being
+   visibly unavailable, and is distinguished from a step that is merely locked by its own
+   blurb ("Coming later" rather than "Needs a school") rather than by colour alone. */
+.navItem--later {
+  opacity: 0.55;
+}
+
+.navItem--later .navIndex {
+  /* An outline instead of a fill: the step has a number in the sequence but nothing
+     behind it yet. Never the only signal — the blurb says "Coming later" and the button
+     is disabled, so this is reinforcement rather than the message. */
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--border);
+}

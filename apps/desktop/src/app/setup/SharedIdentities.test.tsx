@@ -89,7 +89,7 @@ vi.mock("../../ipc/setup", () => ({
 }));
 
 const { Teachers } = await import("./Teachers");
-const { StudentsAndYearLevels } = await import("./StudentsAndYearLevels");
+const { Students } = await import("./Students");
 type SetupContext = import("./SchoolSetup").SetupContext;
 
 const NORTH = { id: "school-north", name: "Northgate Secondary" } as School;
@@ -319,26 +319,23 @@ describe("a student enrolled in two schools", () => {
       ]),
     );
 
-    const view = render(<StudentsAndYearLevels school={NORTH} />);
-    // Twice: the Year levels table that defines it, and the student's Year column.
-    await waitFor(() =>
-      expect(screen.getAllByText("Grade 8 (Northgate)")).toHaveLength(2),
-    );
+    const view = render(<Students school={NORTH} />);
+    // Once, in the student's Year column. Stage A moved the table that *defines* year
+    // levels into its own section, so this screen only ever reads them.
+    await waitFor(() => expect(screen.getByText("Grade 8 (Northgate)")).toBeTruthy());
 
-    view.rerender(<StudentsAndYearLevels school={SOUTH} />);
+    view.rerender(<Students school={SOUTH} />);
 
     // Southmoor's own year level, from Southmoor's enrolment -- not the "year-north" the
     // student record still carries as its home-school value.
-    await waitFor(() =>
-      expect(screen.getAllByText("Grade 8 (Southmoor)")).toHaveLength(2),
-    );
-    expect(screen.queryAllByText("Grade 8 (Northgate)")).toHaveLength(0);
+    await waitFor(() => expect(screen.getByText("Grade 8 (Southmoor)")).toBeTruthy());
+    expect(screen.queryByText("Grade 8 (Northgate)")).toBeNull();
   });
 
   it("shows the admission number the school being looked at gave them", async () => {
     listSchoolStudents.mockResolvedValue([enrolment(SOUTH.id, "year-south")]);
 
-    render(<StudentsAndYearLevels school={SOUTH} />);
+    render(<Students school={SOUTH} />);
 
     expect(await screen.findByText("SM-77")).toBeTruthy();
     expect(screen.queryByText("NG-1001")).toBeNull();
@@ -349,7 +346,7 @@ describe("a student enrolled in two schools", () => {
     // holds their history. With no current spell, "Enrolled" would be a lie.
     listSchoolStudents.mockResolvedValue([]);
 
-    render(<StudentsAndYearLevels school={SOUTH} />);
+    render(<Students school={SOUTH} />);
 
     expect(await screen.findByText("Pupilsen")).toBeTruthy();
     expect(screen.getByText("Left this school")).toBeTruthy();
@@ -358,7 +355,7 @@ describe("a student enrolled in two schools", () => {
   it("marks a visiting student, and names the school that holds their identity", async () => {
     listSchoolStudents.mockResolvedValue([enrolment(SOUTH.id, "year-south")]);
 
-    render(<StudentsAndYearLevels school={SOUTH} context={context()} />);
+    render(<Students school={SOUTH} context={context()} />);
 
     expect(await screen.findByText("Pupilsen")).toBeTruthy();
     expect(screen.getByText(/Visiting from Northgate Secondary/)).toBeTruthy();
@@ -367,7 +364,7 @@ describe("a student enrolled in two schools", () => {
   it("does not offer to edit a visiting student's identity here", async () => {
     listSchoolStudents.mockResolvedValue([enrolment(SOUTH.id, "year-south")]);
 
-    render(<StudentsAndYearLevels school={SOUTH} context={context()} />);
+    render(<Students school={SOUTH} context={context()} />);
     expect(await screen.findByText("Pupilsen")).toBeTruthy();
 
     const edit = screen.getByRole("button", { name: "Edit Cass Pupilsen" });
@@ -381,7 +378,7 @@ describe("a student enrolled in two schools", () => {
     const user = userEvent.setup();
     listSchoolStudents.mockResolvedValue([enrolment(SOUTH.id, "year-south")]);
 
-    render(<StudentsAndYearLevels school={SOUTH} context={context()} />);
+    render(<Students school={SOUTH} context={context()} />);
     expect(await screen.findByText("Pupilsen")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: /^Enrolment Cass Pupilsen/ }));
@@ -411,12 +408,10 @@ describe("a single-school project is unaffected", () => {
   it("still shows its own student's placement from its own enrolment", async () => {
     listSchoolStudents.mockResolvedValue([enrolment(NORTH.id, "year-north")]);
 
-    render(<StudentsAndYearLevels school={NORTH} />);
+    render(<Students school={NORTH} />);
 
     expect(await screen.findByText("Pupilsen")).toBeTruthy();
-    await waitFor(() =>
-      expect(screen.getAllByText("Grade 8 (Northgate)")).toHaveLength(2),
-    );
+    await waitFor(() => expect(screen.getByText("Grade 8 (Northgate)")).toBeTruthy());
     expect(screen.getByText("Enrolled")).toBeTruthy();
   });
 });

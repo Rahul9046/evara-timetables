@@ -1,5 +1,10 @@
 /**
- * Section 12 — Students and year levels.
+ * Section 10 — Students.
+ *
+ * Year levels used to share this screen and are now section 7, with the rest of the school
+ * year's structure — see {@link YearLevels} for why. Nothing else about this screen changed
+ * in Stage A: every Stage 0C capability is here, and the notes below are the reasons it
+ * works the way it does.
  *
  * ## Students are optional, and the screen says so
  *
@@ -9,9 +14,6 @@
  * difference between a school trying Evara in an afternoon and one giving up before it
  * sees a timetable. The copy here says it plainly so nobody types two thousand names
  * believing they have to.
- *
- * Students become worth entering when a school wants per-student timetables, or when the
- * request-driven scheduling of Milestone 2 arrives. Until then the group is the audience.
  *
  * ## Placement is the enrolment's, not the student's
  *
@@ -25,7 +27,7 @@
  * created them. Showing the home school's year on another school's roll would be a
  * confident wrong answer.
  *
- * ## Stage 0C: enrolment is editable, and nobody is entered twice
+ * ## Nobody is entered twice
  *
  * - **"Enrol an existing student"** searches the whole project and writes a spell. Nothing
  *   here can produce a second student record for one real person.
@@ -43,13 +45,14 @@
  * record that the student has left. Membership is the only record that a student was ever
  * in 9-MAT-A, and deleting the person is the one action that destroys it.
  *
- * ## Year levels sit here rather than in their own section
+ * ## A year level is offered, never created on the way past
  *
- * They are what a student is classified by, they are four rows in most schools, and the
- * rest of School Setup already pairs an entity with the small table that classifies it —
- * rooms with room types, cycles with cycle days. Deleting one unclassifies its students
- * through a real repository update rather than a database-level `SET NULL`, so the
- * student's revision stays truthful.
+ * The year-level select reads the **selected school's** levels. A school with none gets a
+ * note and a button that opens Year levels, rather than a free-text box that would invent
+ * one: a year level is school-owned structure with an ordinal, and guessing either from a
+ * student form would be guessing about the school. Year level stays optional on an
+ * enrolment, so the note is advice and never a block — a school that does not track years
+ * can enrol students without ever visiting section 7.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -61,13 +64,10 @@ import type {
   StudentInSchool,
   StudentInput,
   YearLevel,
-  YearLevelInput,
 } from "@evara/domain";
 import {
   createStudent,
-  createYearLevel,
   deleteStudent,
-  deleteYearLevel,
   describeSetupError,
   enrolStudent,
   listCampuses,
@@ -76,19 +76,11 @@ import {
   listStudents,
   listYearLevels,
   updateStudent,
-  updateYearLevel,
 } from "../../ipc/setup";
 import { CrudPanel, type CrudSpec } from "../ui/CrudPanel";
 import type { Choice } from "../ui/Field";
 import { Banner, ConfirmDialog } from "../ui/Shell";
-import {
-  flag,
-  number,
-  text,
-  textOrNull,
-  validateStudent,
-  validateYearLevel,
-} from "../validation";
+import { flag, text, textOrNull, validateStudent } from "../validation";
 import { PersonSearch, type Candidate } from "./PersonSearch";
 import type { SetupContext } from "./SchoolSetup";
 import { StudentEnrolments } from "./StudentEnrolments";
@@ -103,10 +95,11 @@ import { useList } from "./useList";
  */
 type StudentRow = Student & { readonly enrolment: StudentInSchool["enrolment"] | null };
 
-export function StudentsAndYearLevels(props: { school: School; context?: SetupContext }) {
+export function Students(props: { school: School; context?: SetupContext }) {
   const { school } = props;
   const schools = props.context?.schools ?? [school];
   const selectSchool = props.context?.selectSchool;
+  const openSection = props.context?.openSection;
 
   /** Whose enrolment the panel at the bottom is about. */
   const [chosenId, setChosenId] = useState<string | null>(null);
@@ -115,6 +108,8 @@ export function StudentsAndYearLevels(props: { school: School; context?: SetupCo
   const loadCampuses = useCallback(() => listCampuses(school.id), [school.id]);
   const campuses = useList<Campus>(loadCampuses);
 
+  // Read, never written, from here: year levels are section 7's to edit. This screen
+  // offers them and says where to add one.
   const loadYearLevels = useCallback(() => listYearLevels(school.id), [school.id]);
   const yearLevels = useList<YearLevel>(loadYearLevels);
 
@@ -237,45 +232,8 @@ export function StudentsAndYearLevels(props: { school: School; context?: SetupCo
   const homeOf = (row: Student): string =>
     schoolName.get(row.schoolId) ?? "another school";
 
-  const yearSpec: CrudSpec<YearLevel, YearLevelInput> = {
-    noun: "year level",
-    plural: "year levels",
-    title: "Year levels",
-    columns: [
-      { header: "Name", render: (row) => row.name },
-      { header: "Position", render: (row) => String(row.ordinal), numeric: true },
-    ],
-    fields: [
-      { kind: "text", key: "name", label: "Name", required: true, placeholder: "Year 9" },
-      {
-        kind: "number",
-        key: "ordinal",
-        label: "Position",
-        required: true,
-        min: 0,
-        hint: "The school's own order, lowest first. Not an age.",
-      },
-    ],
-    describe: (row) => row.name,
-    validate: validateYearLevel,
-    toDraft: (row) => ({
-      name: row?.name ?? "",
-      ordinal: row === null ? "" : String(row.ordinal),
-    }),
-    toInput: (draft) => ({
-      schoolId: school.id,
-      name: text(draft, "name"),
-      ordinal: number(draft, "ordinal"),
-    }),
-    list: () => listYearLevels(school.id),
-    create: (input) => createYearLevel(input),
-    update: (id, input) => updateYearLevel(id, input),
-    remove: (id) => deleteYearLevel(school.id, id),
-    emptyHint:
-      "No year levels yet. Add the years this school teaches — they are this school's own, so two schools in one campus file may each hold their own Grade 1.",
-    deleteNote: () =>
-      "Students and groups in this year level are kept. They simply stop naming a year.",
-  };
+  /** Whether this school has any year level to place a student in. */
+  const noYearLevels = yearLevels.items !== null && yearLevels.items.length === 0;
 
   const studentSpec: CrudSpec<StudentRow, StudentInput> = {
     noun: "student",
@@ -362,6 +320,9 @@ export function StudentsAndYearLevels(props: { school: School; context?: SetupCo
         label: "Year level",
         emptyLabel: "No year level",
         choices: yearChoices,
+        hint: noYearLevels
+          ? "This school has no year levels yet. Add them under “Year levels” — a student can be entered without one, and given a year later."
+          : "This school's own year levels. Optional: a school that does not track years can leave it unset.",
       },
       {
         kind: "select",
@@ -560,6 +521,9 @@ export function StudentsAndYearLevels(props: { school: School; context?: SetupCo
         <strong>one record with one identifier</strong> and two enrolments.
       </p>
       {campuses.error && <p className="muted">Campuses could not be loaded: {campuses.error}</p>}
+      {yearLevels.error && (
+        <p className="muted">Year levels could not be loaded: {yearLevels.error}</p>
+      )}
       {roll.error && (
         <Banner tone="error">
           This school&rsquo;s enrolments could not be loaded: {roll.error}
@@ -572,14 +536,25 @@ export function StudentsAndYearLevels(props: { school: School; context?: SetupCo
         </Banner>
       )}
 
-      <CrudPanel
-        spec={yearSpec}
-        reloadKey={school.id}
-        onChanged={() => {
-          yearLevels.reload();
-          roll.reload();
-        }}
-      />
+      {/* Advice, never a block. A year level is optional on an enrolment, so a school
+          that does not track years must be able to enrol students without ever opening
+          section 7 — but a school that *does* will want to know where they are, and
+          finding out from an empty dropdown is finding out the hard way. */}
+      {noYearLevels && (
+        <Banner tone="info">
+          No year levels have been configured for this school yet. Students can still be
+          entered and given one later.{" "}
+          {openSection !== undefined && (
+            <button
+              type="button"
+              className="linkish"
+              onClick={() => openSection("yearLevels")}
+            >
+              Go to Year levels
+            </button>
+          )}
+        </Banner>
+      )}
 
       {schools.length > 1 && (
         <div className="actions">
@@ -625,6 +600,7 @@ export function StudentsAndYearLevels(props: { school: School; context?: SetupCo
         student={chosen}
         yearLevels={yearLevels.items ?? []}
         campuses={campuses.items ?? []}
+        onOpenSection={openSection}
         onChanged={refreshAll}
       />
 

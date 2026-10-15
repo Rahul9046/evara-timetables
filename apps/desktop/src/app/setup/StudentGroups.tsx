@@ -74,6 +74,7 @@ import {
   validateStudentGroup,
 } from "../validation";
 import { AvailabilityPanel } from "./AvailabilityGrid";
+import type { SetupContext } from "./SchoolSetup";
 import { useList } from "./useList";
 
 /** The five audience kinds, labelled for people rather than for the schema. */
@@ -91,8 +92,9 @@ function kindLabel(kind: GroupKind): string {
   return found.split(" — ")[0] ?? kind;
 }
 
-export function StudentGroups(props: { school: School }) {
+export function StudentGroups(props: { school: School; context?: SetupContext }) {
   const { school } = props;
+  const openSection = props.context?.openSection;
   const [selected, setSelected] = useState<StudentGroup | null>(null);
 
   const loadCampuses = useCallback(() => listCampuses(school.id), [school.id]);
@@ -278,6 +280,7 @@ export function StudentGroups(props: { school: School }) {
         school={school}
         entityKind="STUDENT_GROUP"
         noun="group"
+        onOpenSection={openSection}
         options={(groups.items ?? []).map((group) => ({
           id: group.id,
           name: group.name,

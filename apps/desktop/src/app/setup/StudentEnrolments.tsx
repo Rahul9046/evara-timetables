@@ -100,10 +100,12 @@ export function StudentEnrolments(props: {
   yearLevels: readonly YearLevel[];
   /** This school's campuses. */
   campuses: readonly Campus[];
+  /** Opens another setup section — used to send the user to Year levels. */
+  onOpenSection?: ((id: string) => void) | undefined;
   /** Called after any change, so the students table above re-reads. */
   onChanged: () => void;
 }) {
-  const { school, schools, student, yearLevels, campuses, onChanged } = props;
+  const { school, schools, student, yearLevels, campuses, onOpenSection, onChanged } = props;
 
   const [history, setHistory] = useState<readonly StudentEnrolment[] | null>(null);
   const [groups, setGroups] = useState<readonly StudentGroup[] | null>(null);
@@ -308,6 +310,24 @@ export function StudentEnrolments(props: {
       }
     >
       {error && <Banner tone="error">{error}</Banner>}
+
+      {/* Year level is optional on a spell, so this is advice rather than a block — but a
+          school that places students by year and finds an empty dropdown here should be
+          told where the levels live rather than left to look. */}
+      {yearLevels.length === 0 && (
+        <Banner tone="info">
+          This school has no year levels, so a spell cannot name one yet.{" "}
+          {onOpenSection !== undefined && (
+            <button
+              type="button"
+              className="linkish"
+              onClick={() => onOpenSection("yearLevels")}
+            >
+              Go to Year levels
+            </button>
+          )}
+        </Banner>
+      )}
 
       {history === null ? (
         <Loading what="this student's enrolment" />

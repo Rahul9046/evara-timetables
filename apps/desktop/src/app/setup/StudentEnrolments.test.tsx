@@ -77,7 +77,7 @@ vi.mock("../../ipc/setup", () => ({
   offendingField: () => null,
 }));
 
-const { StudentsAndYearLevels } = await import("./StudentsAndYearLevels");
+const { Students } = await import("./Students");
 type SetupContext = import("./SchoolSetup").SetupContext;
 
 const STAMP = {
@@ -189,7 +189,7 @@ beforeEach(() => {
 });
 
 function mount(school: School, overrides: Partial<SetupContext> = {}) {
-  return render(<StudentsAndYearLevels school={school} context={context(overrides)} />);
+  return render(<Students school={school} context={context(overrides)} />);
 }
 
 /** Opens the enrolment panel for one student on screen. */
@@ -701,7 +701,7 @@ describe("transferring a student", () => {
   it("is not offered in a single-school campus file", async () => {
     const user = userEvent.setup();
     render(
-      <StudentsAndYearLevels school={NORTH} context={context({ schools: [NORTH] })} />,
+      <Students school={NORTH} context={context({ schools: [NORTH] })} />,
     );
     const panel = await openEnrolment(user, "Pupilsen");
 

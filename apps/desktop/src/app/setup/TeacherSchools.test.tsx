@@ -677,31 +677,19 @@ describe("the list itself", () => {
     await waitFor(() => expect(screen.getByText("This school only")).toBeTruthy());
   });
 
-  it("preserves every workload setting through an edit", async () => {
-    // The Stage A redesign removes these fields; until then an edit must carry them
-    // through untouched, which is the defect the audit flagged and kept flagging.
+  it("keeps the notes field, which is still asked for", async () => {
+    // The four workload values moved off the form in Stage A, and their round trip is
+    // covered by `TeacherFormFields.test.tsx`. Notes stayed, and is the one free-text
+    // field whose round trip nothing else here exercises.
     const user = userEvent.setup();
     listSchoolTeachers.mockResolvedValue([
-      inSchool(
-        teacher({
-          ftePercent: 60,
-          maxPeriodsPerDay: 4,
-          maxPeriodsPerCycle: 18,
-          maxConsecutivePeriods: 2,
-          notes: "Mondays off",
-        }),
-        NORTH.id,
-      ),
+      inSchool(teacher({ notes: "Mondays off" }), NORTH.id),
     ]);
     mount(NORTH);
     await screen.findByText("Okafor");
 
     await user.click(screen.getByRole("button", { name: /^Edit Ada Okafor/ }));
 
-    expect((screen.getByLabelText(/Full-time equivalent/) as HTMLInputElement).value).toBe("60");
-    expect((screen.getByLabelText(/Most periods per day/) as HTMLInputElement).value).toBe("4");
-    expect((screen.getByLabelText(/Most periods per cycle/) as HTMLInputElement).value).toBe("18");
-    expect((screen.getByLabelText(/Most periods in a row/) as HTMLInputElement).value).toBe("2");
     expect((screen.getByLabelText(/Notes/) as HTMLTextAreaElement).value).toBe("Mondays off");
   });
 });

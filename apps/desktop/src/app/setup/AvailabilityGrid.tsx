@@ -8,6 +8,16 @@
  * collapsing into the same empty set. So clearing a cell **removes** a row rather than
  * storing an `AVAILABLE` status, which does not exist.
  *
+ * ## The time model it needs may not exist yet, and that is now ordinary
+ *
+ * Stage A moved people *before* the cycle and the bell schedule, so this panel is
+ * routinely reached before its axes exist. That was always a legal state — a rule is stored
+ * against `(cycle_day, period)` and can be written before the grid has ever been
+ * materialised — but it used to be the unusual one. The two empty states below therefore
+ * name the section that fixes them *and* offer to open it: being told "create one under
+ * Cycles and cycle days" is better than a blank panel, and being taken there is better
+ * still.
+ *
  * ## The axes come from the cycle, never from a week
  *
  * Columns are the chosen cycle's days in `ordinal` order, rows are the chosen bell
@@ -130,8 +140,10 @@ export function AvailabilityGrid(props: {
   entityId: string;
   /** The person, room or group being configured, for the spoken labels. */
   entityName: string;
+  /** Opens another setup section, for the two prerequisite empty states. */
+  onOpenSection?: ((id: string) => void) | undefined;
 }) {
-  const { school, entityKind, entityId, entityName } = props;
+  const { school, entityKind, entityId, entityName, onOpenSection } = props;
 
   const loadCycles = useCallback(() => listCycles(school.id), [school.id]);
   const cycles = useList<Cycle>(loadCycles);
@@ -298,17 +310,36 @@ export function AvailabilityGrid(props: {
 
   if (cycles.items !== null && cycles.items.length === 0) {
     return (
-      <EmptyState title="No cycle yet">
-        Availability is set against a cycle's days. Create one under “Cycles and cycle days”
-        first.
+      <EmptyState
+        title="No cycle yet"
+        action={
+          onOpenSection === undefined
+            ? undefined
+            : { label: "Go to Cycles and cycle days", onClick: () => onOpenSection("cycles") }
+        }
+      >
+        Availability is set against a cycle&rsquo;s days, so there is nothing to set it
+        against yet. Describe the rotation under “Cycles and cycle days” and come back —
+        everything is available until a rule says otherwise, so nothing is lost by doing it
+        in that order.
       </EmptyState>
     );
   }
   if (structures.items !== null && structures.items.length === 0) {
     return (
-      <EmptyState title="No bell schedule yet">
-        Availability is set against a bell schedule's periods. Create one under “Bell
-        schedules and periods” first.
+      <EmptyState
+        title="No bell schedule yet"
+        action={
+          onOpenSection === undefined
+            ? undefined
+            : {
+                label: "Go to Bell schedules and periods",
+                onClick: () => onOpenSection("periods"),
+              }
+        }
+      >
+        Availability is set against a bell schedule&rsquo;s periods. Describe the shape of a
+        day under “Bell schedules and periods” and come back.
       </EmptyState>
     );
   }
@@ -476,8 +507,10 @@ export function AvailabilityPanel(props: {
   noun: string;
   /** The rows that can be configured, already in display order. */
   options: readonly { readonly id: string; readonly name: string }[];
+  /** Opens another setup section, passed through to the grid's empty states. */
+  onOpenSection?: ((id: string) => void) | undefined;
 }) {
-  const { school, entityKind, noun, options } = props;
+  const { school, entityKind, noun, options, onOpenSection } = props;
   const [selected, setSelected] = useState<string>("");
 
   const chosen = options.find((option) => option.id === selected) ?? null;
@@ -517,6 +550,7 @@ export function AvailabilityPanel(props: {
           entityKind={entityKind}
           entityId={chosen.id}
           entityName={chosen.name}
+          onOpenSection={onOpenSection}
         />
       )}
     </div>
