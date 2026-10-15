@@ -388,8 +388,8 @@ subject. The workflow is **seventeen** sections.
 The existing frontend suite came out of this stronger rather than merely adjusted: every
 assertion that checked a payload now also pins that the screen sent the row's own revision,
 and fixtures moved off `rev: 1` wherever an assertion reads one, so a screen sending a
-default cannot pass by coincidence. 62 Rust tests added across two new suites and 58 frontend
-tests across three; **572 Rust and 980 frontend tests pass.**
+default cannot pass by coincidence. 65 Rust tests added across two new suites and 58 frontend
+tests across three; **582 Rust and 980 frontend tests pass.**
 
 > Deliberately **not** in Stage B, and not implied by it: qualification levels or
 > certification expiry (ADR 0025's *Known limitation*), a head of department or a
