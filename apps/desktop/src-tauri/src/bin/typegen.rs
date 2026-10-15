@@ -142,13 +142,68 @@ fn main() -> ExitCode {
 /// `evara-db` rather than against nothing.
 fn write_all() -> (Vec<Generated>, Vec<String>) {
     let (mut files, mut errors, mut required) = entities();
-    let (more_files, more_errors, more_required) = time_model_and_interface();
-    files.extend(more_files);
-    errors.extend(more_errors);
-    required.extend(more_required);
+    for (more_files, more_errors, more_required) in [lessons(), time_model_and_interface()] {
+        files.extend(more_files);
+        errors.extend(more_errors);
+        required.extend(more_required);
+    }
 
     errors.extend(check_dependencies_are_listed(&files, &required));
     (files, errors)
+}
+
+/// What a school teaches, to whom, and how often: the Lessons group and its arithmetic.
+///
+/// Split out of [`entities`] when Stage C made that list outgrow one screen again, along
+/// the same seam — the groups are `DATA-MODEL.md`'s, and this is §5's second half plus §6.
+///
+/// The four `evara-core` types at the foot are the demand arithmetic the views carry. They
+/// are the interface's *answer*, not its calculation: working any of it out in TypeScript
+/// would be a scheduling rule in the view layer.
+fn lessons() -> (Vec<Generated>, Vec<String>, BTreeSet<(PathBuf, String)>) {
+    use evara_core::lessons::{CycleCapacity, DeclaredComparison, DemandFinding, LessonDemand};
+    use evara_db::{
+        Activity, AssignedTeacher, AssignmentEligibility, AttendingGroup, ClassEnrolment,
+        ClassEnrolmentInput, ClassGroup, ClassGroupInput, ClassSection, ClassSectionDependents,
+        ClassSectionInput, ClassSectionView, ClassTeacher, ClassTeacherInput, Course,
+        CourseDependents, CourseInput, CourseView, RosteredStudent, SectionDemand, TaughtSection,
+        TeacherCandidate,
+    };
+
+    contract![
+        // `subject -> course -> class_section -> activity`, with no `school_id` anywhere in
+        // the chain; see ADR 0029 §1.
+        Course,
+        CourseInput,
+        CourseView,
+        CourseDependents,
+        ClassSection,
+        ClassSectionInput,
+        ClassSectionView,
+        ClassSectionDependents,
+        // Staffing. `AssignmentEligibility` keeps ADR 0028's three answers on a named type,
+        // so a screen cannot treat the warning as a refusal.
+        ClassTeacher,
+        ClassTeacherInput,
+        AssignedTeacher,
+        TeacherCandidate,
+        AssignmentEligibility,
+        TaughtSection,
+        // The audience, and the optional roster that is never added to it.
+        ClassGroup,
+        ClassGroupInput,
+        AttendingGroup,
+        ClassEnrolment,
+        ClassEnrolmentInput,
+        RosteredStudent,
+        // One placeable occurrence, and what a section's worth of them demands.
+        Activity,
+        SectionDemand,
+        LessonDemand,
+        DeclaredComparison,
+        CycleCapacity,
+        DemandFinding,
+    ]
 }
 
 /// What a project holds: Structure, People, shared identities, Curriculum, availability.

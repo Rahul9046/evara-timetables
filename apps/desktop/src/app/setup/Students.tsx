@@ -72,6 +72,7 @@ import {
   enrolStudent,
   listCampuses,
   listGroupsForStudent,
+  studentClassCount,
   listSchoolStudents,
   listStudents,
   listYearLevels,
@@ -196,6 +197,29 @@ export function Students(props: { school: School; context?: SetupContext }) {
   const [groupsByStudent, setGroupsByStudent] = useState<
     Readonly<Record<string, readonly StudentGroup[]>>
   >({});
+
+  /**
+   * How many class rosters each student is named on.
+   *
+   * Stage C's addition, and it blocks the delete the same way group membership does:
+   * `class_enrolment.student_id` is `RESTRICT`, because "she was in 9MAT-A" is history of
+   * exactly the kind ADR 0018 refuses to discard. Read alongside the groups, for the same
+   * reason they are read up front.
+   */
+  const [classesByStudent, setClassesByStudent] = useState<Readonly<Record<string, number>>>(
+    {},
+  );
+
+  const noteClasses = useCallback((studentId: string) => {
+    void studentClassCount(studentId)
+      .then((count) => {
+        setClassesByStudent((current) => ({ ...current, [studentId]: count }));
+      })
+      .catch(() => {
+        // As with the group counts: the confirmation loses a sentence, the backend still
+        // refuses, and a second error surface would not help.
+      });
+  }, []);
 
   const noteGroups = useCallback((studentId: string) => {
     void listGroupsForStudent(studentId)
@@ -341,7 +365,10 @@ export function Students(props: { school: School; context?: SetupContext }) {
     describe: (row) => `${row.givenName} ${row.familyName}`,
     validate: validateStudent,
     toDraft: (row) => {
-      if (row !== null) noteGroups(row.id);
+      if (row !== null) {
+        noteGroups(row.id);
+        noteClasses(row.id);
+      }
       return {
         givenName: row?.givenName ?? "",
         familyName: row?.familyName ?? "",
@@ -364,7 +391,10 @@ export function Students(props: { school: School; context?: SetupContext }) {
     }),
     list: () =>
       loadRoll().then((rows) => {
-        for (const row of rows) noteGroups(row.id);
+        for (const row of rows) {
+          noteGroups(row.id);
+          noteClasses(row.id);
+        }
         return rows;
       }),
     // The panel re-reads the list straight afterwards, so the returned row is never what
@@ -414,7 +444,8 @@ export function Students(props: { school: School; context?: SetupContext }) {
       }
       const others = (attended.get(row.id) ?? []).filter((id) => id !== school.id);
       const groups = groupsByStudent[row.id] ?? [];
-      if (others.length === 0 && groups.length === 0) return null;
+      const classes = classesByStudent[row.id] ?? 0;
+      if (others.length === 0 && groups.length === 0 && classes === 0) return null;
       return (
         <>
           {others.length > 0 && (
@@ -436,6 +467,13 @@ export function Students(props: { school: School; context?: SetupContext }) {
               {groups.map((group) => group.name).join(", ")}). A membership is the only
               record that they were ever in one, so it has to be removed deliberately under{" "}
               <strong>Student groups</strong> rather than taken by a delete.
+            </p>
+          )}
+          {classes > 0 && (
+            <p>
+              They are named on {classes} class {classes === 1 ? "roster" : "rosters"}. That
+              is the only record that they were ever in those classes, so it is removed
+              deliberately under <strong>Lessons</strong> rather than taken by a delete.
             </p>
           )}
           <p className="muted">

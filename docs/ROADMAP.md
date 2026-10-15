@@ -315,9 +315,10 @@ pass.
 
 > **Not in Stage A, and not implied by it:** Subjects, Departments, teacher qualifications
 > and `rev` checking (**Stage B**); Lessons and activity modelling (**Stage C**, which is
-> what the disabled navigation entry announces); Excel roster imports (**Stage D**). Nothing
+> what the disabled navigation entry announced); Excel roster imports (**Stage D**). Nothing
 > in this stage creates a lessons table, form, placeholder row or scheduling model, and the
-> navigation entry has no `render` at all so it cannot be opened.
+> navigation entry had no `render` at all so it could not be opened. Stage C built the screen
+> and removed the `comingLater` mechanism with it.
 
 **Curriculum prerequisites and revision checking (Stage B) ✅ complete.** Migration `V14`,
 additive with no backfill: `department` and `subject` (school-owned), `teacher_qualification`
@@ -396,12 +397,90 @@ tests across three; **582 Rust and 980 frontend tests pass.**
 > primary-department flag (ADR 0026's), a department hierarchy, a project-wide subject
 > catalogue (rejected in ADR 0025 §2), `subject.colour` and `subject.default_room_type_id`
 > (Phase 7 and Stage C respectively), **Lessons** and activity modelling (**Stage C**, which
-> is what the disabled navigation entry still announces), and Excel roster imports
-> (**Stage D**). Nothing here creates a lessons, course or class-section table.
+> is what the disabled navigation entry still announced at this point), and Excel roster
+> imports (**Stage D**). Nothing here creates a lessons, course or class-section table.
 >
 > Nor is any kind of **merge** claimed. A conflict is reported and the user decides; a merge
 > Evara performed itself would be a guess about intent, which is the one thing a timetable
 > cannot afford.
+
+**Lessons and activity modelling (Stage C) ✅ complete.** Migration `V15`, additive with no
+backfill: `course`, `class_section`, `class_teacher`, `class_group`, `class_enrolment` and
+`activity`. The section the navigation has announced since Stage A is built, so all
+**seventeen** School Setup sections now render a screen.
+
+What it delivers, and the four decisions in it that are not obvious:
+
+- **The chain carries the school, and not one of the six tables holds a `school_id`.**
+  `subject → course → class_section → activity`, with `require_school_owner` walking it per
+  table. This stage's own notes below had already said so for `course`;
+  [adr/0029](adr/0029-a-lesson-is-a-course-a-section-and-its-occurrences.md) §1 records that
+  it held for all six, and a test asserts the column's absence so a future migration cannot
+  quietly add one. `DATA-MODEL.md`'s sketch of `course (id, school_id, ...)` is corrected
+  rather than implemented.
+- **One `activity` row is one occurrence.** A class needing four single periods a cycle
+  holds four rows; one needing a double holds one row of `duration_periods = 2`. There is no
+  `occurrences_per_cycle` column — the count is how many rows there are, and the demand is
+  `SUM(duration_periods)`. ADR 0029 §2 gives the three things that depend on it, the
+  shortest being that `timetable_entry` is already unique on
+  `(timetable_id, activity_id, timeslot_id)` *because* a multi-period activity occupies
+  several slots. The screen still asks the two numbers a school thinks in — *periods per
+  lesson* and *times per cycle* — states their product in words before the save, and writes
+  `count` rows in one transaction. The activity generator this phase asked for expands
+  `course.periods_per_cycle` respecting `default_duration_periods`, refuses while the
+  declaration is null rather than inventing a number, and refuses a section that already has
+  occurrences rather than silently doubling its demand.
+- **A missing qualification warns; a missing membership refuses.** This phase left the
+  question open on purpose and asked for an ADR:
+  [adr/0028](adr/0028-assigning-a-lesson-warns-about-qualifications.md) keeps two of
+  ADR 0025 §4's three conditions as requirements — an **active** `teacher_school` membership
+  and campus eligibility, each a trigger pair *and* a repository check that can name the
+  remedy — and makes the qualification advisory. The decisive argument is that a database
+  which refuses will be answered by entering a qualification somebody does not have, which
+  destroys the one record the whole design rests on. ADR 0025's ownership model is untouched:
+  nothing in Stage C writes or removes a qualification, and a test asserts it.
+- **The groups are the audience; the roster is a register.** ADR 0006 requires a timetable to
+  be buildable from `student_group.size` alone, so a section with groups and no named
+  individuals is complete rather than half-finished, and the two figures are **never added** —
+  a section taught to a group of 28 that also names four children has an audience of 28,
+  because those four are among the 28. `ClassSectionView` keeps them in separate fields under
+  separate headings and `RosteredStudent.coveredByGroup` answers "am I being counted twice?"
+  per row. ADR 0029 §4.
+
+Two further pieces worth naming:
+
+- **Nothing claims a lesson can be timetabled.** `evara_core::lessons` reports only
+  *impossibility* — an occurrence longer than any unbroken run of teaching periods, a total
+  beyond every slot in the cycle — and says so in those words. A demand that is merely
+  difficult is not reported, because only a solver can tell the difference; and before the
+  school has a cycle and a bell schedule nothing is judged at all, since the setup order puts
+  Lessons at 10 and the time model at 14–17. It lives in `evara-core` rather than
+  `evara-constraints` because that crate is Phase 4's registry of timetable-scored evaluators
+  and these are data-entry rules with an answer before any placement exists.
+- **Deletion was decided one edge at a time.** `delete_course` is refused while any section
+  delivers it; `delete_class_section` *cascades* its staffing, audience, roster and
+  occurrences, through `repo::delete` so each removal is a truthful change-log entry;
+  `delete_student_group` and `delete_student` are refused while a lesson depends on them, with
+  the counts read before the button is offered; `delete_year_level` and `delete_room_type`
+  clear the course's optional references first, so each affected course's `rev` stays truthful.
+  ADR 0029 §7 has the table and the reasoning for each.
+
+88 Rust tests added — 73 in a new `tests_lessons` suite and 15 in `evara_core::lessons`,
+which is where the demand arithmetic can be asserted without a database — and 40 frontend
+tests, 37 in a new suite and 3 on the People screens whose deletes this stage can now block.
+**670 Rust and 1,020 frontend tests pass.**
+
+> Deliberately **not** in Stage C, and not implied by it: elective lines (`line`,
+> `line_member`), course requests (`course_request` — Milestone 2's request-based sectioning,
+> ADR 0006), activity relationships (`activity_link`), per-occurrence rooms, resources and
+> teachers (`activity_room_candidate`, `activity_resource`, `activity_teacher`,
+> `activity_group` — room *allocation* is Phase 6), non-lesson activities and the
+> `activity.school_id`/`kind` columns they need, `class_teacher.role`,
+> `class_section.max_size`, and Excel roster imports (**Stage D**). ADR 0029 §5 lists every
+> omission with what adding it costs; each is one nullable `ALTER TABLE` or one new table.
+>
+> Nor is any timetable claimed, offered or generated. Stage C produces the demand a solver
+> will later be asked to satisfy, and says nothing about whether it can be.
 
 Remaining in this phase: **nothing.** Both open items are closed.
 
@@ -443,17 +522,32 @@ stating once rather than rediscovering:
 
 ### The work
 
-- Migration `0003`: Curriculum group, then Activities group (activity, activity_teacher,
-  activity_group, activity_room_candidate, activity_resource, line, line_member,
-  activity_link).
-- Activity generator: expand a course's `periods_per_cycle` into activities with
-  `split_index`, respecting `default_duration_periods`.
-- Screens: Courses → Class sections → Lessons, with teacher and group assignment,
-  duration, room requirements, and lock toggles. Lines editor (basic).
+**Done, in `V14` (Stage B) and `V15` (Stage C):**
+
+- ✅ The Curriculum group: `department`, `subject`, `teacher_qualification`,
+  `teacher_department` (`V14`), then `course`, `class_section`, `class_teacher`,
+  `class_group`, `class_enrolment`, `activity` (`V15`).
+- ✅ Activity generator: expand a course's `periods_per_cycle` into activities respecting
+  `default_duration_periods`. One row per occurrence, `split_index` assigned once and never
+  renumbered — [adr/0029](adr/0029-a-lesson-is-a-course-a-section-and-its-occurrences.md) §2.
+- ✅ Screens: **Courses → Class sections → Lessons**, with teacher assignment (and its
+  warning), student-group and optional individual assignment, duration, occurrence count and
+  room requirements.
+
+**Remaining in this phase:**
+
+- Lines editor (basic): `line`, `line_member`, evaluated as a `SAME_PERIOD` group. Its table
+  is deliberately absent from `V15` — nothing reads it yet and adding a table is additive.
+- Lock toggles: `activity.is_locked`. A lock is about a *placed* timetable, so it belongs
+  with Phase 8's manual editing rather than with the demand.
+- Per-occurrence overrides: `activity_teacher`, `activity_group`,
+  `activity_room_candidate`, `activity_resource`. Room **allocation** is Phase 6, and
+  Stage C's activities inherit their staffing and audience from their class section.
 - `fixtures/`: a synthetic school generator in `evara-cli` plus 3 checked-in fixtures —
   tiny (feasible by hand), medium (~400 activities), and one deliberately infeasible.
+  Synthetic data only, and no real school names — `CLAUDE.md` rule 3.
 
-**Closes M1-7.**
+**Closes M1-7 once the fixtures land.**
 
 ---
 
@@ -575,12 +669,13 @@ Phase 2's remaining work is sequenced as stages, which is how the multi-school a
 | 0C | Multi-school management interface | ✅ complete |
 | **A** | **School Setup UX restructuring** | ✅ **complete** |
 | **B** | **Subjects, departments, teacher qualifications, `rev` checking** | ✅ **complete** |
-| C | Lessons and activity modelling | next |
-| D | Excel roster imports | after C |
+| **C** | **Lessons and activity modelling** (`V15`) | ✅ **complete** |
+| D | Excel roster imports | next |
 
-Lessons already appears in the School Setup navigation, disabled and labelled, so the order
-reads correctly before Stage C builds it. Nothing else about it exists — no table, no form,
-no placeholder row, and no `render`.
+Lessons appeared in the School Setup navigation from Stage A, disabled and labelled, so the
+order read correctly before there was a screen behind it. Stage C built that screen, so all
+seventeen sections now render one and the `comingLater` mechanism is gone — a branch nothing
+takes is a branch nothing tests.
 
 ## After Milestone 1
 

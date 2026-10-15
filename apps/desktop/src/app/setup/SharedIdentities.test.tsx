@@ -59,6 +59,8 @@ vi.mock("../../ipc/setup", () => ({
   updateYearLevel: vi.fn(() => Promise.resolve({})),
   deleteYearLevel: vi.fn(() => Promise.resolve()),
   listGroupsForStudent: vi.fn(() => Promise.resolve([])),
+  studentClassCount: vi.fn(() => Promise.resolve(0)),
+  groupClassCount: vi.fn(() => Promise.resolve(0)),
   listCampuses: vi.fn<(schoolId: string) => Promise<Campus[]>>(() => Promise.resolve([])),
   // The Stage 0C relationship surface. The assertions here are about what the two lists
   // *show* and what they refuse, so these are stubs — `MultiSchoolManagement.test.tsx`

@@ -40,6 +40,10 @@ const addGroupMember = vi.fn();
 const countGroupMembers = vi.fn<(groupId: string) => Promise<number>>();
 const removeGroupMember = vi.fn();
 const listGroupsForStudent = vi.fn<(studentId: string) => Promise<StudentGroup[]>>();
+// Stage C: how many class rosters a student is on, and how many class sections a group
+// is taught to. Both block a delete, so both are read before it is offered.
+const studentClassCount = vi.fn<(studentId: string) => Promise<number>>();
+const groupClassCount = vi.fn<(groupId: string) => Promise<number>>();
 
 vi.mock("../../ipc/setup", () => ({
   listCampuses: () => listCampuses(),
@@ -121,6 +125,8 @@ vi.mock("../../ipc/setup", () => ({
   removeGroupMember: (schoolId: string, groupId: string, studentId: string) =>
     removeGroupMember(schoolId, groupId, studentId),
   listGroupsForStudent: (studentId: string) => listGroupsForStudent(studentId),
+  studentClassCount: (studentId: string) => studentClassCount(studentId),
+  groupClassCount: (groupId: string) => groupClassCount(groupId),
   // Stage B. Empty by default: a suite that is about something else should not have
   // to describe a curriculum, and one that is about this panel overrides them.
   listDepartments: vi.fn(() => Promise.resolve([])),
@@ -244,6 +250,8 @@ beforeEach(() => {
   listGroupMembers.mockResolvedValue([]);
   countGroupMembers.mockResolvedValue(0);
   listGroupsForStudent.mockResolvedValue([]);
+  studentClassCount.mockResolvedValue(0);
+  groupClassCount.mockResolvedValue(0);
 });
 
 describe("Teachers", () => {
@@ -362,6 +370,49 @@ describe("Students", () => {
     expect(within(dialog).queryByRole("button", { name: /^Delete student$/ })).toBeNull();
     expect(within(dialog).getByRole("button", { name: /^Close$/ })).toBeTruthy();
   });
+
+  it("warns before Delete that a student on a class roster cannot be deleted", async () => {
+    // Stage C's addition to the same dialogue, and the same reasoning ADR 0018 gives about
+    // group membership: "she was in 9MAT-A" is history, so the delete is refused and the
+    // remedy is made visible rather than performed.
+    const user = userEvent.setup();
+    listStudents.mockResolvedValue([student()]);
+    listGroupsForStudent.mockResolvedValue([]);
+    studentClassCount.mockResolvedValue(3);
+
+    render(<Students school={SCHOOL} />);
+    await screen.findByText("Varga");
+    await waitFor(() => expect(studentClassCount).toHaveBeenCalledWith("s-1"));
+
+    await user.click(screen.getByRole("button", { name: /delete/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/named on 3 class rosters/)).toBeTruthy();
+    // The remedy names the screen, with the name in a <strong> — so the match is on the
+    // word rather than the whole phrase, which spans two elements.
+    expect(within(dialog).getByText("Lessons")).toBeTruthy();
+    // No destructive button: the answer is already known.
+    expect(within(dialog).queryByRole("button", { name: /^Delete student$/ })).toBeNull();
+    expect(deleteStudent).not.toHaveBeenCalled();
+  });
+
+  it("offers the delete when nothing holds the student", async () => {
+    // The other half, because a refusal that fires on every row would be indistinguishable
+    // from a broken button.
+    const user = userEvent.setup();
+    listStudents.mockResolvedValue([student()]);
+    listGroupsForStudent.mockResolvedValue([]);
+    studentClassCount.mockResolvedValue(0);
+
+    render(<Students school={SCHOOL} />);
+    await screen.findByText("Varga");
+    await waitFor(() => expect(studentClassCount).toHaveBeenCalledWith("s-1"));
+
+    await user.click(screen.getByRole("button", { name: /delete/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("button", { name: /^Delete student$/ })).toBeTruthy();
+  });
 });
 
 describe("Student groups", () => {
@@ -445,6 +496,26 @@ describe("Student groups", () => {
 
     expect(await screen.findByText(/23 students are listed in this group/i)).toBeTruthy();
     expect(screen.getByText(/nothing else records them/i)).toBeTruthy();
+    expect(deleteStudentGroup).not.toHaveBeenCalled();
+  });
+
+  it("refuses a delete while a class section is taught to the group", async () => {
+    // Stage C's `class_group.student_group_id` is RESTRICT: deleting the audience out from
+    // under three class sections is almost always the wrong row, and the useful answer
+    // names what is in the way.
+    const user = userEvent.setup();
+    listStudentGroups.mockResolvedValue([group()]);
+    countGroupMembers.mockResolvedValue(0);
+    groupClassCount.mockResolvedValue(3);
+
+    render(<StudentGroups school={SCHOOL} />);
+    await waitFor(() => expect(groupClassCount).toHaveBeenCalledWith("g-1"));
+
+    await user.click(await screen.findByRole("button", { name: /^Delete/ }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/3 class sections are taught to this group/)).toBeTruthy();
+    expect(within(dialog).queryByRole("button", { name: /^Delete student group$/ })).toBeNull();
     expect(deleteStudentGroup).not.toHaveBeenCalled();
   });
 

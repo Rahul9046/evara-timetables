@@ -473,3 +473,58 @@ export function validatePeriod(draft: Draft): Problems {
 export function validateCalendarDay(draft: Draft): Problems {
   return problems([["date", isoDate(text(draft, "date"), "Date")]]);
 }
+
+/**
+ * A course.
+ *
+ * `periodsPerCycle` is optional and means something specific when left blank: "this school
+ * has not decided yet". A blank is therefore not an incomplete form and is not defaulted
+ * to one — the activity generator refuses while it is blank and says so, rather than
+ * inventing a number. `defaultDurationPeriods` is required, because one period is the
+ * answer for almost every course and a blank version of it would mean the same thing.
+ */
+export function validateCourse(draft: Draft): Problems {
+  return problems([
+    ["subjectId", required(text(draft, "subjectId"), "Subject")],
+    ["name", required(text(draft, "name"), "Course name")],
+    [
+      "periodsPerCycle",
+      optional(
+        text(draft, "periodsPerCycle"),
+        (value, name) => wholeNumber(value, name, { min: 1 }),
+        "Periods per cycle",
+      ),
+    ],
+    [
+      "defaultDurationPeriods",
+      wholeNumber(text(draft, "defaultDurationPeriods"), "Default duration", { min: 1 }),
+    ],
+  ]);
+}
+
+/** A class section. Only its name is required; a code and a campus are both optional. */
+export function validateClassSection(draft: Draft): Problems {
+  return problems([["name", required(text(draft, "name"), "Section name")]]);
+}
+
+/**
+ * One batch of lesson occurrences.
+ *
+ * Two numbers that are easy to confuse and must not be: `durationPeriods` is how many
+ * *consecutive* periods one occurrence needs, and `count` is how many such occurrences the
+ * cycle needs. Duration 2 with a count of 3 is six period slots a cycle, not two and not
+ * three — see [ADR 0029](../../../../docs/adr/0029-a-lesson-is-a-course-a-section-and-its-occurrences.md).
+ *
+ * The upper bound on `count` matches the repository's: a typo guard, not a scheduling rule.
+ * Nothing here judges whether the resulting demand is possible; that is
+ * `SectionDemand.findings`, which the backend computes.
+ */
+export function validateOccurrences(draft: Draft): Problems {
+  return problems([
+    [
+      "durationPeriods",
+      wholeNumber(text(draft, "durationPeriods"), "Periods per lesson", { min: 1, max: 20 }),
+    ],
+    ["count", wholeNumber(text(draft, "count"), "Times per cycle", { min: 1, max: 40 })],
+  ]);
+}

@@ -74,6 +74,8 @@ vi.mock("../../ipc/setup", () => ({
   deleteYearLevel: vi.fn(() => Promise.resolve()),
   listCampuses: (schoolId: string) => listCampuses(schoolId),
   listGroupsForStudent: vi.fn(() => Promise.resolve([])),
+  studentClassCount: vi.fn(() => Promise.resolve(0)),
+  groupClassCount: vi.fn(() => Promise.resolve(0)),
   listEnrolmentHistory: (studentId: string) => listEnrolmentHistory(studentId),
   updateEnrolment: (schoolId: string, id: string, rev: number, input: unknown) =>
     updateEnrolment(schoolId, id, rev, input),

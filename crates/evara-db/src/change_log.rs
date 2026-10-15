@@ -184,6 +184,13 @@ pub const TRACKED_TABLES: &[&str] = &[
     "subject",
     "teacher_qualification",
     "teacher_department",
+    // V15 — lessons: what a school teaches to whom, how often, and for how long at a time.
+    "course",
+    "class_section",
+    "class_teacher",
+    "class_group",
+    "class_enrolment",
+    "activity",
 ];
 
 /// Installs the change-log triggers for one table.

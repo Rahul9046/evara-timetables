@@ -20,6 +20,7 @@ pub mod availability;
 pub mod curriculum;
 pub mod error;
 pub mod grid;
+pub mod lessons;
 pub mod membership;
 pub mod people;
 pub mod project;
@@ -70,7 +71,7 @@ pub fn app_info() -> Result<AppInfo, String> {
     Ok(AppInfo {
         version: env!("CARGO_PKG_VERSION"),
         debug: cfg!(debug_assertions),
-        phase: "2 — stage B, curriculum prerequisites",
+        phase: "2 — stage C, lessons and activities",
     })
 }
 

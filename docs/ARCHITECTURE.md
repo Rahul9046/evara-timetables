@@ -87,7 +87,11 @@ never a second hand-maintained model.
 1. `evara-core` has no I/O and no dependency on the other crates. It owns entity types,
    ID types, the cycle/calendar/timeslot model, `Score`, `Violation` and `Move`.
 2. `evara-constraints` depends on `evara-core` only. It never touches SQLite. The solver
-   and the validator both consume it.
+   and the validator both consume it. **It holds one kind of thing**: `type_key`-addressed
+   evaluators with a JSON Schema and an `explain()`, each scored against a candidate
+   timetable. A rule that has an answer *before* any placement exists is not one of those
+   and belongs in `evara-core` — `lessons::DemandFinding` is the example, and its module
+   header says why putting it here would have been the mistake.
 3. `evara-solver` depends on `evara-core` + `evara-constraints`. It receives a fully
    materialised problem **in memory** and returns a solution. It never opens a database.
 4. `evara-db` is the only crate that knows SQL. It loads a `Problem` for the solver and
@@ -111,7 +115,15 @@ copy is a second place for them to go wrong:
   `Expected` and put it in the statement's `WHERE` clause, so a save built on a version
   somebody else has since changed is refused rather than applied. A command handler never
   constructs `Expected::Any`; it wraps the `expectedRev` the interface sent. See
-  [adr/0027](adr/0027-revisions-are-checked-on-write.md).
+  [adr/0027](adr/0027-revisions-are-checked-on-write.md), and
+  [adr/0029](adr/0029-a-lesson-is-a-course-a-section-and-its-occurrences.md) §8 for the
+  inventory Stage C extended.
+- **A child's school comes from its parent chain.** Since `V15` the longest one is four
+  tables — `subject → course → class_section → activity` — and not one of the six Lessons
+  tables holds a `school_id`. `require_school_owner` takes an owner query per table, written
+  next to the entity it is about, because the chain *is* the domain statement. A second
+  column recording the same ownership would be a second place for it to be wrong. See
+  [adr/0029](adr/0029-a-lesson-is-a-course-a-section-and-its-occurrences.md) §1.
 
 A read-compare-write revision check would be an architecture bug of the same kind as a rule
 in the UI: it looks like the thing and is not.

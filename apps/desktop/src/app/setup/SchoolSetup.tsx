@@ -52,6 +52,7 @@ import { CampusesAndBuildings } from "./CampusesAndBuildings";
 import { CyclesAndCycleDays } from "./CyclesAndCycleDays";
 import { Departments } from "./Departments";
 import { GridPreviewSection } from "./GridPreviewSection";
+import { Lessons } from "./Lessons";
 import { PeriodStructuresAndPeriods } from "./PeriodStructuresAndPeriods";
 import { ResourcesAndSharing } from "./ResourcesAndSharing";
 import { RoomsAndRoomTypes } from "./RoomsAndRoomTypes";
@@ -103,21 +104,14 @@ interface Section {
   /** Whether this section can be used before a school record exists. */
   readonly needsSchool: boolean;
   /**
-   * Announced in the navigation, not yet built.
+   * What the section shows.
    *
-   * Exactly one entry carries this: **Lessons**, which Stage C implements after Stage B
-   * brings Subjects and Departments. It is in the list because the *order* is the thing
-   * Stage A is for — somebody configuring a school should be able to see that lessons come
-   * after year levels and before teachers — and a section that simply appeared later would
-   * leave the workflow looking shorter than it is.
-   *
-   * The entry is disabled and has no `render`. An empty functional screen would be worse
-   * than an absent one: it would invite a user to look for a feature that does not exist,
-   * and it would need deleting rather than filling in when Stage C arrives.
+   * Required. Until Stage C one entry — **Lessons** — carried a `comingLater` string
+   * instead and had no `render`, so the workflow's shape was visible before the screen
+   * existed. Stage C built it, and the mechanism went with it rather than being kept
+   * against a future need: a branch nothing takes is a branch nothing tests.
    */
-  readonly comingLater?: string;
-  /** Absent for a {@link comingLater} entry, which has nothing to render. */
-  readonly render?: (school: School, context: SetupContext) => ReactNode;
+  readonly render: (school: School, context: SetupContext) => ReactNode;
 }
 
 /**
@@ -143,15 +137,16 @@ interface Section {
  * | 3–5 | Campuses, Rooms, Resources | where, and with what |
  * | 6–7 | Academic years, Year levels | the shape of a school year |
  * | 8–9 | Departments, Subjects | what is taught |
- * | 10 | Lessons | *Stage C* — how often, and to whom |
+ * | 10 | Lessons | how often, and to whom |
  * | 11–13 | Teachers, Students, Student groups | who |
  * | 14–17 | Cycles, Bell schedules, Calendar, Grid preview | when |
  *
- * **Stage B inserted Departments and Subjects at 8 and 9**, before the Lessons entry that
- * announces Stage C rather than after it, because that is the dependency: a lesson is
- * taught *of* a subject. Nothing addresses a section by position — `openSection` and the
- * tests use the identifier — so the insertion changed no behaviour anywhere it was not
- * meant to, which is the property Stage A's reorder established and this one relies on.
+ * **Stage B inserted Departments and Subjects at 8 and 9**, before the Lessons entry
+ * rather than after it, because that is the dependency: a lesson is taught *of* a subject.
+ * **Stage C then built Lessons at 10**, where the navigation had been announcing it since
+ * Stage A. Nothing addresses a section by position — `openSection` and the tests use the
+ * identifier — so neither change moved behaviour anywhere it was not meant to, which is the
+ * property Stage A's reorder established and both have relied on.
  *
  * **The one genuine dependency this inverts is availability**, which is set against a
  * cycle's days and a bell schedule's periods and therefore appears on the Teachers, Rooms
@@ -220,8 +215,7 @@ export const SECTIONS: readonly Section[] = [
     needsSchool: true,
     render: (school) => <YearLevels school={school} />,
   },
-  // What is taught. Departments and subjects are Stage B; Lessons is Stage C — see
-  // `Section.comingLater`.
+  // What is taught, to whom, and how often.
   {
     id: "departments",
     label: "Departments",
@@ -239,10 +233,9 @@ export const SECTIONS: readonly Section[] = [
   {
     id: "lessons",
     label: "Lessons",
-    blurb: "What is taught, and how often",
+    blurb: "What is taught, to whom, and how often",
     needsSchool: true,
-    comingLater:
-      "Lessons arrive in Stage C. Departments and Subjects above are the prerequisites, and they are available now.",
+    render: (school, context) => <Lessons school={school} context={context} />,
   },
   // Who. After the year levels they are placed in, and before the rotation they are
   // timetabled into.
@@ -366,17 +359,12 @@ export function SchoolSetup() {
   /**
    * The section on screen.
    *
-   * Resolved by identifier, and a request for one that cannot be shown falls back to the
-   * first rather than rendering nothing. An unknown identifier is a caller's mistake; a
-   * {@link Section.comingLater} one is reachable only by a disabled button, so neither
-   * should happen — but "neither should happen" is not the same as "cannot", and a blank
+   * Resolved by identifier, and a request for one that does not exist falls back to the
+   * first rather than rendering nothing. An unknown identifier is a caller's mistake, so it
+   * should not happen — but "should not happen" is not the same as "cannot", and a blank
    * body would be the worst way to find out.
    */
-  const requested = SECTIONS.find((section) => section.id === activeId);
-  const active =
-    requested !== undefined && requested.comingLater === undefined
-      ? requested
-      : SECTIONS[0];
+  const active = SECTIONS.find((section) => section.id === activeId) ?? SECTIONS[0];
 
   const context: SetupContext = {
     schools: schools ?? [],
@@ -398,25 +386,19 @@ export function SchoolSetup() {
         )}
         <ol>
           {SECTIONS.map((section, index) => {
-            // Two different reasons a step cannot be opened, and they must not be
-            // conflated: one is temporary and about this campus file, the other is about
-            // the product and will not change by adding a school.
-            const later = section.comingLater ?? null;
-            const locked = later === null && section.needsSchool && !ready;
+            // One reason a step cannot be opened, and it is temporary and about this
+            // campus file: there is no school for the section to be about yet.
+            const locked = section.needsSchool && !ready;
             return (
               <li key={section.id}>
                 <button
                   type="button"
                   className={
-                    section.id === activeId
-                      ? "navItem navItem--on"
-                      : later !== null
-                        ? "navItem navItem--later"
-                        : "navItem"
+                    section.id === activeId ? "navItem navItem--on" : "navItem"
                   }
                   aria-current={section.id === activeId ? "page" : undefined}
-                  disabled={locked || later !== null}
-                  title={locked ? "Add a school first" : (later ?? undefined)}
+                  disabled={locked}
+                  title={locked ? "Add a school first" : undefined}
                   onClick={() => setActiveId(section.id)}
                 >
                   <span className="navIndex" aria-hidden="true">
@@ -425,11 +407,7 @@ export function SchoolSetup() {
                   <span className="navText">
                     <span className="navLabel">{section.label}</span>
                     <span className="navBlurb">
-                      {later !== null
-                        ? "Coming later"
-                        : locked
-                          ? "Needs a school"
-                          : section.blurb}
+                      {locked ? "Needs a school" : section.blurb}
                     </span>
                   </span>
                 </button>
@@ -476,7 +454,7 @@ export function SchoolSetup() {
         ) : (
           // Keyed by school, so switching discards every form, dialogue and selection the
           // previous school's screen was holding. See this module's header.
-          <div key={school.id}>{active?.render?.(school, context) ?? null}</div>
+          <div key={school.id}>{active?.render(school, context) ?? null}</div>
         )}
       </div>
     </div>

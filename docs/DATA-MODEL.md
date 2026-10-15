@@ -154,6 +154,7 @@ The set as shipped:
 | `V12` | several schools per project | **yes**, `school` | — |
 | `V13` | shared identities: membership, eligibility, enrolment history, `resource_campus` | no | yes, from what each row already said |
 | `V14` | the Curriculum prerequisites: `department`, `subject`, `teacher_qualification`, `teacher_department` | no | **no** |
+| `V15` | the Lessons group: `course`, `class_section`, `class_teacher`, `class_group`, `class_enrolment`, `activity` | no | **no** |
 
 `V12` is the only migration that has ever rebuilt a table, and
 `backup::FIRST_REBUILDING_MIGRATION` is set to 12 because of it: a project below that
@@ -166,6 +167,12 @@ copy, which is why `V13` and `V14` left the constant alone.
 has no departments and no subjects, and inventing a "General" department would be putting
 words in a school's mouth. `tests_curriculum::a_v13_project_upgrades_without_touching_a_single_row`
 asserts that every row, revision and timestamp survives the upgrade unchanged.
+
+`V15` has none either, and for the same reason one step further on: a subject with no course
+is the ordinary state of a school part-way through setup, so one course per subject would be
+putting words in its mouth *and* be wrong.
+`tests_lessons::a_project_at_the_previous_schema_keeps_every_row_and_revision` and
+`::the_migration_invents_no_lessons` assert both halves.
 
 ### Project metadata and installation identity
 
@@ -216,7 +223,7 @@ extraction; references run downward in this table only.
 | --- | --- | --- |
 | **Structure** | school, campus, building, building_campus, room, room_campus, room_type, resource, resource_campus, academic_year, term, cycle, cycle_day, period_structure, period, timeslot, calendar_day | — |
 | **People** | teacher, teacher_school, teacher_campus, year_level, student, student_school_enrolment, student_group, student_group_member | Structure |
-| **Curriculum** | department, subject, teacher_qualification, teacher_department, course, class_section, class_teacher, class_group, enrolment, course_request | Structure, People |
+| **Curriculum** | department, subject, teacher_qualification, teacher_department, course, class_section, class_teacher, class_group, class_enrolment, course_request | Structure, People |
 | **Activities** | activity, activity_teacher, activity_group, activity_room_candidate, activity_resource, line, line_member, activity_link, activity_link_member, availability | Structure, People, Curriculum |
 | **Scheduling** | timetable, timetable_entry, constraint_instance, constraint_ref, solve_run, violation | all of the above |
 | **Operations** | absence, coverage | Scheduling |
@@ -721,28 +728,99 @@ and `repo::update` / `repo::delete` address rows by `id`.
 (ADR 0026's), a department hierarchy, a project-wide subject catalogue (rejected in ADR 0025
 §2), and everything below.
 
+### What `V15` implements — courses, class sections, and the demand they make
+
+Stage C, and the chain that turns a subject into something a timetable can be built from.
+Two decisions are recorded as ADRs because neither is obvious —
+[adr/0028](adr/0028-assigning-a-lesson-warns-about-qualifications.md) for who may be given a
+lesson and [adr/0029](adr/0029-a-lesson-is-a-course-a-section-and-its-occurrences.md) for
+what shape a lesson's demand has.
+
+```sql
+-- This school's offering of one subject: "Year 9 Mathematics".
+--
+-- NO school_id. `subject.school_id` is the only answer, and the chain
+-- subject -> course -> class_section -> activity carries it the whole way down.
+course (id, subject_id -> subject, year_level_id NULL, term_id NULL,
+        name, code NULL, description NULL,
+        periods_per_cycle INTEGER NULL,            -- the DECLARED demand; NULL = undecided
+        default_duration_periods INTEGER NOT NULL DEFAULT 1,
+        required_room_type_id NULL -> room_type,
+        UNIQUE (subject_id, name))
+-- `code` is unique within the SCHOOL, which needs a trigger pair rather than a partial
+-- index, because this table deliberately does not name its school.
+
+-- One deliverable instance of that offering: "Year 9 Mathematics A".
+class_section (id, course_id -> course, name, code NULL, campus_id NULL -> campus,
+               UNIQUE (course_id, name),
+               UNIQUE (course_id, code) WHERE code IS NOT NULL)
+
+-- Who teaches it. Many per section: co-teaching is ordinary.
+class_teacher (id, class_section_id, teacher_id, UNIQUE (class_section_id, teacher_id))
+
+-- Who attends it. The PRIMARY scheduling population (ADR 0006).
+class_group (id, class_section_id, student_group_id,
+             UNIQUE (class_section_id, student_group_id))
+
+-- Which named individuals attend it. OPTIONAL, and a roster overlay rather than a second
+-- population: nothing adds this count to the groups' size.
+class_enrolment (id, class_section_id, student_id,
+                 UNIQUE (class_section_id, student_id))
+
+-- ONE placeable occurrence of that instance. Four single periods a cycle is FOUR rows.
+activity (id, class_section_id -> class_section, name NULL,
+          duration_periods INTEGER NOT NULL DEFAULT 1,   -- consecutive periods, one occurrence
+          split_index INTEGER NOT NULL,                  -- assigned once, never renumbered
+          UNIQUE (class_section_id, split_index))
+```
+
+Six departures from the sketch below, each deliberate and each argued in ADR 0029:
+
+- **`course` has no `school_id`.** The sketch wrote one; `ROADMAP.md`'s Phase 3 notes had
+  already corrected it, and `CLAUDE.md` states the rule in general. Every school-owned read
+  and write resolves its school through the chain, and
+  `tests_lessons::a_course_has_no_school_column_and_resolves_one_through_its_subject`
+  asserts the absence on all six tables so a future migration cannot quietly add one.
+- **An activity is one occurrence, not a count of them.** There is no
+  `occurrences_per_cycle`: the count *is* the number of rows, and the demand is
+  `SUM(duration_periods)`. `timetable_entry`'s `UNIQUE (timetable_id, activity_id,
+  timeslot_id)` already assumes this, Phase 4's "spread these four across four days" needs
+  individually addressable occurrences, and the solver's variable set is then the rows
+  themselves with no expansion step. ADR 0029 §2.
+- **`activity.class_section_id` is `NOT NULL`, and the table has no `school_id` and no
+  `kind`.** The sketch's nullable column exists for an assembly or a yard duty, which
+  Stage C does not model; carrying three columns no screen can explain is the mistake `V14`
+  named about `subject.colour`. Adding them is an ADR 0020 rebuild, which `V12` has done
+  once already.
+- **`enrolment` is named `class_enrolment`**, because `V13` already made "enrolment" mean *a
+  spell at a school* throughout the crate. It names the **student**, not the spell — a
+  student may hold several spells at one school, so a spell-keyed roster could list the same
+  child twice — and a trigger pair requires a non-`LEFT` spell at the section's school.
+- **`class_section.student_group_id` is dropped.** The sketch has it *and* `class_group`,
+  which is two places to say who attends. The many-to-many is what co-teaching and combined
+  cohorts need.
+- **`class_teacher.role` is absent**, and so are `class_section.max_size` and
+  `class_enrolment.status`. All three have no reader in Milestone 1, and the sketch's
+  `(section, teacher, role)` key would let one person be a section's primary *and* its
+  assistant at once. ADR 0029 §5 lists every omission with what adding it costs.
+
+**Who may be given a lesson** is `V15`'s other substance, and it amends what ADR 0025 §4
+promised. An **active** `teacher_school` membership and campus eligibility are *requirements*
+— trigger pairs, plus a repository check that can name the remedy — and a missing
+`teacher_qualification` is a **warning** the interface shows. ADR 0028 argues it; the short
+version is that a database that refuses will be answered by entering a qualification
+somebody does not have, which destroys the record rather than protecting it. Withdrawing a
+membership is refused while any of that school's class sections remain assigned, which is
+the opposite of what `V13` and `V14` chose for the other two narrowings and is argued in
+ADR 0028 §5.
+
+**Not in `V15`**, and not implied by it: elective lines, course requests, per-occurrence
+rooms, resources or teachers, activity relationships, and any notion of a timetable. See
+ADR 0029 §5.
+
 ### The rest of the group, as documented and not yet built
 
 ```sql
-
--- What is taught: "Year 9 Mathematics".
-course (id, school_id, subject_id -> subject, name, code, year_level_id NULL,
-        term_id NULL,                           -- NULL = runs all year
-        periods_per_cycle INTEGER,
-        default_duration_periods INTEGER DEFAULT 1,
-        required_room_type_id NULL, credits REAL NULL)
-
--- A deliverable instance: "9MAT-A", one teacher set, one audience.
-class_section (id, course_id -> course, name, code, term_id NULL, campus_id NULL,
-               max_size INTEGER NULL, student_group_id -> student_group NULL)
-class_teacher (class_section_id, teacher_id,
-               role TEXT CHECK (role IN ('PRIMARY','CO','ASSISTANT')),
-               PRIMARY KEY(class_section_id, teacher_id, role))
-class_group (class_section_id, student_group_id,
-             PRIMARY KEY(class_section_id, student_group_id))
-enrolment (id, class_section_id, student_id, status,
-           UNIQUE(class_section_id, student_id))
-
 -- Individual demand, for request-driven (elective-line) scheduling later.
 course_request (id, student_id, course_id, term_id NULL,
                 kind TEXT CHECK (kind IN ('REQUIRED','ELECTIVE','ALTERNATE')),
@@ -751,48 +829,65 @@ course_request (id, student_id, course_id, term_id NULL,
 ```
 
 Both scheduling traditions are representable: group-based (fill `student_group` and
-`class_group`) and request-based (fill `course_request` and let a sectioning phase derive
-`enrolment`). Milestone 1 solves group-based only — see
+`class_group`, which `V15` does) and request-based (fill `course_request` and let a
+sectioning phase derive `class_enrolment`). Milestone 1 solves group-based only — see
 [OPEN-DECISIONS.md](OPEN-DECISIONS.md) D5.
 
 ---
 
 ## 6. Activities — the thing that gets scheduled
 
-An **activity** is one placeable unit of work. Lessons are the common case; assemblies,
-meetings, homeroom, sport and yard duties are the same shape, which is why they are not
-special-cased.
+An **activity** is one placeable unit of work, and since `V15` it is **one occurrence of one
+class section**. A class meeting four times a cycle for one period holds four rows; a class
+meeting once for a double holds one row of `duration_periods = 2`.
+
+Lessons are the only case `V15` models. Assemblies, meetings, homeroom, sport and yard duties
+are the same *shape*, which is why they are not special-cased — but they have no class
+section, so they need the `school_id` and `kind` columns `V15` deliberately omits, and they
+arrive with the stage that has a screen for them.
 
 ```sql
-activity (id, school_id, class_section_id -> class_section NULL,
-          kind TEXT CHECK (kind IN ('LESSON','ASSEMBLY','MEETING','HOMEROOM',
-                                    'SPORT','YARD_DUTY','EXAM','OTHER')),
-          name, duration_periods INTEGER DEFAULT 1,
-          required_capacity INTEGER NULL, required_room_type_id NULL,
-          preferred_room_id NULL, needs_room BOOLEAN DEFAULT 1,
-          term_id NULL, campus_id NULL,
-          split_index INTEGER,                  -- 1..n of a course's periods_per_cycle
-          is_locked BOOLEAN DEFAULT 0,
-          created_at, updated_at, rev)
-
-activity_teacher (activity_id, teacher_id, role,
-                  PRIMARY KEY(activity_id, teacher_id, role))
-activity_group (activity_id, student_group_id,
-                PRIMARY KEY(activity_id, student_group_id))
-activity_room_candidate (activity_id, room_id, PRIMARY KEY(activity_id, room_id))
-activity_resource (activity_id, resource_id, quantity,
-                   PRIMARY KEY(activity_id, resource_id))
+activity (id, class_section_id -> class_section, name NULL,
+          duration_periods INTEGER NOT NULL DEFAULT 1,
+          split_index INTEGER NOT NULL,
+          created_at, updated_at, rev,
+          UNIQUE (class_section_id, split_index))
 ```
 
-Teachers and groups are **many-to-many from day one** — co-teaching and combined-cohort
-lessons are normal, and retro-fitting them is expensive. The Java prototype's single
-`teacherId` is exactly the shortcut to avoid.
+Teachers and groups are attached to the **class section**, many-to-many from day one —
+co-teaching and combined-cohort lessons are normal, and retro-fitting them is expensive. The
+Java prototype's single `teacherId` is exactly the shortcut to avoid. The sketch's
+`activity_teacher` and `activity_group` are a per-occurrence *override* of that and are not
+built: two places to say who teaches a lesson is two places for them to disagree.
+
+```sql
+-- Not in V15. Per-occurrence overrides and room allocation; see ADR 0029 §5.
+activity_teacher (activity_id, teacher_id, role)
+activity_group (activity_id, student_group_id)
+activity_room_candidate (activity_id, room_id)
+activity_resource (activity_id, resource_id, quantity)
+```
 
 ### Duration
 
 A double period is **one activity with `duration_periods = 2`** occupying consecutive
 periods, not two linked activities. Simpler constraints, simpler UI, and it makes
 "this must not be split" structural rather than a rule that can be switched off.
+
+### What can be said about a demand before there is a solver
+
+`evara_core::lessons` answers two questions and refuses a third.
+`LessonDemand::of` sums a section's occurrences; `CycleCapacity::from_schedules` measures
+what the school's cycle and bell schedules offer, including the **longest unbroken run** of
+teaching periods — which is the figure a multi-period occurrence actually needs and is not
+the same as the periods in a day.
+
+`DemandFinding` then reports only **impossibility**: an occurrence longer than any run, or a
+total beyond every slot in the cycle. "Twenty-nine periods in a thirty-period cycle" is
+probably infeasible and is deliberately **not** reported, because only a solver can tell
+difficulty from impossibility. Feasibility is never reported at all, and the screen says so
+in those words. Before the school has a cycle and a bell schedule, nothing is judged — the
+setup order puts Lessons at section 10 and the time model at 14–17. ADR 0029 §6.
 
 ### Lines / blocks and relationships
 
@@ -949,6 +1044,14 @@ separable, which is what substitution reporting and yard-duty rosters need.
 CREATE INDEX idx_entry_timetable_slot ON timetable_entry(timetable_id, timeslot_id);
 CREATE INDEX idx_entry_timetable_act  ON timetable_entry(timetable_id, activity_id);
 CREATE INDEX idx_entry_room           ON timetable_entry(timetable_id, room_id, timeslot_id);
+-- V15's, for the RESTRICT scans and for the "what does this teacher teach?" and
+-- "which classes is this group in?" reads the People screens ask per row.
+CREATE INDEX idx_class_teacher_teacher ON class_teacher(teacher_id);
+CREATE INDEX idx_class_group_group     ON class_group(student_group_id);
+CREATE INDEX idx_class_enrolment_student ON class_enrolment(student_id);
+CREATE INDEX idx_course_subject        ON course(subject_id);
+CREATE INDEX idx_class_section_course  ON class_section(course_id);
+-- Later, with the per-occurrence overrides themselves.
 CREATE INDEX idx_act_teacher_teacher  ON activity_teacher(teacher_id);
 CREATE INDEX idx_act_group_group      ON activity_group(student_group_id);
 CREATE INDEX idx_avail_entity         ON availability(entity_kind, entity_id);

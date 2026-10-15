@@ -173,7 +173,7 @@ beforeEach(() => {
     ),
   );
   deleteSubject.mockResolvedValue(undefined);
-  subjectDependents.mockResolvedValue({ total: 0, qualifiedTeachers: 0 });
+  subjectDependents.mockResolvedValue({ total: 0, qualifiedTeachers: 0, courses: 0 });
   listSubjectTeachers.mockResolvedValue([]);
 });
 
@@ -453,8 +453,8 @@ describe("the Subjects screen", () => {
     subjectDependents.mockImplementation((id) =>
       Promise.resolve(
         id === "s-n-maths"
-          ? { total: 4, qualifiedTeachers: 4 }
-          : { total: 0, qualifiedTeachers: 0 },
+          ? { total: 4, qualifiedTeachers: 4, courses: 0 }
+          : { total: 0, qualifiedTeachers: 0, courses: 0 },
       ),
     );
     render(<Subjects school={NORTH} />);

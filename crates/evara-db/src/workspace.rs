@@ -25,6 +25,7 @@ use crate::cloud_sync::{self, SyncedFolder};
 use crate::error::{DbError, Result};
 use crate::repo::availability::Availability;
 use crate::repo::curriculum::Curriculum;
+use crate::repo::lessons::Lessons;
 use crate::repo::membership::Membership;
 use crate::repo::people::People;
 use crate::repo::structure::Structure;
@@ -286,6 +287,18 @@ impl Workspace {
             .as_mut()
             .ok_or(DbError::NoProjectOpen)?
             .curriculum())
+    }
+
+    /// The lessons repository for the open project.
+    ///
+    /// Courses, class sections, who teaches and attends them, the optional individual
+    /// roster, and the occurrences they demand — the `V15` chain that hangs off a subject.
+    ///
+    /// # Errors
+    ///
+    /// [`DbError::NoProjectOpen`] if nothing is open.
+    pub fn lessons(&mut self) -> Result<Lessons<'_>> {
+        Ok(self.open.as_mut().ok_or(DbError::NoProjectOpen)?.lessons())
     }
 
     /// The availability repository for the open project.

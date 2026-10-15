@@ -22,6 +22,9 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AcademicYear,
   AcademicYearInput,
+  Activity,
+  AssignedTeacher,
+  AttendingGroup,
   AvailabilityEntity,
   AvailabilityRule,
   AvailabilityRuleInput,
@@ -32,6 +35,17 @@ import type {
   CalendarDayInput,
   Campus,
   CampusInput,
+  ClassEnrolment,
+  ClassGroup,
+  ClassSection,
+  ClassSectionDependents,
+  ClassSectionInput,
+  ClassSectionView,
+  ClassTeacher,
+  Course,
+  CourseDependents,
+  CourseInput,
+  CourseView,
   Cycle,
   CycleCoverage,
   CycleDay,
@@ -60,10 +74,12 @@ import type {
   RoomType,
   RoomTypeInput,
   RoomWithCampuses,
+  RosteredStudent,
   School,
   SchoolDependents,
   SchoolInput,
   SchoolLogoView,
+  SectionDemand,
   SetupError,
   Student,
   StudentEnrolment,
@@ -77,8 +93,10 @@ import type {
   Subject,
   SubjectDependents,
   SubjectInput,
+  TaughtSection,
   Teacher,
   TeacherCampus,
+  TeacherCandidate,
   TeacherDepartment,
   TeacherDepartmentView,
   TeacherInSchool,
@@ -1638,4 +1656,385 @@ export function removeTeacherDepartment(
     departmentId,
     expectedRev,
   });
+}
+
+// ============================================================================= lessons
+//
+// Courses, class sections, who teaches and attends them, the optional individual roster,
+// and the occurrences they demand.
+//
+// Every one of these takes `schoolId` explicitly, including the updates. That is the
+// visible consequence of the chain in ADR 0029: a `CourseInput` carries no `schoolId`
+// because `subject.schoolId` is the only truthful place for one, so the acting school has
+// to be passed rather than lifted off the input the way `updateSubject` lifts it.
+
+// ------------------------------------------------------------------------------ course
+
+/** Creates a course as an offering of one of this school's subjects. */
+export function createCourse(schoolId: string, input: CourseInput): Promise<Course> {
+  return invoke<Course>("setup_course_create", { schoolId, input });
+}
+
+/** One course by identifier, or `null`. */
+export function getCourse(id: string): Promise<Course | null> {
+  return invoke<Course | null>("setup_course_get", { id });
+}
+
+/**
+ * Every course of one school, by subject then name, with the names a listing needs.
+ *
+ * Two schools' Mathematics are two subjects, so their offerings are different courses with
+ * different identifiers. This is a call that must be re-made when the selected school
+ * changes; nothing here merges them.
+ */
+export function listCourses(schoolId: string): Promise<CourseView[]> {
+  return invoke<CourseView[]>("setup_course_list", { schoolId });
+}
+
+/** Replaces a course's details. Its subject never changes, and neither does its id. */
+export function updateCourse(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+  input: CourseInput,
+): Promise<Course> {
+  return invoke<Course>("setup_course_update", { schoolId, id, input, expectedRev });
+}
+
+/** What a course still holds, so a confirmation can explain before it asks. */
+export function courseDependents(id: string): Promise<CourseDependents> {
+  return invoke<CourseDependents>("setup_course_dependents", { id });
+}
+
+/** Deletes a course that has no class sections. Refused while any remain. */
+export function deleteCourse(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_course_delete", { schoolId, id, expectedRev });
+}
+
+// ----------------------------------------------------------------------- class section
+
+/** Creates a class section of one of this school's courses. */
+export function createClassSection(
+  schoolId: string,
+  input: ClassSectionInput,
+): Promise<ClassSection> {
+  return invoke<ClassSection>("setup_class_section_create", { schoolId, input });
+}
+
+/** One class section by identifier, or `null`. */
+export function getClassSection(id: string): Promise<ClassSection | null> {
+  return invoke<ClassSection | null>("setup_class_section_get", { id });
+}
+
+/** Every class section of one course, with its staffing, audience and demand. */
+export function listClassSections(
+  schoolId: string,
+  courseId: string,
+): Promise<ClassSectionView[]> {
+  return invoke<ClassSectionView[]>("setup_class_section_list", { schoolId, courseId });
+}
+
+/**
+ * Replaces a class section's details.
+ *
+ * Refused if moving it to a campus would strand a teacher who is not eligible there.
+ */
+export function updateClassSection(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+  input: ClassSectionInput,
+): Promise<ClassSection> {
+  return invoke<ClassSection>("setup_class_section_update", {
+    schoolId,
+    id,
+    input,
+    expectedRev,
+  });
+}
+
+/**
+ * What a class section holds, so a confirmation can say what deleting it takes with it.
+ *
+ * These counts do **not** block the delete — the section owns every one of them and clears
+ * them itself. They exist so the user is told what is about to go.
+ */
+export function classSectionDependents(id: string): Promise<ClassSectionDependents> {
+  return invoke<ClassSectionDependents>("setup_class_section_dependents", { id });
+}
+
+/** Deletes a class section, taking its staffing, audience, roster and occurrences. */
+export function deleteClassSection(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_class_section_delete", { schoolId, id, expectedRev });
+}
+
+// --------------------------------------------------------------------- teacher staffing
+
+/** Every teacher assigned to one class section, with their membership and qualification. */
+export function listClassTeachers(
+  schoolId: string,
+  classSectionId: string,
+): Promise<AssignedTeacher[]> {
+  return invoke<AssignedTeacher[]>("setup_class_teacher_list", {
+    schoolId,
+    classSectionId,
+  });
+}
+
+/**
+ * Every teacher this school could give the section, and why each one may or may not.
+ *
+ * The whole of ADR 0028's policy, computed in the backend. Includes the members that
+ * would be refused, so the picker can say why somebody expected is unavailable rather
+ * than leaving them mysteriously absent.
+ */
+export function listTeacherCandidates(
+  schoolId: string,
+  classSectionId: string,
+): Promise<TeacherCandidate[]> {
+  return invoke<TeacherCandidate[]>("setup_class_teacher_candidates", {
+    schoolId,
+    classSectionId,
+  });
+}
+
+/**
+ * Gives a class section to a teacher.
+ *
+ * Requires an active membership and campus eligibility; does **not** require a
+ * qualification for the subject, though the absence of one is reported. ADR 0028.
+ */
+export function addClassTeacher(
+  schoolId: string,
+  classSectionId: string,
+  teacherId: string,
+): Promise<ClassTeacher> {
+  return invoke<ClassTeacher>("setup_class_teacher_add", {
+    schoolId,
+    classSectionId,
+    teacherId,
+  });
+}
+
+/** Takes a teacher off a class section. Their qualifications and membership stay. */
+export function removeClassTeacher(
+  schoolId: string,
+  classSectionId: string,
+  teacherId: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_class_teacher_remove", {
+    schoolId,
+    classSectionId,
+    teacherId,
+    expectedRev,
+  });
+}
+
+/** Every class section one teacher teaches, across every school. */
+export function listTeacherSections(teacherId: string): Promise<TaughtSection[]> {
+  return invoke<TaughtSection[]>("setup_teacher_sections", { teacherId });
+}
+
+// ------------------------------------------------------------------ attending groups
+
+/** Every student group attending one class section, with the population it contributes. */
+export function listClassGroups(
+  schoolId: string,
+  classSectionId: string,
+): Promise<AttendingGroup[]> {
+  return invoke<AttendingGroup[]>("setup_class_group_list", { schoolId, classSectionId });
+}
+
+/** Adds one of this school's student groups to a class section. */
+export function addClassGroup(
+  schoolId: string,
+  classSectionId: string,
+  studentGroupId: string,
+): Promise<ClassGroup> {
+  return invoke<ClassGroup>("setup_class_group_add", {
+    schoolId,
+    classSectionId,
+    studentGroupId,
+  });
+}
+
+/** Takes a student group off a class section. The group and its members are untouched. */
+export function removeClassGroup(
+  schoolId: string,
+  classSectionId: string,
+  studentGroupId: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_class_group_remove", {
+    schoolId,
+    classSectionId,
+    studentGroupId,
+    expectedRev,
+  });
+}
+
+// -------------------------------------------------------------- individual roster
+
+/**
+ * Every individual on one class section's roster.
+ *
+ * `coveredByGroup` answers "is this child being counted twice?" visibly. They are not: the
+ * group side is the scheduling population, and nothing adds the two figures. ADR 0029 §4.
+ */
+export function listClassEnrolments(
+  schoolId: string,
+  classSectionId: string,
+): Promise<RosteredStudent[]> {
+  return invoke<RosteredStudent[]>("setup_class_enrolment_list", {
+    schoolId,
+    classSectionId,
+  });
+}
+
+/**
+ * Puts one named student on a class section's roster.
+ *
+ * Optional throughout. Refused for a student with no current spell at this school —
+ * including one whose identity exists only because another school enrolled them.
+ */
+export function addClassEnrolment(
+  schoolId: string,
+  classSectionId: string,
+  studentId: string,
+): Promise<ClassEnrolment> {
+  return invoke<ClassEnrolment>("setup_class_enrolment_add", {
+    schoolId,
+    classSectionId,
+    studentId,
+  });
+}
+
+/** Takes one individual off a class section's roster. Their enrolment is untouched. */
+export function removeClassEnrolment(
+  schoolId: string,
+  classSectionId: string,
+  studentId: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_class_enrolment_remove", {
+    schoolId,
+    classSectionId,
+    studentId,
+    expectedRev,
+  });
+}
+
+// -------------------------------------------------------------------------- activities
+
+/** Every occurrence of one class section, in its stable order. */
+export function listActivities(
+  schoolId: string,
+  classSectionId: string,
+): Promise<Activity[]> {
+  return invoke<Activity[]>("setup_activity_list", { schoolId, classSectionId });
+}
+
+/**
+ * What a class section asks of a cycle, and anything about it that cannot work.
+ *
+ * `findings` reports only impossibility. An **empty list does not mean the section can be
+ * timetabled** — only a solver can say that, and there is not one yet.
+ */
+export function sectionDemand(
+  schoolId: string,
+  classSectionId: string,
+): Promise<SectionDemand> {
+  return invoke<SectionDemand>("setup_section_demand", { schoolId, classSectionId });
+}
+
+/**
+ * Adds `count` identical occurrences to a class section.
+ *
+ * This is how "four times per cycle" is entered: four rows, each one placeable unit with
+ * its own identifier and its own revision. A creation, so no `expectedRev`.
+ */
+export function addActivities(
+  schoolId: string,
+  classSectionId: string,
+  name: string | null,
+  durationPeriods: number,
+  count: number,
+): Promise<Activity[]> {
+  return invoke<Activity[]>("setup_activity_add", {
+    schoolId,
+    classSectionId,
+    name,
+    durationPeriods,
+    count,
+  });
+}
+
+/**
+ * Fills an empty class section with the occurrences its course declares.
+ *
+ * Refuses a section that already has occurrences, and invents no number for a course that
+ * declares none.
+ */
+export function generateActivities(
+  schoolId: string,
+  classSectionId: string,
+): Promise<Activity[]> {
+  return invoke<Activity[]>("setup_activity_generate", { schoolId, classSectionId });
+}
+
+/** Replaces one occurrence's name and duration. */
+export function updateActivity(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+  name: string | null,
+  durationPeriods: number,
+): Promise<Activity> {
+  return invoke<Activity>("setup_activity_update", {
+    schoolId,
+    id,
+    name,
+    durationPeriods,
+    expectedRev,
+  });
+}
+
+/**
+ * Deletes one occurrence.
+ *
+ * The others keep their positions, so deleting the second of four leaves 1, 3, 4. The
+ * screen numbers the rows it shows.
+ */
+export function deleteActivity(
+  schoolId: string,
+  id: string,
+  expectedRev: number,
+): Promise<void> {
+  return invoke<void>("setup_activity_delete", { schoolId, id, expectedRev });
+}
+
+// ------------------------------------------------- what a lesson row blocks elsewhere
+
+/**
+ * How many class sections one student is on the roster of, across every school.
+ *
+ * Read by the Students screen so a blocked delete explains before the button rather than
+ * failing after it.
+ */
+export function studentClassCount(studentId: string): Promise<number> {
+  return invoke<number>("setup_student_class_count", { studentId });
+}
+
+/** How many class sections one student group attends. Same purpose, same screen pattern. */
+export function groupClassCount(studentGroupId: string): Promise<number> {
+  return invoke<number>("setup_group_class_count", { studentGroupId });
 }

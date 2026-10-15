@@ -175,6 +175,13 @@ pub struct SubjectDependents {
     pub total: i64,
     /// Teachers qualified to teach it.
     pub qualified_teachers: i64,
+    /// Courses that are offerings of it.
+    ///
+    /// Added in Stage C. `ROADMAP.md` said in advance that this is where the new count
+    /// goes — *"`course.subject_id` is `RESTRICT`, like every ownership edge, and
+    /// `Curriculum::subject_dependents` is the place to add the new count so a refused
+    /// subject delete goes on explaining itself."*
+    pub courses: i64,
 }
 
 /// One of a teacher's qualifications, with the subject it names.
@@ -221,7 +228,7 @@ const DEPARTMENT_COLUMNS: &str =
     "id, school_id, name, code, description, created_at, updated_at, rev";
 const DEPARTMENT_ASSIGNMENTS: &str = "name = ?, code = ?, description = ?";
 
-const SUBJECT_COLUMNS: &str =
+pub(crate) const SUBJECT_COLUMNS: &str =
     "id, school_id, department_id, name, code, description, created_at, updated_at, rev";
 const SUBJECT_ASSIGNMENTS: &str = "department_id = ?, name = ?, code = ?, description = ?";
 
@@ -533,9 +540,11 @@ impl Curriculum<'_> {
                 [text(id)],
                 |row| row.get(0),
             )?;
+            let courses = super::lessons::courses_of_subject(conn, id)?;
             Ok(SubjectDependents {
-                total: qualified,
+                total: qualified + courses,
                 qualified_teachers: qualified,
+                courses,
             })
         })
     }
@@ -605,7 +614,13 @@ impl Curriculum<'_> {
                 [text(id)],
                 |row| row.get(0),
             )?;
-            if qualified > 0 {
+            // Stage C's addition, and the one `ROADMAP.md` named in advance. A course is an
+            // offering *of* this subject, so deleting the subject underneath it would leave
+            // a course teaching nothing — and with it the sections, staffing and roster
+            // built on that course. `course.subject_id` is `RESTRICT` for the reason every
+            // ownership edge is.
+            let courses = super::lessons::courses_of_subject(tx, id)?;
+            if qualified + courses > 0 {
                 return Err(DbError::StillReferenced { entity: "subject" });
             }
             delete(tx, "subject", "subject", id, expected)

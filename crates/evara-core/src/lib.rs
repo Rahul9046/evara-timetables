@@ -45,6 +45,13 @@
 //! this school teach on?" without storing the answer anywhere. See
 //! [ADR 0017](../../../docs/adr/0017-weekly-and-custom-cycles.md).
 
+//! [`lessons::LessonDemand`] is Stage C's addition, and the same kind of thing: how much of
+//! a cycle one class section asks for, and whether the school's time model could hold one
+//! occurrence of it at all. It is arithmetic over counts, so it belongs here rather than in
+//! SQL or in a React component — and deliberately not in `evara-constraints`, which is
+//! Phase 4's registry of timetable-scored evaluators. See that module's header.
+
 pub mod branding;
 pub mod calendar;
+pub mod lessons;
 pub mod time;
