@@ -155,6 +155,7 @@ in the UI: it looks like the thing and is not.
 | [IMPORT.md](IMPORT.md) | Spreadsheet roster imports: formats, mapping, matching |
 | [ROADMAP.md](ROADMAP.md) | Milestone 1 broken into implementation phases |
 | [OPEN-DECISIONS.md](OPEN-DECISIONS.md) | Risks and decisions still to be made |
+| [SCHEDULING-READINESS-AUDIT.md](SCHEDULING-READINESS-AUDIT.md) | What is built towards timetable generation, what is not, and the milestone sequence to get there |
 | [adr/](adr/) | Accepted architecture decision records |
 
 ---
