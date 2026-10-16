@@ -51,7 +51,15 @@
 //! SQL or in a React component — and deliberately not in `evara-constraints`, which is
 //! Phase 4's registry of timetable-scored evaluators. See that module's header.
 
+//! [`import`] is Stage D's, and is here for a different reason: four crates have to agree
+//! on what a source table and an import plan *are*. The parser in `evara-import` produces
+//! one, `evara-db` turns it into a plan, the command layer carries both, and the interface
+//! renders it — so the vocabulary sits under all of them. The per-cell rules come with it,
+//! because "is this a code or a number the spreadsheet mangled?" is a question about a cell
+//! and not about a school.
+
 pub mod branding;
 pub mod calendar;
+pub mod import;
 pub mod lessons;
 pub mod time;

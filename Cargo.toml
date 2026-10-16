@@ -8,6 +8,7 @@ members = [
     "crates/evara-project",
     "crates/evara-report",
     "crates/evara-integrations",
+    "crates/evara-import",
     "crates/evara-cli",
     "apps/desktop/src-tauri",
 ]
@@ -36,6 +37,7 @@ evara-solver = { path = "crates/evara-solver" }
 evara-project = { path = "crates/evara-project" }
 evara-report = { path = "crates/evara-report" }
 evara-integrations = { path = "crates/evara-integrations" }
+evara-import = { path = "crates/evara-import" }
 
 # Third party — all MIT / Apache-2.0 / BSD / ISC (see deny.toml)
 serde = { version = "1", features = ["derive"] }
@@ -56,6 +58,34 @@ refinery = { version = "0.10", features = ["rusqlite-bundled"] }
 tempfile = "3"
 # Platform application-data directories for the settings database.
 directories = "6"
+
+# Spreadsheet import — Stage D. All three are pure Rust with no network code, which is
+# what `CLAUDE.md` rule 1 requires of anything that ships: an import reads a file the user
+# already has, and reaches nothing.
+#
+# `calamine` reads .xlsx/.xlsb/.ods and legacy .xls. It is a *reader* with no formula
+# engine at all, which is the property ADR 0030 §4 depends on rather than a limitation --
+# a workbook cannot make Evara evaluate anything. MIT.
+#
+# The `dates` feature is enabled, which brings `chrono` in behind the parser. A deliberate
+# trade, and the alternative was looked at first: without it `calamine` hands over a raw
+# Excel serial number, and turning one into a date means implementing the 1900 leap-year
+# bug *and* detecting the 1904 epoch. `calamine`'s own `as_datetime` does both
+# (`datatype.rs`: "we need to handle both a 1900 and 1904 epoch and we need to account for
+# the Excel date bug where it treats 1900 as a leap year"), and getting it wrong shifts a
+# leaver's date by four years and a day, silently — precisely the failure this import
+# exists to refuse. One well-licensed dependency is a better price than that risk, and
+# `chrono` never leaves `evara-import`: a date is rendered to `YYYY-MM-DD` at the parser's
+# edge and travels as text, so it is not named in any signature. MIT OR Apache-2.0.
+calamine = { version = "0.36", features = ["dates"] }
+# CSV, with the quoting and embedded-newline handling that hand-rolled splitting gets
+# wrong. Unlicense OR MIT.
+csv = "1"
+# Writing the downloadable templates. A template has to format its code columns as *text*
+# or Excel helpfully turns `00124` into `124` the moment the school saves it -- the exact
+# fidelity failure the import then has to cope with, created by our own template. MIT OR
+# Apache-2.0.
+rust_xlsxwriter = { version = "0.99", default-features = false }
 # Base64, for the one place binary data crosses the IPC boundary: a school logo. JSON has
 # no byte-array type, and serde would otherwise write a 2 MiB image as ~12 MB of decimal
 # numbers. Already in the tree as a transitive dependency of tauri, so this adds no new

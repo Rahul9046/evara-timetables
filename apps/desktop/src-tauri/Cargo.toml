@@ -62,6 +62,7 @@ ts-rs = { workspace = true, optional = true }
 # Command handlers delegate into these. Phase 0 wires the dependency graph only;
 # no command does real work yet.
 evara-core = { workspace = true }
+evara-import = { workspace = true }
 evara-constraints = { workspace = true }
 evara-solver = { workspace = true }
 evara-db = { workspace = true }

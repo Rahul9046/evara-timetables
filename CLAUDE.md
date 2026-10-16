@@ -38,6 +38,7 @@ apps/desktop/src        React — view layer, no rules, no SQL
 apps/desktop/src-tauri  command handlers — orchestration only
 crates/evara-project    .evara import/export        -> core, db
 crates/evara-report     projections and renderers   -> core
+crates/evara-import     spreadsheet parsing, templates -> core ONLY
 crates/evara-integrations external adapters         -> core ONLY
 crates/evara-db         the only crate with SQL     -> core
 crates/evara-solver     generation                  -> core, constraints
@@ -165,7 +166,29 @@ disagree about whether a placement is legal, the product is broken.
   settings database and reaches the change log through the per-connection
   `evara_site_id()` function. Never store the active installation in a project.
 - **`.evaraproj` is the live project; `.evara` is the portable export.** Never use one
-  where the other belongs, and never introduce a third extension.
+  where the other belongs, and never introduce a third extension. A spreadsheet is neither:
+  `.xlsx` and `.csv` are read by `evara-import` and are never written as a project.
+- **An import is a reviewed plan, and a preview writes nothing.** `Import::plan` runs under
+  `db.read`; `Import::apply` runs under `db.write`, **rebuilds the plan inside the
+  transaction** and refuses `DbError::ReviewRequired` if the fingerprint has moved. Never
+  compare a fingerprint in the interface — that is check-then-act. Never import row by row
+  or transaction by row: a failure on the last row must leave none of the others, which is
+  the whole reason the engine is in `evara-db` rather than composed from public repository
+  methods. [adr/0030](docs/adr/0030-an-import-is-a-reviewed-plan.md).
+- **An import never invents a record and never merges an identity.** A row naming something
+  the school does not hold is an error on that row — never a placeholder entity. A code
+  matches within its school; a name is evidence and produces a `Conflict` the user answers.
+  An existing record that disagrees with the file is never overwritten without an answer,
+  and an import never deletes an activity. [adr/0031](docs/adr/0031-import-identity-matching.md).
+- **A spreadsheet identifier is text, and a formula is never evaluated.** `SourceCell::code`
+  refuses a numeric cell: `00124` arriving as `124` has already lost what made it an
+  identifier, so it is reported with the remedy rather than guessed at. Dates are
+  `YYYY-MM-DD` only — an ambiguous one is an error, never an interpretation. A formula cell
+  with no stored result is `Unsupported`; macro workbooks are refused at the extension.
+- **An unmapped column is silence; a mapped blank column is an answer.** Unmapped means the
+  import has no opinion and the stored value survives; mapped-and-blank means there is no
+  value and the field is cleared. Collapsing the two makes "importing twice is safe"
+  untrue.
 - **A persisted identifier that will not parse is corruption, not input.** Never
   substitute a default, never panic — return `DbError::CorruptIdentifier`. A nil-UUID
   fallback makes every damaged row compare equal to every other, which is worse than the

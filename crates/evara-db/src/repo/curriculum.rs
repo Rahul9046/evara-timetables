@@ -250,22 +250,7 @@ impl Curriculum<'_> {
     pub fn create_department(&mut self, input: &DepartmentInput) -> Result<Department> {
         let stamp = Stamp::new();
         self.db.write(|tx| {
-            tx.execute(
-                "INSERT INTO department (id, school_id, name, code, description,
-                     created_at, updated_at, rev)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                rusqlite::params![
-                    text(stamp.id),
-                    text(input.school_id),
-                    &input.name,
-                    &input.code,
-                    &input.description,
-                    &stamp.created_at,
-                    &stamp.updated_at,
-                    stamp.rev,
-                ],
-            )
-            .map_err(|error| translate(error, "department"))?;
+            insert_department(tx, &stamp, input)?;
             Ok(())
         })?;
         self.department(stamp.id)?.ok_or(DbError::NotFound {
@@ -320,15 +305,8 @@ impl Curriculum<'_> {
     ) -> Result<Department> {
         self.db.write(|tx| {
             require_same_school(tx, "department", "department", id, input.school_id)?;
-            update(
-                tx,
-                "department",
-                "department",
-                id,
-                expected,
-                DEPARTMENT_ASSIGNMENTS,
-                rusqlite::params![&input.name, &input.code, &input.description],
-            )
+            update_department_row(tx, id, expected, input)?;
+            Ok(())
         })?;
         self.department(id)?.ok_or(DbError::NotFound {
             entity: "department",
@@ -399,6 +377,59 @@ impl Curriculum<'_> {
     }
 }
 
+/// Writes one department row.
+///
+/// Extracted from [`Curriculum::create_department`] so an import can write several kinds of record
+/// inside one transaction — see `super::import`. The public method and the importer go
+/// through this one statement, so a new column cannot reach one path and miss the other.
+pub(crate) fn insert_department(
+    tx: &Transaction<'_>,
+    stamp: &Stamp,
+    input: &DepartmentInput,
+) -> Result<()> {
+    tx.execute(
+        "INSERT INTO department (id, school_id, name, code, description,
+             created_at, updated_at, rev)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        rusqlite::params![
+            text(stamp.id),
+            text(input.school_id),
+            &input.name,
+            &input.code,
+            &input.description,
+            &stamp.created_at,
+            &stamp.updated_at,
+            stamp.rev,
+        ],
+    )
+    .map_err(|error| translate(error, "department"))?;
+    Ok(())
+}
+
+/// Writes one department's domain columns, at the revision the caller expects.
+///
+/// Extracted from [`Curriculum::update_department`] so an import can compose several writes inside one
+/// transaction — see `super::import`. Both paths go through this one statement, so a new
+/// column cannot reach one and miss the other. The school check and anything the public
+/// method does *around* the write stay there, because the importer has already done its own.
+pub(crate) fn update_department_row(
+    tx: &Transaction<'_>,
+    id: Uuid,
+    expected: Expected,
+    input: &DepartmentInput,
+) -> Result<()> {
+    update(
+        tx,
+        "department",
+        "department",
+        id,
+        expected,
+        DEPARTMENT_ASSIGNMENTS,
+        rusqlite::params![&input.name, &input.code, &input.description],
+    )?;
+    Ok(())
+}
+
 /// Whether anything still refers to a department.
 ///
 /// Inside the transaction that is about to delete it, so the answer cannot go stale between
@@ -435,23 +466,7 @@ impl Curriculum<'_> {
         let stamp = Stamp::new();
         self.db.write(|tx| {
             require_department_in_school(tx, input.department_id, input.school_id)?;
-            tx.execute(
-                "INSERT INTO subject (id, school_id, department_id, name, code, description,
-                     created_at, updated_at, rev)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                rusqlite::params![
-                    text(stamp.id),
-                    text(input.school_id),
-                    opt_text(input.department_id),
-                    &input.name,
-                    &input.code,
-                    &input.description,
-                    &stamp.created_at,
-                    &stamp.updated_at,
-                    stamp.rev,
-                ],
-            )
-            .map_err(|error| translate(error, "subject"))?;
+            insert_subject(tx, &stamp, input)?;
             Ok(())
         })?;
         self.subject(stamp.id)?
@@ -509,20 +524,8 @@ impl Curriculum<'_> {
         self.db.write(|tx| {
             require_same_school(tx, "subject", "subject", id, input.school_id)?;
             require_department_in_school(tx, input.department_id, input.school_id)?;
-            update(
-                tx,
-                "subject",
-                "subject",
-                id,
-                expected,
-                SUBJECT_ASSIGNMENTS,
-                rusqlite::params![
-                    opt_text(input.department_id),
-                    &input.name,
-                    &input.code,
-                    &input.description,
-                ],
-            )
+            update_subject_row(tx, id, expected, input)?;
+            Ok(())
         })?;
         self.subject(id)?
             .ok_or(DbError::NotFound { entity: "subject" })
@@ -626,6 +629,65 @@ impl Curriculum<'_> {
             delete(tx, "subject", "subject", id, expected)
         })
     }
+}
+
+/// Writes one subject row.
+///
+/// Extracted from [`Curriculum::create_subject`] so an import can write several kinds of record
+/// inside one transaction — see `super::import`. The public method and the importer go
+/// through this one statement, so a new column cannot reach one path and miss the other.
+pub(crate) fn insert_subject(
+    tx: &Transaction<'_>,
+    stamp: &Stamp,
+    input: &SubjectInput,
+) -> Result<()> {
+    tx.execute(
+        "INSERT INTO subject (id, school_id, department_id, name, code, description,
+             created_at, updated_at, rev)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        rusqlite::params![
+            text(stamp.id),
+            text(input.school_id),
+            opt_text(input.department_id),
+            &input.name,
+            &input.code,
+            &input.description,
+            &stamp.created_at,
+            &stamp.updated_at,
+            stamp.rev,
+        ],
+    )
+    .map_err(|error| translate(error, "subject"))?;
+    Ok(())
+}
+
+/// Writes one subject's domain columns, at the revision the caller expects.
+///
+/// Extracted from [`Curriculum::update_subject`] so an import can compose several writes inside one
+/// transaction — see `super::import`. Both paths go through this one statement, so a new
+/// column cannot reach one and miss the other. The school check and anything the public
+/// method does *around* the write stay there, because the importer has already done its own.
+pub(crate) fn update_subject_row(
+    tx: &Transaction<'_>,
+    id: Uuid,
+    expected: Expected,
+    input: &SubjectInput,
+) -> Result<()> {
+    update(
+        tx,
+        "subject",
+        "subject",
+        id,
+        expected,
+        SUBJECT_ASSIGNMENTS,
+        rusqlite::params![
+            opt_text(input.department_id),
+            &input.name,
+            &input.code,
+            &input.description,
+        ],
+    )?;
+    Ok(())
 }
 
 /// Refuses a department that belongs to another school, or accepts `None`.

@@ -44,6 +44,7 @@ pub mod change_log;
 pub mod cloud_sync;
 mod connection;
 mod error;
+pub mod import;
 pub mod meta;
 mod migrations;
 pub mod repo;
@@ -59,6 +60,7 @@ pub use crate::change_log::{ChangeRecord, TrackedTable};
 pub use crate::cloud_sync::SyncedFolder;
 pub use crate::connection::{BUSY_TIMEOUT, PragmaReport};
 pub use crate::error::{DbError, InternalError, Result};
+pub use crate::import::{Import, report_csv};
 pub use crate::meta::ProjectIdentity;
 pub use crate::migrations::supported_schema_version;
 pub use crate::repo::availability::{
@@ -356,6 +358,18 @@ impl Database {
         Lessons::new(self)
     }
 
+    /// Previews and applies a spreadsheet import.
+    ///
+    /// Separate from every repository because an import is not an entity: it reads a file
+    /// the school already has, resolves every row against what the project holds, and
+    /// writes the whole approved result in **one** transaction. That last part is why the
+    /// engine lives in this crate at all — `Database::write` is `pub(crate)`, so an
+    /// atomic multi-entity write is only expressible from inside it. See
+    /// [adr/0030](../../docs/adr/0030-an-import-is-a-reviewed-plan.md).
+    pub fn import(&mut self) -> Import<'_> {
+        Import::new(self)
+    }
+
     /// Reads the connection settings back from SQLite, for diagnostics and tests.
     ///
     /// # Errors
@@ -482,3 +496,7 @@ mod tests_membership;
 /// Stage C: courses, class sections, who teaches and attends them, and what they demand.
 #[cfg(test)]
 mod tests_lessons;
+
+/// Stage D: a spreadsheet becomes a reviewed plan, and the plan is applied or it is not.
+#[cfg(test)]
+mod tests_import;

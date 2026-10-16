@@ -52,6 +52,7 @@ import { CampusesAndBuildings } from "./CampusesAndBuildings";
 import { CyclesAndCycleDays } from "./CyclesAndCycleDays";
 import { Departments } from "./Departments";
 import { GridPreviewSection } from "./GridPreviewSection";
+import { ImportData } from "./ImportData";
 import { Lessons } from "./Lessons";
 import { PeriodStructuresAndPeriods } from "./PeriodStructuresAndPeriods";
 import { ResourcesAndSharing } from "./ResourcesAndSharing";
@@ -115,7 +116,8 @@ interface Section {
 }
 
 /**
- * The seventeen sections, in the order a school is actually configured.
+ * The eighteen sections: seventeen in the order a school is actually configured, and the
+ * spreadsheet import after them.
  *
  * Exported so a test can assert the list rather than the rendering: the set of sections and
  * their order is a product decision, and a silently dropped or reordered one would
@@ -289,6 +291,17 @@ export const SECTIONS: readonly Section[] = [
     blurb: "Every slot a lesson could occupy",
     needsSchool: true,
     render: (school) => <GridPreviewSection school={school} />,
+  },
+  // Stage D, appended rather than inserted. An import is a way of filling the sections
+  // above rather than a step between any two of them, and a school reaches for it at
+  // whatever point it has a file -- so it has no place in the order, and giving it one
+  // would have moved every section after it for no gain.
+  {
+    id: "import",
+    label: "Import data",
+    blurb: "Bring a spreadsheet of records into this school",
+    needsSchool: true,
+    render: (school) => <ImportData school={school} />,
   },
 ];
 

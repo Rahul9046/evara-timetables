@@ -550,6 +550,16 @@ pub enum EnrolmentStatus {
 }
 
 impl EnrolmentStatus {
+    /// The value stored in `student_school_enrolment.status`, for a caller outside this
+    /// module that has to compare against the column.
+    ///
+    /// `super::import` reads the raw column to decide whether a spreadsheet's status agrees
+    /// with the spell Evara holds, and comparing two `&str` beats re-parsing the column into
+    /// an enum just to compare two enums.
+    pub(crate) const fn stored_value(self) -> &'static str {
+        self.as_str()
+    }
+
     /// The value stored in `student_school_enrolment.status`.
     const fn as_str(self) -> &'static str {
         match self {

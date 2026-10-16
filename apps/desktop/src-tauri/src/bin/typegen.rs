@@ -142,7 +142,9 @@ fn main() -> ExitCode {
 /// `evara-db` rather than against nothing.
 fn write_all() -> (Vec<Generated>, Vec<String>) {
     let (mut files, mut errors, mut required) = entities();
-    for (more_files, more_errors, more_required) in [lessons(), time_model_and_interface()] {
+    for (more_files, more_errors, more_required) in
+        [lessons(), time_model_and_interface(), spreadsheet_import()]
+    {
         files.extend(more_files);
         errors.extend(more_errors);
         required.extend(more_required);
@@ -203,6 +205,57 @@ fn lessons() -> (Vec<Generated>, Vec<String>, BTreeSet<(PathBuf, String)>) {
         DeclaredComparison,
         CycleCapacity,
         DemandFinding,
+    ]
+}
+
+/// Stage D: the vocabulary a spreadsheet import is reviewed and applied in.
+///
+/// Its own group rather than an addition to [`time_model_and_interface`] because the whole
+/// of it is one feature's contract, and because a reader looking for "what does the import
+/// screen receive" should find one list rather than a dozen entries interleaved with the
+/// grid's.
+///
+/// All but the four view types come from `evara_core::import`, which is where they have to
+/// live: `evara-import` parses into them and `evara-db` plans with them, and a vocabulary
+/// two crates share cannot sit in either. Note that `SourceCell` and `SourceRow` are
+/// listed and `SourceTable` is not — the table is held in the backend session and never
+/// crosses, but a cell is what a sample row is made of.
+fn spreadsheet_import() -> (Vec<Generated>, Vec<String>, BTreeSet<(PathBuf, String)>) {
+    use evara_core::import::{
+        Choice, ColumnMapping, FieldSpec, ImportFingerprint, ImportKind, ImportPlan, ImportSummary,
+        PlanCounts, PlannedRow, RowAction, RowDecision, RowFinding, Severity, SourceCell,
+        SourceRow,
+    };
+    use evara_desktop_lib::commands::import::{
+        ImportKindView, ImportSourceView, SampleRow, TemplateKindFormat,
+    };
+
+    contract![
+        // What is being imported, and the columns it has.
+        ImportKind,
+        FieldSpec,
+        ColumnMapping,
+        // What a file turned out to hold.
+        SourceCell,
+        SourceRow,
+        // The plan, which is the whole of what a user reviews.
+        ImportPlan,
+        PlannedRow,
+        PlanCounts,
+        RowAction,
+        RowFinding,
+        Severity,
+        ImportFingerprint,
+        // What the user decides about a row the planner would not decide alone.
+        RowDecision,
+        Choice,
+        // What happened, once it had.
+        ImportSummary,
+        // Interface contracts defined with the command handlers.
+        ImportKindView,
+        ImportSourceView,
+        SampleRow,
+        TemplateKindFormat,
     ]
 }
 
