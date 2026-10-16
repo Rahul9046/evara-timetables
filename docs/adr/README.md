@@ -37,6 +37,7 @@ tempted to undo it without knowing why.
 | [0029](0029-a-lesson-is-a-course-a-section-and-its-occurrences.md) | A lesson is a course, a class section, and one row per occurrence; no table in the chain holds a `school_id` | Accepted |
 | [0030](0030-an-import-is-a-reviewed-plan.md) | An import is a reviewed plan applied in one transaction; preview writes nothing and nothing is created to fill a gap | Accepted |
 | [0031](0031-import-identity-matching.md) | A code matches, a name asks; reuse across schools is offered and never assumed | Accepted |
+| [0032](0032-timetable-generation-is-scoped-to-one-school.md) | Generation is scoped to one school's grid; shared occupancy is compared in real time within a school and reported across schools | **Proposed** |
 
 Statuses: **Proposed** (awaiting a decision), **Accepted**, **Superseded by NNNN**,
 **Deprecated**. Accepted records are not edited to reflect a change of mind — a new

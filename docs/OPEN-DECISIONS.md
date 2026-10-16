@@ -567,6 +567,83 @@ nothing (ADR 0029 §3). And `class_enrolment` is a **roster overlay**, never add
 attending groups' size (ADR 0029 §4), which is what keeps ADR 0006's promise that a timetable
 can be built without a single student record.
 
+---
+
+### D34 — Which bell schedule does an activity schedule against?
+
+**Open. Must be settled before the `Problem` loader is written.** Raised by
+[SCHEDULING-READINESS-AUDIT.md](SCHEDULING-READINESS-AUDIT.md) §4.1.
+
+The grid is materialised per `(cycle, period_structure, term)` —
+`MaterialisationRequest` in `repo/time_model.rs` names all three — so a school running two
+campuses on two bell schedules holds **two disjoint sets of `timeslot` rows over the same
+cycle days**. That is the solver's value range, and something has to choose which half of it
+an activity may be placed in.
+
+Nothing stored answers it:
+
+- An `activity` reaches a campus only through `class_section.campus_id` (`V15`), which is
+  **nullable** and means *not campus-constrained* — the ordinary state of a section at a
+  single-campus school and a legitimate one elsewhere.
+- `period_structure.campus_id` (`V4`) is nullable too and means *school-wide*, so a school
+  may hold a school-wide schedule and a campus schedule at once, and `is_default` is per
+  campus bucket rather than per school.
+- `timeslot.campus_id` is derived from the period structure, so the two are consistent —
+  but an activity is not joined to either.
+
+This is not an edge case. It is the first question the loader asks, for every activity, in
+every school. Options, not yet weighed:
+
+| Option | Shape | Cost |
+| --- | --- | --- |
+| **A — resolve through the section's campus, default to the school-wide schedule** | `class_section.campus_id` picks the campus schedule; a section with no campus uses the school-wide default | Cheap, and silently wrong for a multi-campus school whose sections do not name a campus |
+| **B — a solve names its bell schedule(s) and refuses an ambiguous activity** | The pre-flight check reports every activity that could belong to two grids, with the remedy ("give this section a campus") | Honest, and makes the user finish a setup they may consider finished |
+| **C — the activity names its grid** | A column, or a per-solve mapping table | Most explicit, a migration, and a third place campus information lives |
+
+Nothing is implemented in any direction. A provisional answer in the loader would be a
+scheduling rule in the crate that owns SQL.
+
+---
+
+### D35 — What does `room-capacity` compare against?
+
+**Open. Must be settled before the constraint registry is written.** Raised by
+[SCHEDULING-READINESS-AUDIT.md](SCHEDULING-READINESS-AUDIT.md) §4.4.
+
+[CONSTRAINTS.md](CONSTRAINTS.md) defines `room-capacity` as *"Room capacity ≥ activity's
+required capacity"* and marks it `M1`. `room.capacity` exists and is `NOT NULL`. **The
+right-hand side does not exist**, and none of the three candidates supplies it:
+
+- `class_section.max_size` appears in DATA-MODEL.md §5's sketch and `V15` records that it
+  was deliberately **not built**.
+- `student_group.size` is nullable, so summing a section's `class_group` rows yields nothing
+  for precisely the schools [ADR 0006](adr/0006-group-based-scheduling-first.md) promises
+  will keep working.
+- `class_enrolment` is a roster overlay with no scheduling meaning in Milestone 1
+  ([ADR 0029](adr/0029-a-lesson-is-a-course-a-section-and-its-occurrences.md) §4), so
+  counting it would contradict D12 as well as ADR 0006.
+
+So the choice is: add one column (`class_section.max_size`, a nullable `ALTER TABLE`), derive
+a figure and accept that it is absent for size-less groups, or **leave `room-capacity` out of
+the first constraint set** and say so in CONSTRAINTS.md. Deciding before the registry is
+written avoids shipping a registered `type_key` that cannot be evaluated — which would fail
+[CLAUDE.md](../CLAUDE.md) §4's definition of done on its unit test.
+
+---
+
+### D22 — note added 2026-10-16
+
+[adr/0032](adr/0032-timetable-generation-is-scoped-to-one-school.md) is a **Proposed** record
+answering D22 for the intra-school case — compare `[starts_at, ends_at)` intervals rather
+than `timeslot_id`, which needs no schema change — and deferring the cross-school case
+explicitly. D22 stays open until that record is accepted or rejected.
+
+That record also corrects one premise above: *"`period_structure` is school-wide, and nothing
+ties a campus to exactly one"* understates the model. `period_structure.campus_id` exists and
+`timeslot.campus_id` is derived from it under a trigger pair. D22's **conclusion** is
+unaffected — timeslot identity still carries no campus, so two schedules still produce
+different rows for overlapping minutes — but the sentence should be fixed when D22 closes.
+
 ## Technical risks
 
 ### R1 — Incremental scoring correctness (highest)
