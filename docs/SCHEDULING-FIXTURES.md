@@ -446,8 +446,8 @@ introducing a property-testing dependency for them.
 
 | Milestone | Use |
 | --- | --- |
-| **M3** pre-solve diagnostics | Produce `Diagnostic`s; compare against `Expectations::diagnostics`, which records the exact code **and** the affected row. `infeasible-duration` and `infeasible-room-type` must produce a specific cause with no solver involved |
-| **M4** `Problem` loader | Build a `Problem` from SQLite; implement ADR 0033 §3's `resolve`; assert `Problem::integrity()` is empty on real projects. Seeding a project from a fixture description gives the database-backed fixtures this milestone does not provide |
+| **M3** pre-solve diagnostics | ✅ **Done.** `Expectations::diagnostics` proved to be the right oracle, read as a **lower bound**: a fixture records findings validation must produce, not the complete set it may. Both impossible fixtures produce their recorded cause with no solver involved. [PRE-SOLVE-VALIDATION.md](PRE-SOLVE-VALIDATION.md) §13 lists what every fixture produces |
+| **M4** `Problem` loader | Build a `Problem` from SQLite and **call** `evara_core::scheduling::resolve` rather than reimplementing ADR 0033 §3 — [ADR 0036](adr/0036-one-bell-schedule-resolver-shared-by-validation-and-loading.md). Assert `Problem::integrity()` is empty on real projects. Also owns three stored-row diagnostics ([ADR 0037](adr/0037-stored-row-diagnostics-belong-to-the-loader.md)). Seeding a project from a fixture description gives the database-backed fixtures this milestone does not provide |
 | **M5** registry + evaluators | Implement ADR 0035 §3's seven rules; run them over every fixture and compare against `Expectations::overlaps`, including the `rule` each cites. Call `RoomFact::is_candidate_for` rather than restating the candidate predicate. Carries the `children_are_disjoint` migration |
 | **M6** construction solver | Search over `Problem`, return `SolveOutcome`. The tiny fixture's attached arrangement is a lower bound on what a solver must achieve |
 | **M7** persistence | Write an `Assignment` back against the `Uuid` each fact carries |
@@ -462,9 +462,19 @@ introducing a property-testing dependency for them.
    database, by design.
 2. **The medium fixture's feasibility is designed, not proven.** Its counting arguments are
    asserted; no arrangement is exhibited.
-3. **The overlap relation and the bell-schedule resolution in every fixture are *declared*.**
-   They are the expected output, not a derivation. That is the point of the split, and it means
-   a fixture cannot catch an evaluator bug until the evaluator exists.
+3. **The overlap relation in every fixture is *declared*.** It is the expected output, not a
+   derivation, and a fixture cannot catch an evaluator bug until the evaluator exists.
+
+   The bell-schedule resolution **was** declared the same way, and M3 closed that half: the
+   resolver now computes it and `Problem::integrity` reports any section whose recorded
+   resolution disagrees. A test asserts declared equals computed for all 24 fixtures at three
+   seeds — it passed on the first run, so M2's declarations were right. See
+   [ADR 0036](adr/0036-one-bell-schedule-resolver-shared-by-validation-and-loading.md).
+
+   **One fixture was corrected by M3.** `medium` declared 4 periods per cycle for every section
+   while giving every fifth one a double, so 25 sections reported a legitimate but unintended
+   discrepancy. It now declares what it generates, via a named helper both the declaration and
+   the activity list read. [PRE-SOLVE-VALIDATION.md](PRE-SOLVE-VALIDATION.md) §13.
 4. **`Problem::pinned` is always empty.** `activity.is_locked` is not in `V15`, and
    `activity-fixed` joins the constraint set once locks exist.
 5. **Room capacity has no `Unknown`.** `room.capacity` is `NOT NULL`, so it is always a stated

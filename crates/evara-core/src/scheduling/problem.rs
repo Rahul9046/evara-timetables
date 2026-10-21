@@ -44,6 +44,7 @@ use super::placement::Placement;
 use super::population::{
     AttendanceFloor, DisjointnessDeclaration, ExpectedAttendance, GroupMask, OverlapRelation,
 };
+use super::resolve::MaterialisedGrid;
 
 /// Another school that also holds an entity in this problem.
 ///
@@ -575,8 +576,31 @@ impl Problem {
         self.population_integrity(&mut errors);
         self.lesson_integrity(&mut errors);
         self.companion_integrity(&mut errors);
+        self.resolution_integrity(&mut errors);
         errors.extend(self.duplicate_identities());
         errors
+    }
+
+    /// Every section whose recorded bell-schedule resolution the relation does not produce.
+    ///
+    /// Runs only when the indices it would read are sound: a dangling campus or schedule index
+    /// would make the relation's answer meaningless, and reporting a disagreement on top of a
+    /// dangling reference would bury the cause under a symptom.
+    fn resolution_integrity(&self, errors: &mut Vec<IntegrityError>) {
+        if !errors.is_empty() {
+            return;
+        }
+        let grid = MaterialisedGrid::of(self);
+        for (at, section) in self.sections.iter().enumerate() {
+            let computed = grid.resolve(&self.context, section.campus);
+            if section.bell_schedule != computed {
+                errors.push(IntegrityError::BellScheduleResolutionDisagrees {
+                    at,
+                    declared: section.bell_schedule.clone(),
+                    computed,
+                });
+            }
+        }
     }
 
     /// The grid: schedules, periods and slots.
@@ -869,6 +893,32 @@ pub enum IntegrityError {
         activities: usize,
         /// How long the pinned list is.
         pinned: usize,
+    },
+    /// A section's recorded bell-schedule resolution is not what the compatibility relation
+    /// produces.
+    ///
+    /// # Why this is an integrity error and not a diagnostic
+    ///
+    /// [`SectionFact::bell_schedule`] is an *answer*, computed by whatever built the problem.
+    /// A section that resolves to none or to several schedules is an ordinary — if blocking —
+    /// state of a real school, and M3 reports it as `no-bell-schedule` or
+    /// `ambiguous-bell-schedule` from the **computed** result.
+    ///
+    /// This variant is the different failure: the problem *claims* an answer the accepted
+    /// relation does not give. No school can type that; only a loader or a fixture can write
+    /// it. So it belongs in the channel this type exists for — loader and fixture bugs — and
+    /// not in a report a user is asked to act on.
+    ///
+    /// M2 left this unchecked, which meant a fixture could declare any resolution it liked.
+    /// See [ADR 0036](../../../../docs/adr/0036-one-bell-schedule-resolver-shared-by-validation-and-loading.md).
+    BellScheduleResolutionDisagrees {
+        /// The section's position.
+        at: usize,
+        /// What the section records.
+        declared: BellScheduleResolution,
+        /// What [ADR 0033](../../../../docs/adr/0033-an-activity-schedules-against-one-resolved-bell-schedule.md)
+        /// §2's relation produces.
+        computed: BellScheduleResolution,
     },
 }
 

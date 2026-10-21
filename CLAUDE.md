@@ -264,3 +264,4 @@ keeps incremental scoring honest, and a wrong delta silently produces a wrong ti
 | `cargo run -p evara-cli -- --help` | Headless CLI |
 | `cargo run -p evara-cli -- fixture --list` | List the synthetic scheduling fixtures |
 | `cargo run -p evara-cli -- fixture tiny` | Write one as JSON — synthetic test data, **not** a timetable |
+| `cargo run -p evara-cli -- validate tiny` | Pre-solve validation of a fixture's inputs; exits 1 on a blocking finding |
