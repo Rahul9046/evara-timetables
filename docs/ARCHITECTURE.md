@@ -55,7 +55,10 @@ Status: **design phase.** This document is the target architecture. See
 Three further crates sit at the edges: `evara-report` (timetable projections →
 HTML/CSV/PDF), `evara-import` (spreadsheet bytes → a parsed table, and the downloadable
 templates) and `evara-integrations` (future external adapters, empty and feature-gated).
-`evara-cli` is a headless binary used for tests, fixtures and solver benchmarking.
+`evara-cli` is a headless binary used for tests, fixtures and solver benchmarking. One of
+its eight subcommands exists: `evara fixture` writes a synthetic scheduling problem as JSON.
+It generates **test data and not a timetable** — nothing in Evara generates a timetable
+yet — and it reads no project, opens no database and applies no migration.
 
 `evara-import` is the one with a dependency set nothing else should inherit — `calamine`,
 `csv`, `rust_xlsxwriter` — which is why it is its own crate rather than a module of
@@ -95,7 +98,14 @@ never a second hand-maintained model.
 ## 3. Layering rules
 
 1. `evara-core` has no I/O and no dependency on the other crates. It owns entity types,
-   ID types, the cycle/calendar/timeslot model, `Score`, `Violation` and `Move`.
+   ID types, the cycle/calendar/timeslot model, `Score`, `Violation` and `Move`. Since M2 it
+   also owns the **scheduling vocabulary** — `scheduling::Problem` and its facts, `Placement`,
+   `Assignment`, the three-state `Overlap`, `ExpectedAttendance`, the availability index, the
+   diagnostic codes and `SolveOutcome` — for the reason the layering already implies: four
+   crates have to agree on those types, so they sit underneath all four. The deterministic
+   synthetic-school generator sits beside them behind a `fixtures` feature the desktop binary
+   does not enable. No rule is evaluated and nothing is solved there;
+   [SCHEDULING-FIXTURES.md](SCHEDULING-FIXTURES.md) §1 says what each later milestone adds.
 2. `evara-constraints` depends on `evara-core` only. It never touches SQLite. The solver
    and the validator both consume it. **It holds one kind of thing**: `type_key`-addressed
    evaluators with a JSON Schema and an `explain()`, each scored against a candidate

@@ -845,6 +845,7 @@ dependencies = [
  "evara-project",
  "evara-report",
  "evara-solver",
+ "serde_json",
 ]
 
 [[package]]

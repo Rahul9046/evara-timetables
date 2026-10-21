@@ -58,8 +58,96 @@
 //! because "is this a code or a number the spreadsheet mangled?" is a question about a cell
 //! and not about a school.
 
+//! [`scheduling`] is M2's, and is here for the same reason as [`import`], one layer further
+//! down: `evara-db` compiles a school into a [`scheduling::Problem`], `evara-constraints`
+//! evaluates rules against one, `evara-solver` searches over one, and the command layer
+//! carries the result — so the vocabulary sits under all four.
+//! `docs/SCHEDULING-ARCHITECTURE-DECISIONS.md` §4.2 says so in one line, and that module's
+//! header sets out what M2 declares and what each later milestone supplies. **No solver, no
+//! constraint evaluator and no loader lives there**; it is a data contract plus the
+//! deterministic fixtures the milestones after it are tested against.
+
 pub mod branding;
 pub mod calendar;
 pub mod import;
 pub mod lessons;
+pub mod scheduling;
 pub mod time;
+
+#[cfg(test)]
+mod layering_tests {
+    /// This crate's own manifest, read at compile time.
+    ///
+    /// `include_str!` rather than `std::fs`: this crate performs no I/O, and a test that read
+    /// a file at run time would be the first thing in it to do so. The path is relative to
+    /// this source file, so it cannot drift.
+    const MANIFEST: &str = include_str!("../Cargo.toml");
+
+    /// Crates whose presence here would be an architecture bug rather than a dependency
+    /// choice.
+    ///
+    /// `rusqlite` and `refinery` would make the bottom of the stack know SQL;
+    /// `tauri` would tie it to a window and stop it compiling to `wasm32`; `calamine`,
+    /// `csv` and `rust_xlsxwriter` belong to `evara-import` alone and
+    /// `Cargo.toml`'s own comment says `chrono` "never leaves" it.
+    const FORBIDDEN: &[&str] = &[
+        "rusqlite",
+        "refinery",
+        "tauri",
+        "calamine",
+        "csv",
+        "rust_xlsxwriter",
+        "chrono",
+        "reqwest",
+        "tokio",
+    ];
+
+    #[test]
+    fn the_manifest_search_can_actually_fail() {
+        // A positive control, because a string search that matched nothing would make the two
+        // tests below pass for the wrong reason — and a test that cannot fail is worse than no
+        // test. `serde` *is* a dependency, so the same expression must find it.
+        assert!(
+            MANIFEST.contains("\nserde ="),
+            "the manifest search no longer finds a dependency that is present; the two \
+             layering tests below are vacuous until this is fixed"
+        );
+    }
+
+    #[test]
+    fn no_database_driver_or_window_reaches_the_bottom_of_the_stack() {
+        // `CLAUDE.md` §2: `evara-core` depends on *nothing* — no other `evara-*` crate, no
+        // I/O, no driver. The layering diagram asserts it and nothing enforced it; this does.
+        // It is a string search over the manifest rather than a graph query, which is crude
+        // and catches the case that actually happens: somebody adds a line.
+        for crate_name in FORBIDDEN {
+            assert!(
+                !MANIFEST.contains(&format!("\n{crate_name} =")),
+                "{crate_name} must not be a dependency of evara-core"
+            );
+        }
+    }
+
+    #[test]
+    fn no_sibling_evara_crate_reaches_the_bottom_of_the_stack() {
+        // The one rule that keeps the dependency graph acyclic: `evara-core` is the bottom,
+        // so a dependency on any sibling would make `evara-db` → `evara-core` → `evara-db`
+        // expressible. The scheduling vocabulary lives here precisely because four crates
+        // need it and this crate needs none of them.
+        assert!(
+            !MANIFEST.contains("\nevara-"),
+            "evara-core must not depend on another evara-* crate"
+        );
+    }
+
+    #[test]
+    fn the_fixtures_feature_adds_no_dependency() {
+        // The generator is twenty lines of SplitMix64 and a UUID builder, deliberately: a
+        // fixture whose bytes changed under a dependency bump would invalidate every solver
+        // baseline committed against it. See `scheduling::fixtures::rng`.
+        assert!(
+            MANIFEST.contains("fixtures = []"),
+            "the fixtures feature must enable no optional dependency"
+        );
+    }
+}

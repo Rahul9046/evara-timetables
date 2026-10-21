@@ -309,7 +309,8 @@ M1  decisions  (this PR)              ── no code
 ```
 
 M2 is the only unblocked milestone before M1 and was still shaped by it, which is the
-audit's §17 argument and the reason this PR exists.
+audit's §17 argument and the reason this PR exists. It has since been built —
+[SCHEDULING-FIXTURES.md](SCHEDULING-FIXTURES.md).
 
 ---
 
@@ -348,7 +349,14 @@ Collected so that nothing below is mistaken for an oversight.
 ## 9. Future fixtures and acceptance tests
 
 **Not implemented in M1.** Fixtures are M2's deliverable (audit B12), synthetic names only
-(`CLAUDE.md` rule 3). Each ADR carries its own acceptance table; the fifteen the brief names
+(`CLAUDE.md` rule 3).
+
+> **Built in M2.** The fifteen cases below became 24 fixtures in
+> `evara_core::scheduling::fixtures`, each carrying the acceptance tests it covers and the
+> expected outcome of each. See [SCHEDULING-FIXTURES.md](SCHEDULING-FIXTURES.md) §4 for the
+> mapping, and §1 for where the vocabulary §4.2 specifies ended up. No rule that would satisfy
+> those expectations is implemented: a fixture holds the inputs and the expected output, and
+> M3, M4 and M5 supply the functions in between. Each ADR carries its own acceptance table; the fifteen the brief names
 map onto them as follows, and every one has an expected outcome written down so M2 implements
 rather than re-decides.
 

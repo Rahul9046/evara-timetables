@@ -17,10 +17,14 @@ name = "evara"
 path = "src/main.rs"
 
 [dependencies]
-evara-core = { workspace = true }
+# `fixtures` brings in the deterministic synthetic-school generator that `evara fixture`
+# writes out. It is off by default so the desktop binary does not carry it.
+evara-core = { workspace = true, features = ["fixtures"] }
 evara-constraints = { workspace = true }
 evara-solver = { workspace = true }
 evara-db = { workspace = true }
 evara-project = { workspace = true }
 evara-report = { workspace = true }
 evara-integrations = { workspace = true }
+# Writing a fixture out. Already in the tree, so this adds no new crate and no new licence.
+serde_json = { workspace = true }
