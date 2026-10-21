@@ -104,8 +104,11 @@ never a second hand-maintained model.
    header says why putting it here would have been the mistake.
 3. `evara-solver` depends on `evara-core` + `evara-constraints`. It receives a fully
    materialised problem **in memory** and returns a solution. It never opens a database.
-4. `evara-db` is the only crate that knows SQL. It loads a `Problem` for the solver and
-   persists a `Solution` back.
+4. `evara-db` is the only crate that knows SQL. It *will* load a `Problem` for the solver and
+   persist a `Solution` back — the loader is M4's and the writer M7's, and neither exists at
+   `V15`. The rule is stated now because it decides where that code goes when it arrives:
+   the translation from UUIDs to the solver's dense indexes happens here, once, and no other
+   crate acquires a database handle to avoid it.
 5. `evara-import` may depend on `evara-core` and nothing else. It turns bytes into an
    `evara_core::import::SourceTable` and writes templates; it never opens a file, never
    reaches the network, never evaluates a formula and never runs a macro. It is given bytes
@@ -156,6 +159,7 @@ in the UI: it looks like the thing and is not.
 | [ROADMAP.md](ROADMAP.md) | Milestone 1 broken into implementation phases |
 | [OPEN-DECISIONS.md](OPEN-DECISIONS.md) | Risks and decisions still to be made |
 | [SCHEDULING-READINESS-AUDIT.md](SCHEDULING-READINESS-AUDIT.md) | What is built towards timetable generation, what is not, and the milestone sequence to get there |
+| [SCHEDULING-ARCHITECTURE-DECISIONS.md](SCHEDULING-ARCHITECTURE-DECISIONS.md) | The four decisions that precede solver code, the scheduling context and conflict contracts they fix, and which future schema changes they require |
 | [adr/](adr/) | Accepted architecture decision records |
 
 ---

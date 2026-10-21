@@ -37,7 +37,10 @@ tempted to undo it without knowing why.
 | [0029](0029-a-lesson-is-a-course-a-section-and-its-occurrences.md) | A lesson is a course, a class section, and one row per occurrence; no table in the chain holds a `school_id` | Accepted |
 | [0030](0030-an-import-is-a-reviewed-plan.md) | An import is a reviewed plan applied in one transaction; preview writes nothing and nothing is created to fill a gap | Accepted |
 | [0031](0031-import-identity-matching.md) | A code matches, a name asks; reuse across schools is offered and never assumed | Accepted |
-| [0032](0032-timetable-generation-is-scoped-to-one-school.md) | Generation is scoped to one school's grid; shared occupancy is compared in real time within a school and reported across schools | **Proposed** |
+| [0032](0032-timetable-generation-is-scoped-to-one-school.md) | Generation is scoped to one school's grid; shared occupancy is compared in real time within a school and reported across schools | Accepted — moved from *Proposed* in M1, every premise re-verified and one strengthened |
+| [0033](0033-an-activity-schedules-against-one-resolved-bell-schedule.md) | An activity schedules against exactly one bell schedule, resolved by campus compatibility; an ambiguous one is refused, never guessed | Accepted |
+| [0034](0034-expected-attendance-is-explicit-and-room-capacity-waits-for-it.md) | Expected attendance is a stated number or it is unknown; `room-capacity` leaves the first constraint set | Accepted |
+| [0035](0035-student-group-overlap-is-a-three-state-answer.md) | Whether two student groups share students has three answers, and *indeterminate* is one of them | Accepted |
 
 Statuses: **Proposed** (awaiting a decision), **Accepted**, **Superseded by NNNN**,
 **Deprecated**. Accepted records are not edited to reflect a change of mind — a new

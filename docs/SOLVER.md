@@ -72,11 +72,14 @@ addressed by dense `u32` indexes, not UUIDs. UUID ↔ index translation happens 
 
 ```rust
 pub struct Problem {
-    pub timeslots:  Vec<TimeslotFact>,     // cycle_day, period, ordinal, campus
+    pub timeslots:  Vec<TimeslotFact>,     // cycle_day, period, ordinal, campus,
+                                           //   period_structure, starts_at/ends_at
     pub rooms:      Vec<RoomFact>,         // capacity, room_type, campus
     pub teachers:   Vec<TeacherFact>,
-    pub groups:     Vec<GroupFact>,        // expanded to leaf student sets
-    pub activities: Vec<ActivityFact>,     // duration, teachers, groups, requirements
+    pub groups:     Vec<GroupFact>,        // group indices + the overlap relation,
+                                           //   NOT expanded student sets — see below
+    pub activities: Vec<ActivityFact>,     // duration, teachers, groups, requirements,
+                                           //   resolved bell schedule
     pub unavailable: UnavailabilityIndex,  // bitset per (entity, timeslot)
     pub constraints: Vec<CompiledConstraint>,
     pub pinned:     Vec<Option<Placement>>, // locked activities
@@ -91,6 +94,33 @@ pub struct Placement { pub timeslot: u32, pub room: Option<u32> }
 Two planning variables per activity — **timeslot** and **room** — matching the prototype,
 plus a third later for teacher selection when a class has interchangeable staff
 (see [OPEN-DECISIONS.md](OPEN-DECISIONS.md) D7).
+
+**Three things M1's decisions fix about this shape.** None is implemented; all three are
+contracts the loader (M4) and the types (M2) are built to.
+
+- **An activity's value range is one bell schedule's slots, resolved before the solve.** The
+  grid of a `(cycle, term)` may hold slots from several `period_structure` rows, and
+  [adr/0033](adr/0033-an-activity-schedules-against-one-resolved-bell-schedule.md) decides
+  which one an activity draws from — by campus compatibility, refusing an ambiguous case
+  rather than guessing. `TimeslotFact` therefore carries its structure, and its
+  `starts_at` / `ends_at`, because the clash key for a shared room or teacher is a wall-clock
+  interval and not a `timeslot_id`
+  ([adr/0032](adr/0032-timetable-generation-is-scoped-to-one-school.md) rule 2).
+- **`groups` is not expanded to leaf student sets**, which is what this section said before
+  and which [adr/0035](adr/0035-student-group-overlap-is-a-three-state-answer.md) §5
+  corrects. [ADR 0006](adr/0006-group-based-scheduling-first.md) requires a school with **no
+  `student` rows at all** to get a full timetable, and such a school's leaf sets are all
+  empty — so an expansion would make every pair compare disjoint and `student-clash` silent
+  for precisely the schools group-first scheduling was chosen for. The compiled form is a
+  three-state overlap relation over group indices, held as bitsets, derived from member rows
+  where they exist and from declarations where they do not.
+- **`RoomFact.capacity` is carried and read by no first-set constraint.**
+  [adr/0034](adr/0034-expected-attendance-is-explicit-and-room-capacity-waits-for-it.md)
+  defers `room-capacity` because no stored field supplies its left-hand side, and makes
+  expected attendance an explicit two-state value rather than a number that defaults to zero.
+
+The whole set is summarised in
+[SCHEDULING-ARCHITECTURE-DECISIONS.md](SCHEDULING-ARCHITECTURE-DECISIONS.md).
 
 ---
 
@@ -294,6 +324,26 @@ that catch most genuinely impossible setups, with actionable messages:
 Example output: *"Year 9 needs 42 periods per cycle but only 40 teaching slots exist.
 Reduce a course's periods per cycle, or add a period."* This layer is high value for low
 effort and should ship in Milestone 1.
+
+M1's decisions add two more kinds of output to this layer, and the distinction between them
+matters as much as the checks themselves:
+
+- **Hard validation errors that refuse the solve**, because the remedy is a field the user
+  can fill in and without it there is no value range at all: no grid materialised, an
+  activity that resolves to no bell schedule, and an activity that resolves to more than one
+  ([adr/0033](adr/0033-an-activity-schedules-against-one-resolved-bell-schedule.md) §3).
+- **Explicit warnings that do not block**, because the remedy is a setup task or does not
+  exist: group pairs whose overlap is `Indeterminate`
+  ([adr/0035](adr/0035-student-group-overlap-is-a-three-state-answer.md) §6), sections whose
+  expected attendance is `Unknown`
+  ([adr/0034](adr/0034-expected-attendance-is-explicit-and-room-capacity-waits-for-it.md) §5),
+  and entities shared with another school
+  ([adr/0032](adr/0032-timetable-generation-is-scoped-to-one-school.md) rule 3).
+
+Every warning is counted and carried onto the generated timetable, so a timetable is
+described as having no *confirmed* clash within the school solved — never as conflict-free.
+[SCHEDULING-ARCHITECTURE-DECISIONS.md](SCHEDULING-ARCHITECTURE-DECISIONS.md) §3.2 classifies
+every incomplete input into one of four outcomes.
 
 **Layer 2 — Post-solve hard-violation report.** When the best solution is infeasible,
 return the hard violations with full entity references and let the user click through to

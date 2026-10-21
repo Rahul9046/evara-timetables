@@ -461,6 +461,24 @@ A trigger additionally requires a timeslot's denormalised `school_id`, `cycle_id
 `campus_id` to agree with the cycle day and period it was built from, so the grid cannot
 drift from the cycle it claims to belong to. Same approach as room/building in V3.
 
+**Two bell schedules mean two disjoint grids over the same cycle days, and which one an
+activity uses is resolved rather than stored.** The grid is materialised per
+`(cycle, period_structure, term)`, and `timeslot` identity carries no campus, so a school
+running two campuses on two schedules holds two sets of `timeslot` rows covering the same
+days and often the same minutes. Nothing joins an `activity` to either:
+`class_section.campus_id` is nullable and `period_structure.campus_id` is nullable.
+[adr/0033](adr/0033-an-activity-schedules-against-one-resolved-bell-schedule.md) decides the
+resolution — campus compatibility against the structures actually materialised, with a
+refusal rather than a default when it is not unique — and it needs **no column and no
+migration**. Two consequences for anyone reading this section as a reference:
+
+- A bell schedule serves either **one** campus or **every** campus. A subset is not
+  expressible, because `campus_id` is a column rather than an association table.
+- Because the two grids' periods are different `period` rows, a clash on a shared room or
+  teacher is decided by comparing `[starts_at, ends_at)` within a `cycle_day`, never by
+  comparing `timeslot_id` ([adr/0032](adr/0032-timetable-generation-is-scoped-to-one-school.md)
+  rule 2). That comparison needs no timezone and no `calendar_day` row.
+
 Four more triggers hold the cycle kinds (V9, [adr/0017](adr/0017-weekly-and-custom-cycles.md)):
 a `WEEKLY` cycle is seven days long, a cycle's `kind` never changes, and a `WEEKLY` cycle's
 day carries the weekday of its position — so `weekday_hint` and `ordinal` cannot disagree
@@ -560,11 +578,26 @@ student_group_member (id, student_group_id, student_id,
                       UNIQUE(student_group_id, student_id))
 ```
 
-`parent_group_id` gives the hierarchy that drives student clash detection: a cohort split
-into three teaching sets means those sets conflict with the cohort but not with each
-other. Clash detection resolves a group to its **leaf student set** — either real
-`student_group_member` rows or, when membership is not modelled, the declared ancestry.
-`size` exists so a school can timetable without entering a single student.
+`parent_group_id` gives the hierarchy that student clash detection reads, and `size` exists
+so a school can timetable without entering a single student.
+
+**Corrected 2026-10-21 by [adr/0035](adr/0035-student-group-overlap-is-a-three-state-answer.md).**
+This paragraph previously read *"a cohort split into three teaching sets means those sets
+conflict with the cohort but not with each other"*, and *"clash detection resolves a group to
+its leaf student set"*. Both are wrong, and the record argues each at length:
+
+- **Siblings are not disjoint.** The claim is true of three *classes* of a cohort and false
+  of three *teaching sets of different subjects*, which are structurally identical in the
+  stored data — same parent, same `kind`, nothing to tell them apart. A tree of containment
+  cannot express two different divisions of one population, which is why the resolution needs
+  one future nullable column (`student_group.children_are_disjoint`, asked per parent) rather
+  than an inference. **It is not in `V10` and not in any migration.**
+- **Resolution is not to a leaf student set.** [adr/0006](adr/0006-group-based-scheduling-first.md)
+  requires a school with no `student` rows to get a full timetable, so its leaf sets are all
+  empty and an expansion would make clash detection silent for exactly those schools. Overlap
+  is a three-state function over *groups* — `Overlaps`, `Disjoint`, `Indeterminate` — proved
+  from member rows where they exist, from containment and declared-size arithmetic where they
+  do not, and reported rather than enforced when it cannot be proved.
 
 Student records are optional in Milestone 1 and exist so individual request-driven
 scheduling can be added without a schema break. Fixtures use synthetic names only.
@@ -804,6 +837,17 @@ Six departures from the sketch below, each deliberate and each argued in ADR 002
   `(section, teacher, role)` key would let one person be a section's primary *and* its
   assistant at once. ADR 0029 §5 lists every omission with what adding it costs.
 
+  `class_section.max_size` **stays** reserved for Milestone 2's sectioning —
+  `section-max-size` and `section-balance` in [adr/0006](adr/0006-group-based-scheduling-first.md).
+  A room's occupancy figure is a *different* quantity and gets a different, also unbuilt,
+  column: [adr/0034](adr/0034-expected-attendance-is-explicit-and-room-capacity-waits-for-it.md)
+  specifies `class_section.expected_attendance` and defers `room-capacity` until it exists,
+  because `room.capacity` currently has nothing to be compared against. **Neither column is
+  in `V15` or in any migration.** Until then a section's expected attendance is either
+  derived from declared group sizes over provably disjoint groups or is `Unknown` — and
+  `Unknown` is never read as zero, which is what the displayed audience total on the Class
+  section screen does and is labelled to do.
+
 **Who may be given a lesson** is `V15`'s other substance, and it amends what ADR 0025 §4
 promised. An **active** `teacher_school` membership and campus eligibility are *requirements*
 — trigger pairs, plus a repository check that can name the remedy — and a missing
@@ -1040,20 +1084,25 @@ separable, which is what substitution reporting and yard-duty rosters need.
 
 ## 9. Indexes that matter
 
+**Built and planned are mixed below; each block says which.** Everything under *planned*
+belongs to a table no migration defines, so none of it exists at `V15`.
+
 ```sql
+-- PLANNED, with timetable_entry itself (§7). Not in any migration.
 CREATE INDEX idx_entry_timetable_slot ON timetable_entry(timetable_id, timeslot_id);
 CREATE INDEX idx_entry_timetable_act  ON timetable_entry(timetable_id, activity_id);
 CREATE INDEX idx_entry_room           ON timetable_entry(timetable_id, room_id, timeslot_id);
--- V15's, for the RESTRICT scans and for the "what does this teacher teach?" and
+-- BUILT. V15's, for the RESTRICT scans and for the "what does this teacher teach?" and
 -- "which classes is this group in?" reads the People screens ask per row.
 CREATE INDEX idx_class_teacher_teacher ON class_teacher(teacher_id);
 CREATE INDEX idx_class_group_group     ON class_group(student_group_id);
 CREATE INDEX idx_class_enrolment_student ON class_enrolment(student_id);
 CREATE INDEX idx_course_subject        ON course(subject_id);
 CREATE INDEX idx_class_section_course  ON class_section(course_id);
--- Later, with the per-occurrence overrides themselves.
+-- PLANNED, later, with the per-occurrence overrides themselves (ADR 0029 §5).
 CREATE INDEX idx_act_teacher_teacher  ON activity_teacher(teacher_id);
 CREATE INDEX idx_act_group_group      ON activity_group(student_group_id);
+-- BUILT.
 CREATE INDEX idx_avail_entity         ON availability(entity_kind, entity_id);
 CREATE INDEX idx_timeslot_cycle       ON timeslot(cycle_id, ordinal);
 CREATE INDEX idx_change_log_seq       ON change_log(entity_table, entity_id, seq);

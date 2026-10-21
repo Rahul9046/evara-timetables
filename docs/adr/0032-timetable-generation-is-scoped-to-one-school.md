@@ -1,9 +1,18 @@
 # ADR 0032 — Timetable generation is scoped to one school; sharing is compared in real time within it, and reported across it
 
-- Status: **Proposed** — drafted by [`SCHEDULING-READINESS-AUDIT.md`](../SCHEDULING-READINESS-AUDIT.md) §9, awaiting a decision. Nothing is implemented in either direction.
-- Date: 2026-10-16
+- Status: **Accepted** (2026-10-21). Drafted by
+  [`SCHEDULING-READINESS-AUDIT.md`](../SCHEDULING-READINESS-AUDIT.md) §9 as **Proposed**;
+  every premise was re-verified against the implementation in M1 and one was strengthened
+  (§"Two schools have no common clock" — the workspace holds no timezone database at all).
+  Nothing is implemented in either direction.
+- Date: 2026-10-16; accepted and revised 2026-10-21
 - Decides: [OPEN-DECISIONS](../OPEN-DECISIONS.md) D22, for the intra-school case. Defers its
   cross-school case explicitly rather than leaving it unanswered.
+- Completed by: [ADR 0033](0033-an-activity-schedules-against-one-resolved-bell-schedule.md)
+  (which bell schedule an activity draws its slots from — rule 2's interval comparison needs
+  that resolved first), [ADR 0034](0034-expected-attendance-is-explicit-and-room-capacity-waits-for-it.md)
+  (a shared room's capacity), [ADR 0035](0035-student-group-overlap-is-a-three-state-answer.md)
+  (a shared student's clashes, and why rule 3's student case is a warning).
 - Builds on: [ADR 0011](0011-stable-timeslot-identity.md) (a timeslot's identity is
   `(term, cycle_day, period)` and carries no campus),
   [ADR 0014](0014-rooms-shared-across-campuses.md) (one room, one identity, so occupancy is
@@ -42,12 +51,25 @@ value ranges**. A solver asked to "solve the project" would be solving N indepen
 that share no variable domain.
 
 **Two schools have no common clock.** `school.timezone` is `NOT NULL` and per school
-(`V12__multiple_schools.sql`). No project-level calendar aligns one school's Day A to
-another's; `calendar_day` is school-scoped and, since `V4:186-190`, entered explicitly per
-date with no automatic rotation. So neither of the two available comparisons works across
-schools: cycle positions are not commensurable, and wall-clock times are not commensurable
-until a timezone and a date are both resolved. D22's *Widened by `V13`* paragraph says
-exactly this.
+(`V12:76`). No project-level calendar aligns one school's Day A to another's; `calendar_day`
+is school-scoped and, since `V4:186-190`, entered explicitly per date with no automatic
+rotation. So neither of the two available comparisons works across schools: cycle positions
+are not commensurable, and wall-clock times are not commensurable until a timezone and a
+date are both resolved. D22's *Widened by `V13`* paragraph says exactly this.
+
+It is in fact one step worse than D22 recorded, and the stronger fact is why this record can
+close the question rather than keep weighing it. **The workspace cannot resolve a timezone at
+all.** `school.timezone` is `TEXT` with a non-empty `CHECK` and nothing else — documented as
+IANA at `repo/structure.rs:70`, validated as free text, and parsed by no code in the
+repository. The only date-time dependency is `time = { version = "0.3", features =
+["formatting", "parsing", "macros"] }` (`Cargo.toml:47`), which ships no timezone database;
+`chrono` exists behind `calamine`'s `dates` feature and, per `Cargo.toml:78`, *"never leaves
+`evara-import`"*. Comparing two schools' wall-clock bells is therefore not an unwritten
+algorithm but an unavailable one: it would need a new dependency, a licence review under
+`CLAUDE.md` rule 4, and a decision about what a project does when a stored zone name is not
+a zone. None of that is work this record should trigger, and all of it is work the
+intra-school case does not need, because one school has one zone and the zone cancels on
+both sides of every comparison.
 
 **Within one school, real time *is* already computable.** One timezone. One set of
 `period.starts_at` / `period.ends_at`, stored as `'HH:MM'` and `CHECK`-validated
@@ -127,10 +149,75 @@ hall gets double-booked while both timetables report themselves clean.
 ### 4. What this defers, named rather than implied
 
 Coordinated cross-school generation, cross-school clash detection, and project-level
-availability (`availability.school_id` is `NOT NULL`, so a shared teacher's unavailability is
-entered once per school and nothing reconciles the two). All three become possible once a
-project-level time alignment exists — D22's Option C — and none should be built before a
-school has asked for it.
+availability (`availability.school_id` is `NOT NULL` — `V11:44` — so a shared teacher's
+unavailability is entered once per school and nothing reconciles the two). All three become
+possible once a project-level time alignment exists — D22's Option C — and none should be
+built before a school has asked for it.
+
+### 5. Four scopes, which are not the same scope
+
+The word "scope" does four jobs in a solve, and conflating any two of them is how a
+timetable comes to be described as something it is not. Added on acceptance, because the
+rules above are only safe if these are kept apart.
+
+| Scope | Extent | Authority |
+| --- | --- | --- |
+| **Optimisation** — what the solver may move | One school's activities, over one `(cycle, term)` grid, drawing slots per [ADR 0033](0033-an-activity-schedules-against-one-resolved-bell-schedule.md) | rule 1 |
+| **Validation** — what a violation can be computed over | The same school's activities, plus the full occupancy of every `room_id` and `resource_id` *that school's* placements touch | rule 2 |
+| **Persistence** — what a saved timetable covers | One school, one cycle, one term. A timetable row is never project-wide | rule 1 |
+| **Warning** — what is *announced* but not computed | Entities in scope that another school also holds | rule 3 |
+
+**What can be validated within one school**, from stored data and with no new table:
+teacher clash, student clash (to the extent [ADR 0035](0035-student-group-overlap-is-a-three-state-answer.md)
+proves it), room clash and resource clash by real-time interval, room type, campus
+eligibility, availability, duration contiguity and non-teaching periods.
+
+**What can be compared across schools: nothing in time.** Two facts can be *detected* —
+that an entity is shared, and that another school holds placements naming it — and neither
+is a comparison. A shared `room_id` with placements in two schools' timetables cannot be
+checked for overlap, because deciding whether School A's Day 3 Period 2 and School B's Day
+1 Period 5 are the same minutes needs a date mapping and a timezone resolution, and §"Two
+schools have no common clock" shows both are absent.
+
+**Calendar-date alignment is not required for anything this record decides, and is not
+sufficient for what it defers.** Rule 2's comparison is within one school, where every bell
+schedule materialises against the same `cycle_day` rows (`cycle_day` belongs to the cycle,
+not to a `period_structure`), so the day axis is shared without `calendar_day` being
+consulted at all. **An incomplete calendar mapping therefore has no effect on any clash
+decision** — which matters, because `calendar_day` is entered one date at a time
+(`V4:186-190`) and is incomplete in most real projects. It would become *necessary* for the
+cross-school case and still not be *enough*, since a timezone database would be needed too.
+
+**Timezone differences are handled by not crossing them.** One school, one
+`school.timezone`; both sides of every interval comparison are in it; the zone cancels and
+is never read. No code resolves a zone name, and nothing in the MVP needs to.
+
+**Physical-time interval comparison, exactly.** Two placements of one school overlap when
+they fall on the same `cycle_day` and
+`a.starts_at < b.ends_at AND b.starts_at < a.ends_at`. `period.starts_at` / `ends_at` are
+zero-padded `'HH:MM'` under `CHECK (ends_at > starts_at)` (`V4:104-105`, `V4:111`), so no period
+crosses midnight and text comparison *is* chronological comparison. A multi-period
+occurrence's interval runs from its first period's `starts_at` to its last period's
+`ends_at`. Different cycles of one school are different grids and are never compared; a
+solve names one cycle.
+
+**When the other school has no timetable, has a draft, or has several**, the answer is the
+same in all three cases, and it is the same answer as when it has a published one:
+**rule 3's warning does not read it.** The warning is a property of the *sharing* — a second
+active `teacher_school` row, a `room_campus` set spanning two schools' campuses — not of any
+other school's output. This is deliberate: a warning that appeared only once a second
+timetable existed would be absent exactly while the first school was generating, which is
+when it is needed, and a warning whose text depended on another timetable's `status` would
+imply Evara had compared them. It has not and cannot.
+
+**The warning is informational and does not block.** Rule 3 says so and the reason bears
+repeating here because it is the one place this record chooses visibility over safety:
+blocking would make a configuration ADR 0014, ADR 0021 and ADR 0022 each deliberately
+support unusable, and the remedy a block would demand — coordinate two schools' timetables —
+is the thing Evara cannot do. Compare
+[ADR 0033](0033-an-activity-schedules-against-one-resolved-bell-schedule.md) §3, where an
+unresolved bell schedule **does** refuse the solve: there the remedy exists and is one
+field, so refusing is a question the user can answer rather than a wall.
 
 ## Consequences
 
@@ -185,3 +272,24 @@ that arises — is answerable without it.
 **Give `period` an authoritative interval *and* add a campus to timeslot identity.** Rejected
 as a change to ADR 0011's identity tuple, which is load-bearing for rematerialisation. The
 interval comparison in rule 2 achieves the same result without touching identity.
+
+## Future acceptance tests
+
+Added on acceptance. Fixtures are M2's (audit B12); these are the cases they must carry.
+None exists yet.
+
+| # | Fixture | Expectation |
+| --- | --- | --- |
+| 1 | One school, one campus, one bell schedule, a room used twice in one slot | One `room-clash` violation. Interval comparison and `timeslot_id` equality agree, so nothing is paid for the general case. |
+| 2 | One school, two campuses on **different** bells, a hall shared by both, booked at overlapping minutes under **different** `timeslot_id`s | **One violation.** The case ADR 0014 calls a correctness failure, and the whole reason rule 2 compares intervals. |
+| 3 | As 2, booked at adjacent but non-overlapping minutes (08:00–08:45 and 08:50–09:35) | No violation. Asserts the comparison is half-open, not merely same-day. |
+| 4 | As 2 for a `resource` with `quantity = 1` | Same outcome. Whatever answers this for a room answers it for a resource (D22, *Widened by `V13`*). |
+| 5 | One school, two campuses, a teacher eligible for both, placed at overlapping minutes under different `timeslot_id`s | One `teacher-clash` violation, by interval. |
+| 6 | **Two schools**, one shared teacher with two active `teacher_school` rows | Generation for school A succeeds; a pre-flight warning names the teacher **and both schools** and states the limit. School B's timetable is never read, whether it exists, is a `DRAFT`, or there are several. |
+| 7 | As 6 with no timetable at all for school B | Identical warning. Asserts the warning is a property of the sharing, not of another timetable. |
+| 8 | **Two schools** sharing a room via `room_campus` across their campuses | Warning naming the room and both schools; the room still clashes correctly *within* the school being solved. |
+| 9 | **Two schools** with concurrent `ENROLLED` spells for one student, in groups at both | Warning naming the student and both schools. No cross-school clash is computed ([ADR 0035](0035-student-group-overlap-is-a-three-state-answer.md) §7). |
+| 10 | **Two schools with different academic calendars** — different `academic_year`, `term` and `calendar_day` rows — sharing a teacher | Both generate independently. Nothing compares their grids, and no finding claims otherwise. |
+| 11 | One school whose `calendar_day` coverage is **empty** | Every clash decision is unaffected; generation succeeds. Asserts that an incomplete calendar mapping is not an input to any rule this record decides. |
+| 12 | A generated timetable for a school with shared entities | Its provenance and its views carry the shared-entity warnings. It is described as having no confirmed clash *within this school*, never as conflict-free. |
+| 13 | Two unrelated schools in one project, nothing shared | Neither solve reads the other's rows; no warning is produced; neither pays for the other. |
