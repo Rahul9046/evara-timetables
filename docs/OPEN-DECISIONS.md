@@ -128,17 +128,33 @@ it, macOS users must bypass Gatekeeper manually, which for a school-admin audien
 effectively a blocker. Windows code signing has a similar cost. Not a dependency problem
 — a distribution-cost decision that needs an owner before Phase 11.
 
-### D12 — Student clash semantics when membership is not modelled
+### D12 — Student clash semantics when membership is not modelled ✅ RESOLVED 2026-10-21 (M1)
 
-Still open, and `V15` deliberately did not narrow it: `class_enrolment` is a roster overlay
-with no scheduling meaning in Milestone 1 (ADR 0029 §4), so clash detection has exactly the
-same input it had before Stage C.
+**Three answers, not two: `Overlaps`, `Disjoint`, `Indeterminate`.**
 
-Many schools will never enter individual students. Clash detection then relies on the
-`student_group` hierarchy (`parent_group_id`) to decide which groups overlap. This is a
-genuinely subtle area — combined classes, split sets and composite groups are where
-competitor products differentiate — and getting it wrong produces either phantom clashes
-or missed ones. Needs its own design note and a dedicated fixture before Phase 5.
+Recorded as [adr/0035](adr/0035-student-group-overlap-is-a-three-state-answer.md). Only
+`Overlaps` is a hard `student-clash`; `Disjoint` must be *proved*; `Indeterminate` is never
+silently converted to either, is not enforced, and is reported with the count of answers
+that would clear it.
+
+Overlap is proved from facts first and declarations second — shared effective membership
+over the group's subtree (filtered to students who are `is_active` and hold a non-`LEFT`
+spell), containment through `parent_group_id`, and a pigeonhole test on declared sizes
+within a common ancestor. Disjointness is proved only by provable emptiness or by one future
+nullable column, `student_group.children_are_disjoint`, asked **per parent** rather than per
+pair.
+
+The record also establishes what this decision was open for: the hierarchy alone **cannot**
+express two different divisions of one cohort, so `V10:124-126`'s assumption that sibling
+teaching sets do not clash is true of three classes and false of three sets of different
+subjects. That is why a column is required rather than optional, and why it is carried by
+M5's migration. `SOLVER.md` §2's *"expanded to leaf student sets"* and `CONSTRAINTS.md`'s
+*"resolved to leaf student sets"* are corrected by the same record: an expansion to students
+would make `student-clash` silent for exactly the schools [ADR 0006](adr/0006-group-based-scheduling-first.md)
+protects.
+
+The fixture this entry asked for is specified — sixteen cases plus a twenty-row truth table
+— and is M2's to build.
 
 ### D13 — Minimum supported Rust version ✅ RESOLVED 2026-10-06 (Phase 0)
 
@@ -271,9 +287,40 @@ states rather than by inventing policy, and are recorded here for visibility:
 - `calendar_day(school_id, date, COALESCE(campus_id, ''))` gets the same `COALESCE`
   treatment as `timeslot`, for the same reason: the campus-less rows are the common case.
 
-### D22 — How cross-campus time is compared for a shared room
+### D22 — How cross-campus time is compared for a shared room ✅ RESOLVED 2026-10-21 (M1)
 
-**Open. Must be settled before `room-clash` is implemented for shared rooms.**
+**Option A, within a school: compare `[starts_at, ends_at)` intervals, not `timeslot_id`.
+The cross-school case is explicitly deferred.**
+
+Recorded as [adr/0032](adr/0032-timetable-generation-is-scoped-to-one-school.md), accepted
+2026-10-21 after every premise below was re-verified against `V15`. Two placements of one
+school conflict on a shared `room_id` or `resource_id` when they fall on the same `cycle_day`
+and their wall-clock intervals overlap — which needs **no schema change**, no timezone
+(one school has one zone, so it cancels on both sides) and no `calendar_day` coverage (both
+bell schedules of a school materialise against the same `cycle_day` rows). Which schedule an
+activity draws its times from is [adr/0033](adr/0033-an-activity-schedules-against-one-resolved-bell-schedule.md).
+
+Option B was rejected for refusing a setup [ADR 0014](adr/0014-rooms-shared-across-campuses.md)
+deliberately supports; Option C was rejected as premature. The cross-school half is not
+merely undesigned but **unavailable**: the workspace ships no timezone database and nothing
+parses `school.timezone`, so it would need a new dependency and a licence review before any
+algorithm. It is reported by name instead, per that record's rule 3.
+
+**The premise correction this entry carried is applied below.** The original text read
+*"`period_structure` is school-wide, and nothing ties a campus to exactly one"*. That
+understated the model and is struck: `period_structure.campus_id` exists (`V4:82`), a
+campus-scoped schedule is expressible, and `timeslot.campus_id` is derived from it under a
+trigger pair (`V4:149-184`). The **conclusion was unaffected** — timeslot identity still
+carries no campus, so two schedules still produce different `timeslot` rows for overlapping
+minutes, which is exactly why the answer compares minutes.
+
+The original statement of the problem is kept below, with that one sentence corrected, because
+the three options and the `R-shared-room-time` risk it names are what the ADR argues against.
+
+---
+
+**Original entry, as it stood before resolution.** Settled before `room-clash` is
+implemented for shared rooms.
 
 `V6` made a room shareable across campuses
 ([adr/0014](adr/0014-rooms-shared-across-campuses.md)). A shared room is **one** room with
@@ -283,8 +330,11 @@ other campus may. That part is decided and is recorded as a binding invariant in
 
 What is *not* decided is what "at a given time" means across campuses.
 
-- `period_structure` is school-wide, and nothing ties a campus to exactly one, so two
-  campuses can timetable against different bell schedules.
+- `period_structure` is **campus-scoped** — `campus_id` is nullable and `NULL` means
+  school-wide (`V4:82`) — and `is_default` is unique per campus bucket rather than per
+  school, so two campuses can timetable against different bell schedules and a school may
+  hold both a school-wide schedule and a campus one at once. *(Corrected 2026-10-21; the
+  original sentence claimed a campus could not be tied to a schedule at all.)*
 - Those schedules can carry the same period ordinals with different wall-clock times.
   **Period 3 on North is not necessarily Period 3 on South.**
 - A timeslot's identity is `(term_id, cycle_day_id, period_id)` with no campus in it
@@ -312,6 +362,12 @@ Related risk: **R-shared-room-time.** Until this is settled, a school that share
 between campuses on different bell schedules has no protection against double-booking it,
 and will not be warned by anything. The model permits the configuration; the solver cannot
 yet reason about it.
+
+> **Status 2026-10-21.** The risk is **answered for the intra-school case and still carried
+> for the cross-school one.** [adr/0032](adr/0032-timetable-generation-is-scoped-to-one-school.md)
+> rule 2 decides the comparison; nothing implements it, so the exposure lasts until M5 ships
+> `room-clash`. Across schools the risk is permanent until a time alignment and a timezone
+> database both exist, and rule 3 converts it from silent to announced.
 
 **Widened by `V13`.** `resource_campus` ([adr/0022](adr/0022-resources-shared-across-campuses.md))
 makes a resource shareable on the same terms, so whatever answers this for `room-clash`
@@ -569,10 +625,29 @@ can be built without a single student record.
 
 ---
 
-### D34 — Which bell schedule does an activity schedule against?
+### D34 — Which bell schedule does an activity schedule against? ✅ RESOLVED 2026-10-21 (M1)
 
-**Open. Must be settled before the `Problem` loader is written.** Raised by
-[SCHEDULING-READINESS-AUDIT.md](SCHEDULING-READINESS-AUDIT.md) §4.1.
+**Exactly one, resolved by campus compatibility against the schedules actually materialised
+into the grid. A non-unique answer is a refusal, never a guess.**
+
+Recorded as [adr/0033](adr/0033-an-activity-schedules-against-one-resolved-bell-schedule.md).
+The solve derives `G`, the set of `period_structure` rows with slots in `(cycle, term)`; a
+structure is compatible with a class section when it is school-wide, when it names the
+section's campus, or when the section names no campus **and the school has exactly one**.
+Exactly one compatible structure resolves; zero and more-than-one are hard pre-flight errors
+that name the section, the cause and the remedy.
+
+Option A was rejected: its fallback is silent and mishandles an ordinary configuration — a
+multi-campus school whose sections leave `campus_id` null. Option C (a column on the
+activity or section) was rejected as premature, and the record names the one future case
+that would justify it: two bell schedules on one campus. The answer costs **no migration**.
+
+Two findings came out of resolving it. `is_default` cannot serve as the tie-break, because
+it is unique per *campus bucket* and a school may hold two defaults; and the interface
+already contains the smaller version of that ambiguity at `GridPreviewSection.tsx:103`,
+which picks the first `is_default` row in a name-ordered list. The second is survivable where
+it is — materialisation is previewed and confirmed — and is the evidence that this decision
+was not hypothetical. **No code was changed by M1**; fixing that default is a separate PR.
 
 The grid is materialised per `(cycle, period_structure, term)` —
 `MaterialisationRequest` in `repo/time_model.rs` names all three — so a school running two
@@ -605,10 +680,30 @@ scheduling rule in the crate that owns SQL.
 
 ---
 
-### D35 — What does `room-capacity` compare against?
+### D35 — What does `room-capacity` compare against? ✅ RESOLVED 2026-10-21 (M1)
 
-**Open. Must be settled before the constraint registry is written.** Raised by
-[SCHEDULING-READINESS-AUDIT.md](SCHEDULING-READINESS-AUDIT.md) §4.4.
+**Nothing yet: `room-capacity` leaves the first constraint set.** Expected attendance
+becomes an explicit, optional `class_section.expected_attendance`; it is derived only from
+declared group sizes over provably disjoint groups, and is `Unknown` otherwise.
+
+Recorded as [adr/0034](adr/0034-expected-attendance-is-explicit-and-room-capacity-waits-for-it.md).
+The type is **not registered** in M5 and `CONSTRAINTS.md` moves it from `M1` to `M2+`,
+because an evaluator written now could only be tested against a left-hand side that is
+`Unknown` everywhere — failing [CLAUDE.md](../CLAUDE.md) §4's fourth requirement — and a
+registered type that never fires tells the user their rooms are being checked.
+
+`Unknown` is a third value, never `0` and never a pass: the constraint is **not evaluated**
+for that activity, generation is not blocked, room assignment is not blocked, and the count
+is reported in pre-flight and carried on the generated timetable. The reason it cannot be
+`0` is already in the repository — `AttendingGroup.population` is
+`size.unwrap_or(named_members)` (`repo/lessons.rs:1396`) and `ClassSectionDetail.tsx:535`
+sums those, so a section whose groups declare no size displays an audience of `0`. That is
+correct for the screen it is on and would satisfy every room in the school.
+
+The name matters and was chosen rather than reused: `class_section.max_size` stays reserved
+for M2 sectioning (`section-max-size`, `section-balance` in
+[ADR 0006](adr/0006-group-based-scheduling-first.md)). A cap on allocation and an occupancy
+figure for a room are different quantities that are usually different numbers.
 
 [CONSTRAINTS.md](CONSTRAINTS.md) defines `room-capacity` as *"Room capacity ≥ activity's
 required capacity"* and marks it `M1`. `room.capacity` exists and is `NOT NULL`. **The
@@ -631,18 +726,12 @@ written avoids shipping a registered `type_key` that cannot be evaluated — whi
 
 ---
 
-### D22 — note added 2026-10-16
+### D22 — note added 2026-10-16, discharged 2026-10-21
 
-[adr/0032](adr/0032-timetable-generation-is-scoped-to-one-school.md) is a **Proposed** record
-answering D22 for the intra-school case — compare `[starts_at, ends_at)` intervals rather
-than `timeslot_id`, which needs no schema change — and deferring the cross-school case
-explicitly. D22 stays open until that record is accepted or rejected.
-
-That record also corrects one premise above: *"`period_structure` is school-wide, and nothing
-ties a campus to exactly one"* understates the model. `period_structure.campus_id` exists and
-`timeslot.campus_id` is derived from it under a trigger pair. D22's **conclusion** is
-unaffected — timeslot identity still carries no campus, so two schedules still produce
-different rows for overlapping minutes — but the sentence should be fixed when D22 closes.
+[adr/0032](adr/0032-timetable-generation-is-scoped-to-one-school.md) was **Proposed** when
+this note was written. It is now **Accepted**, so D22 is closed for the intra-school case and
+its cross-school case is deferred by that record rather than left open here. The premise
+correction this note asked for has been applied to D22's text above and is marked there.
 
 ## Technical risks
 

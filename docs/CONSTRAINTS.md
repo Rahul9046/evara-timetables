@@ -51,15 +51,29 @@ No `appliesTo` rows means project-wide. `term_id` on the instance scopes it in t
 
 Status: `M1` = Milestone 1, `M2+` = later, `R` = schema reserved only.
 
+> **The `Status` column is a plan, not a record of what works.** As of `V15`, **nothing in
+> this file is implemented**: `crates/evara-constraints` holds no `struct`, no `trait` and no
+> `fn`, there is no `constraint_instance` table, and no evaluator has ever run. See
+> [SCHEDULING-READINESS-AUDIT.md](SCHEDULING-READINESS-AUDIT.md) §5 for the measured state.
+>
+> `M1` here also means *specified for* Milestone 1 rather than *in the first solver*. The
+> first solver's set is nine types — eight hard plus `activity-scheduled` — and
+> [SCHEDULING-ARCHITECTURE-DECISIONS.md](SCHEDULING-ARCHITECTURE-DECISIONS.md) §6 is the
+> list. `teacher-qualified`, school membership and campus eligibility are deliberately not
+> among them: the solver does not choose teachers in Milestone 1 (D7), and the two
+> eligibility rules are already database invariants under trigger pairs at `V15:507`, so a
+> constraint type for either would be a second implementation of a rule the schema already
+> holds.
+
 ### Clashes and capacity
 
 | Key | Default | Semantics | Status |
 | --- | --- | --- | --- |
 | `teacher-clash` | HARD | A teacher may not be in two activities in one timeslot. `CORE-001` | M1 |
-| `student-clash` | HARD | A student group (resolved to leaf student sets) may not attend two activities in one timeslot. `CORE-002` | M1 |
-| `room-clash` | HARD | A room may not host two activities in one timeslot. Evaluated **per `room_id`, project-wide** — see the note below. `CORE-003` | M1 |
-| `resource-clash` | HARD | Demand for a shared resource may not exceed its quantity in a timeslot. | M1 |
-| `room-capacity` | HARD | Room capacity ≥ activity's required capacity. `CORE-005` | M1 |
+| `student-clash` | HARD | Two activities may not overlap in time when any group attending one **confirmedly overlaps** any group attending the other. Overlap is the three-state function of [adr/0035](adr/0035-student-group-overlap-is-a-three-state-answer.md); an `Indeterminate` pair is reported, not enforced. `CORE-002` | M1 |
+| `room-clash` | HARD | A room may not host two activities at overlapping wall-clock times. Keyed **per `room_id`, project-wide** and evaluated within the school being solved — see the note below. `CORE-003` | M1 |
+| `resource-clash` | HARD | Demand for a shared resource may not exceed its quantity at overlapping wall-clock times. | M1 |
+| `room-capacity` | HARD | Room capacity ≥ the activity's expected attendance. **Not in the first constraint set** — [adr/0034](adr/0034-expected-attendance-is-explicit-and-room-capacity-waits-for-it.md) defers it until `class_section.expected_attendance` exists, because nothing today supplies a left-hand side. `CORE-005` | M2+ |
 | `room-type-required` | HARD | Assigned room must match the required room type. `CORE-006` | M1 |
 | `room-candidate-only` | HARD | If `activity_room_candidate` rows exist, the room must be one of them. | M1 |
 
@@ -71,15 +85,22 @@ Status: `M1` = Milestone 1, `M2+` = later, `R` = schema reserved only.
 > hall, Campus B cannot book it, and a per-campus evaluation would let both succeed and
 > produce a timetable that double-books a physical space while reporting no violation.
 >
-> **This is not yet implementable for the cross-campus case, and must not be guessed.**
-> `period_structure` is school-wide and no campus is tied to one, so two campuses can
+> **The cross-campus case compares minutes, not timeslot identifiers.** `period_structure`
+> is campus-scoped (`campus_id` nullable, `NULL` meaning school-wide), so two campuses can
 > timetable against different bell schedules whose periods share ordinals and differ in
 > wall-clock time. A timeslot's identity is `(term_id, cycle_day_id, period_id)` with no
 > campus in it ([ADR 0011](adr/0011-stable-timeslot-identity.md)), so comparing
-> `timeslot_id` is *not* the same as comparing time. The obvious implementation is wrong
-> exactly when sharing matters, and wrong silently. **D22** in
-> [OPEN-DECISIONS.md](OPEN-DECISIONS.md) must be settled before `room-clash` is
-> implemented for rooms shared between campuses on different bell schedules.
+> `timeslot_id` is *not* the same as comparing time: the obvious implementation is wrong
+> exactly when sharing matters, and wrong silently.
+>
+> **D22 is resolved** by [adr/0032](adr/0032-timetable-generation-is-scoped-to-one-school.md).
+> Two placements conflict when they fall on the same `cycle_day` and their
+> `[starts_at, ends_at)` intervals overlap — within the school being solved, which needs no
+> timezone and no calendar date. Which bell schedule an activity draws its times from is
+> [adr/0033](adr/0033-an-activity-schedules-against-one-resolved-bell-schedule.md). **Across
+> schools the comparison is not made at all**: it is reported by name, per that record's
+> rule 3, and a timetable is never described as conflict-free. Nothing is implemented yet —
+> this is M5's work, and the status column above is a plan.
 
 ### Availability and time windows
 
