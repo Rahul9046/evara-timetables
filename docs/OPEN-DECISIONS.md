@@ -154,7 +154,12 @@ would make `student-clash` silent for exactly the schools [ADR 0006](adr/0006-gr
 protects.
 
 The fixture this entry asked for is specified — sixteen cases plus a twenty-row truth table
-— and is M2's to build.
+— and **M2 built it**: nine of the 24 fixtures in `evara_core::scheduling::fixtures` carry
+the group-overlap cases, each recording the verdict *and* which of ADR 0035 §3's seven rules
+decides it, so M5 can assert the route as well as the answer. The three-state `Overlap` and
+the three-state `DisjointnessDeclaration` are declared; the function that derives them is
+still M5's, and the column is still unwritten. See
+[SCHEDULING-FIXTURES.md](SCHEDULING-FIXTURES.md).
 
 ### D13 — Minimum supported Rust version ✅ RESOLVED 2026-10-06 (Phase 0)
 
@@ -827,3 +832,18 @@ Synthetic fixtures are mandatory, and naive ones are too easy — they hide the 
 timetables. **Mitigation:** a parameterised generator in `evara-cli` with knobs for
 tightness, specialist-room scarcity and part-time fraction, plus hand-built adversarial
 cases.
+
+**Partly mitigated in M2, and the mitigation changed shape.** The generator is in
+`evara_core::scheduling::fixtures` rather than `evara-cli`, because `evara-constraints` and
+`evara-solver` must be able to use it and neither can depend on a binary crate. It took the
+*hand-built adversarial cases* half of the mitigation and not the *knobs* half: 22 of the 24
+fixtures are a named pathology each — an unresolvable bell schedule, a contradicted
+disjointness declaration, an unbookable specialist room, an occurrence longer than any
+teaching run — which a reviewer can read in full and a failing assertion can name. A dial
+produces a school nobody can characterise, and "tightness 0.8 failed" is not a diagnosis.
+
+**The risk is not closed.** The `medium` fixture is deliberately comfortable — every class
+needs 20 of its 30 slots, no teacher carries more than 8 occurrences — so it exercises scale
+and not difficulty. A genuinely tight fixture is still wanted, and is best written once a
+solver exists to be beaten by it, because until then nobody can tell a hard fixture from an
+impossible one. Phase 6, with the score baselines.

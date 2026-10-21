@@ -37,6 +37,7 @@ evara-timetables/
 │   ├── evara-report/               # view projections, HTML/CSV/PDF renderers
 │   ├── evara-integrations/         # external adapters — empty, feature-gated
 │   └── evara-cli/                  # headless solve / benchmark / migrate / fixture gen
+│                                   #   (only `fixture` exists; it writes synthetic data)
 ├── packages/
 │   └── domain/                     # GENERATED TypeScript types + UI-side guards
 ├── fixtures/                       # synthetic schools (JSON + generator + .evara)
@@ -543,11 +544,18 @@ stating once rather than rediscovering:
 - Per-occurrence overrides: `activity_teacher`, `activity_group`,
   `activity_room_candidate`, `activity_resource`. Room **allocation** is Phase 6, and
   Stage C's activities inherit their staffing and audience from their class section.
-- `fixtures/`: a synthetic school generator in `evara-cli` plus 3 checked-in fixtures —
-  tiny (feasible by hand), medium (~400 activities), and one deliberately infeasible.
-  Synthetic data only, and no real school names — `CLAUDE.md` rule 3.
+- ✅ `fixtures/`: **done in M2**, and in a different place than this line expected. The
+  generator lives in `evara_core::scheduling::fixtures` rather than in `evara-cli`, because
+  `evara-constraints` and `evara-solver` must be able to use it and neither can depend on a
+  binary crate; `evara-cli` enables it behind a feature and exposes `evara fixture`. Nothing
+  is checked in as JSON — a generator that is a pure function of a seed already *is* a
+  fixture, so a committed copy could only drift from it. 24 fixtures: `tiny` (with a
+  known-feasible arrangement attached), `medium` (80 teachers, 1 000 students at group level,
+  **500** occurrences), two conclusively impossible ones, and twenty focused cases carrying
+  the acceptance tests of ADRs 0032–0035. Synthetic data only — `CLAUDE.md` rule 3. See
+  [SCHEDULING-FIXTURES.md](SCHEDULING-FIXTURES.md).
 
-**Closes M1-7 once the fixtures land.**
+**Closes M1-7.**
 
 ---
 
@@ -566,7 +574,10 @@ stating once rather than rediscovering:
 ## Phase 5 — Scorer, validator, diagnostics
 
 - Implement the `M1` evaluators from [CONSTRAINTS.md](CONSTRAINTS.md) §3 — roughly 22
-  types. One module and one test file each.
+  types. One module and one test file each. They are written against the vocabulary M2
+  declared in `evara_core::scheduling` and are tested against M2's fixtures, whose
+  `Expectations` already record the verdict *and* the ADR rule that decides it —
+  [SCHEDULING-FIXTURES.md](SCHEDULING-FIXTURES.md) §9.
 - `ReferenceScorer` (full evaluation) and `IncrementalScorer` (indexed), plus the
   property test asserting they agree after random move sequences. This test gates every
   later constraint.

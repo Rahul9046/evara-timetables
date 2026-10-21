@@ -71,32 +71,51 @@ addressed by dense `u32` indexes, not UUIDs. UUID ↔ index translation happens 
 `evara-db`'s loader. The inner loop touches only integers and bitsets.
 
 ```rust
+// Implemented in M2 as `evara_core::scheduling`. Abridged: every field carries doc comments
+// naming the record that fixes its meaning.
 pub struct Problem {
-    pub timeslots:  Vec<TimeslotFact>,     // cycle_day, period, ordinal, campus,
-                                           //   period_structure, starts_at/ends_at
-    pub rooms:      Vec<RoomFact>,         // capacity, room_type, campus
-    pub teachers:   Vec<TeacherFact>,
-    pub groups:     Vec<GroupFact>,        // group indices + the overlap relation,
-                                           //   NOT expanded student sets — see below
-    pub activities: Vec<ActivityFact>,     // duration, teachers, groups, requirements,
-                                           //   resolved bell schedule
+    pub context:     SchedulingContext,    // school, cycle, term, campuses, bell schedules
+    pub timeslots:   Vec<TimeslotFact>,    // cycle_day, period, bell schedule, campus,
+                                           //   is_teaching, and its wall-clock interval
+    pub room_types:  Vec<RoomTypeFact>,
+    pub rooms:       Vec<RoomFact>,        // capacity, room_type, campuses, is_bookable
+    pub teachers:    Vec<TeacherFact>,
+    pub groups:      Vec<GroupFact>,       // the inputs to overlap, NOT expanded student
+                                           //   sets — see below
+    pub sections:    Vec<SectionFact>,     // staffing, audience + masks, room requirement,
+                                           //   resolved bell schedule, expected attendance
+    pub activities:  Vec<ActivityFact>,    // one placeable occurrence each: duration,
+                                           //   split_index, and its section
+    pub overlap:     OverlapRelation,      // three-state, per pair of group indices
     pub unavailable: UnavailabilityIndex,  // bitset per (entity, timeslot)
-    pub constraints: Vec<CompiledConstraint>,
-    pub pinned:     Vec<Option<Placement>>, // locked activities
+    pub pinned:      Vec<Option<Placement>>, // locked activities; nothing writes it yet
 }
 
-pub struct Assignment {                    // the solution
-    pub placements: Vec<Option<Placement>>, // indexed by activity index
-}
-pub struct Placement { pub timeslot: u32, pub room: Option<u32> }
+pub struct Assignment { /* one Option<Placement> per activity index */ }
+pub struct Placement { pub timeslot: TimeslotIx, pub room: Option<RoomIx> }
 ```
+
+`CompiledConstraint` is **not** in the implemented `Problem`: the registry is M5's and a
+field for it would be a promise this milestone cannot keep. It joins the struct with the
+evaluators that read it.
+
+The indices are newtypes (`TimeslotIx`, `RoomIx`, `ActivityIx`, …) over `u32` rather than bare
+`u32`s. The shape is unchanged and the runtime cost is nil; what it buys is that passing a
+room index where a timeslot index belongs becomes a type error rather than a plausible wrong
+answer — the worst failure mode in a product whose value is that its answers are right.
+
+A section exists between an activity and its facts because four occurrences of one section
+are taught by the same people to the same groups in the same kind of room and resolve to the
+same bell schedule. Holding that once rather than four times is the argument
+[adr/0029](adr/0029-a-lesson-is-a-course-a-section-and-its-occurrences.md) §5 used to reject
+`activity_teacher` and `activity_group`.
 
 Two planning variables per activity — **timeslot** and **room** — matching the prototype,
 plus a third later for teacher selection when a class has interchangeable staff
 (see [OPEN-DECISIONS.md](OPEN-DECISIONS.md) D7).
 
-**Three things M1's decisions fix about this shape.** None is implemented; all three are
-contracts the loader (M4) and the types (M2) are built to.
+**Three things M1's decisions fix about this shape.** The types are implemented (M2); the
+loader that fills them in is M4's, and nothing evaluates or searches yet.
 
 - **An activity's value range is one bell schedule's slots, resolved before the solve.** The
   grid of a `(cycle, term)` may hold slots from several `period_structure` rows, and
@@ -120,7 +139,9 @@ contracts the loader (M4) and the types (M2) are built to.
   expected attendance an explicit two-state value rather than a number that defaults to zero.
 
 The whole set is summarised in
-[SCHEDULING-ARCHITECTURE-DECISIONS.md](SCHEDULING-ARCHITECTURE-DECISIONS.md).
+[SCHEDULING-ARCHITECTURE-DECISIONS.md](SCHEDULING-ARCHITECTURE-DECISIONS.md), and
+[SCHEDULING-FIXTURES.md](SCHEDULING-FIXTURES.md) records how M2 turned it into types and the
+fixtures each later milestone is tested against.
 
 ---
 

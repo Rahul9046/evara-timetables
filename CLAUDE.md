@@ -206,8 +206,23 @@ disagree about whether a placement is legal, the product is broken.
   rows where the column is unset — often the common case.
 - **Naming**: `snake_case` in SQL and Rust, `camelCase` in JSON and TypeScript, mapped in
   exactly one place with serde attributes.
+- **The scheduling vocabulary is `evara-core`'s, and its unknowns are variants.**
+  `scheduling::Problem` and its facts, `Placement`, `Assignment`, the diagnostics and
+  `SolveOutcome` live there because `evara-db`, `evara-constraints`, `evara-solver` and the
+  command layer all have to agree on them. Three of its types carry a decision in their
+  shape and must keep it: `ExpectedAttendance::Unknown` holds **no number**, so there is no
+  `0` to leak into a comparison; `Overlap::Indeterminate` is reachable only by naming it, so
+  no caller can write `!= Disjoint` and promote the unproven case into a clash; and
+  `DisjointnessDeclaration` keeps `NotStated` and `MayOverlap` apart, because they give the
+  same overlap answer and are different states. A duration is a **count of periods** and the
+  wall-clock interval is derived from the periods covered — never the other way round.
+  `RoomFact::is_candidate_for` is the **one** implementation of the room candidate domain,
+  and the loader, the move validator and the fixtures all call it rather than restating the
+  predicate. [SCHEDULING-FIXTURES.md](docs/SCHEDULING-FIXTURES.md).
 - **Solving is deterministic.** Seeded RNG, recorded on the run. No `Instant::now()` or
-  unseeded randomness inside the solver's decisions.
+  unseeded randomness inside the solver's decisions. The same rule binds the fixture
+  generator: it reads no clock and depends on no RNG crate, so a fixture's bytes cannot
+  change under a dependency bump and invalidate a committed baseline.
 - **Scores are integers.** Three levels, compared lexicographically. Weights become
   integer penalties at compile time, not at scoring time.
 
@@ -247,3 +262,5 @@ keeps incremental scoring honest, and a wrong delta silently produces a wrong ti
 | `npm run rust:test` | Rust tests only |
 | `npm run typecheck` | TypeScript only |
 | `cargo run -p evara-cli -- --help` | Headless CLI |
+| `cargo run -p evara-cli -- fixture --list` | List the synthetic scheduling fixtures |
+| `cargo run -p evara-cli -- fixture tiny` | Write one as JSON — synthetic test data, **not** a timetable |

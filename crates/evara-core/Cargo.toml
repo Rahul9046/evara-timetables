@@ -17,6 +17,11 @@ workspace = true
 # solver and the CLI never carry the generator; `evara-typegen` and the desktop crate
 # turn it on. See ADR 0012.
 ts = ["dep:ts-rs"]
+# The deterministic synthetic-school generator in `scheduling::fixtures`. Off by default so
+# the desktop binary does not carry test infrastructure; `evara-cli` turns it on for the
+# `fixture` command, and the module is also compiled whenever this crate's own tests are
+# built, so `cargo test -p evara-core` exercises it with no feature flag.
+fixtures = []
 
 [dependencies]
 serde = { workspace = true }
