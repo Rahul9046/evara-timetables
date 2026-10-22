@@ -345,7 +345,19 @@ fn shared_teacher() -> (Project, School, School) {
         .bells(&mut project, "Southmoor Day", None, STANDARD_DAY)
         .materialise(&mut project);
 
-    let hall = north.room(&mut project, "Joint Sports Hall", 0, None, 200, &[]);
+    // Classified under Northgate, which is where it was created. Southmoor declares a type
+    // of its own with the same name, so the two are same-named and different records — the
+    // case §10 of the assembly document is about.
+    let north_hall_type = north.room_type(&mut project, "Sports Hall");
+    south.room_type(&mut project, "Sports Hall");
+    let hall = north.room(
+        &mut project,
+        "Joint Sports Hall",
+        0,
+        Some(north_hall_type),
+        200,
+        &[],
+    );
     project
         .db()
         .structure()
@@ -1911,4 +1923,103 @@ fn inspection_refuses_a_file_that_is_not_a_project() {
         crate::Database::open_for_inspection(&absent),
         Err(DbError::ProjectNotFound { .. })
     ));
+}
+
+#[test]
+fn a_shared_rooms_classification_survives_and_does_not_match_a_same_named_type() {
+    // §10: `create_room` does not hold a room's type to its campus's school, and a shared
+    // room's type belongs to whichever school created it. Dropping the classification would
+    // be wrong in the dangerous direction — an unclassified room is a candidate for *every*
+    // requirement — so it is loaded even though the other school does not own it.
+    let (project, north, south) = shared_teacher();
+    let from_south = assemble(&project, &south);
+
+    let hall = from_south
+        .problem
+        .rooms
+        .iter()
+        .find(|r| r.name == "Joint Sports Hall")
+        .expect("the hall is in scope at Southmoor");
+    let classified = hall.room_type.expect("its classification is kept");
+
+    // Two room types are in scope at Southmoor: its own, and Northgate's, which the shared
+    // hall is classified under. They share a name and are different records.
+    assert_eq!(from_south.problem.room_types.len(), 2);
+    let hall_type = &from_south.problem.room_types[classified.get()];
+    assert_eq!(hall_type.name, "Sports Hall");
+
+    let own = from_south
+        .problem
+        .room_types
+        .iter()
+        .position(|t| t.id != hall_type.id)
+        .expect("Southmoor's own type of the same name");
+    assert_ne!(
+        own,
+        classified.get(),
+        "Southmoor has not said the shared hall is one of its sports halls"
+    );
+
+    // And the identity is Northgate's, so a section of Southmoor requiring *its* sports hall
+    // would not be offered this room.
+    let from_north = assemble(&project, &north);
+    let north_type = from_north
+        .problem
+        .rooms
+        .iter()
+        .find(|r| r.name == "Joint Sports Hall")
+        .and_then(|r| r.room_type)
+        .map(|ix| from_north.problem.room_types[ix.get()].id)
+        .expect("Northgate classifies it too");
+    assert_eq!(hall_type.id, north_type, "one classification, one identity");
+}
+
+#[test]
+fn an_unbookable_room_is_in_no_candidate_set() {
+    // ADR 0034 §6: `is_bookable = 0` removes a room from every activity's candidate set, and
+    // is unrelated to how many people fit. The loader reads it through
+    // `RoomFact::is_candidate_for`, which is the one place the three conditions live.
+    let mut project = Project::new();
+    let mut school = School::new(&mut project, "Oakhanger School", &["Oakhanger"], 5);
+    school
+        .bells(&mut project, "Standard Day", None, STANDARD_DAY)
+        .materialise(&mut project);
+    let kind = school.room_type(&mut project, "Drama Studio");
+    school.room(&mut project, "Studio 1", 0, Some(kind), 30, &[]);
+    school.unbookable_room(&mut project, "Studio 2 (closed)", 0, Some(kind));
+
+    let teacher = school.teacher(&mut project, "Nevin");
+    let group = school.group(&mut project, "9A", Some(28), None);
+    let drama = school.subject(&mut project, "Drama");
+    let section = school.section(
+        &mut project,
+        drama,
+        "9A Drama",
+        None,
+        Some(kind),
+        Some(2),
+        false,
+    );
+    school.teach(&mut project, section, teacher);
+    school.attend(&mut project, section, group);
+    school.occurrences(&mut project, section, 1, 2);
+    project.reopen();
+
+    let assembly = assemble(&project, &school);
+    assert_eq!(assembly.problem.rooms.len(), 2, "both rooms are loaded");
+    assert!(
+        assembly.problem.rooms.iter().any(|r| !r.is_bookable),
+        "and the stored flag is carried, not dropped"
+    );
+    assert_eq!(
+        assembly.problem.sections[0].room_candidates.len(),
+        1,
+        "only the bookable studio is a candidate"
+    );
+
+    // Not a blocking finding: a candidate set of one is enough, and the closed studio is a
+    // deliberate state rather than a problem to report.
+    let found = report(&project, &school);
+    assert!(!found.findings.has(DiagnosticCode::NoRoomOfRequiredType));
+    assert!(found.may_solve(), "{}", found.headline());
 }

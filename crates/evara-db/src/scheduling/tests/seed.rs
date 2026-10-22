@@ -322,6 +322,40 @@ impl School {
         id
     }
 
+    /// Adds a room that may not be booked.
+    ///
+    /// `is_bookable = 0` removes a room from **every** activity's candidate set and is
+    /// unrelated to how many people fit (ADR 0034 §6). Stored, editable, and read by nothing
+    /// until the loader built a candidate domain.
+    pub(super) fn unbookable_room(
+        &mut self,
+        project: &mut Project,
+        name: &str,
+        campus: usize,
+        room_type: Option<Uuid>,
+    ) -> Uuid {
+        let id = project
+            .db()
+            .structure()
+            .create_room(
+                &RoomInput {
+                    campus_id: self.campuses[campus],
+                    building_id: None,
+                    room_type_id: room_type,
+                    name: name.to_owned(),
+                    code: format!("R{}", self.rooms.len()),
+                    capacity: 40,
+                    is_bookable: false,
+                    notes: None,
+                },
+                &[],
+            )
+            .expect("create room")
+            .id;
+        self.rooms.push(id);
+        id
+    }
+
     /// Adds a room on one campus, optionally shared with others.
     pub(super) fn room(
         &mut self,
