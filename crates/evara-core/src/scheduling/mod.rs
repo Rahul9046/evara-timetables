@@ -84,7 +84,8 @@ pub use availability::{
 pub use clock::{DurationPeriods, TimeInterval, TimeOfDay};
 pub use constraints::{
     AffectedSet, CompiledConstraint, ConstraintError, ConstraintLevel, ConstraintOptions,
-    ConstraintScope, ConstraintType, Explanation, ScopeRef, Violation, ViolationKey, ViolationSink,
+    ConstraintScope, ConstraintType, Explanation, ScopeRef, StoredConstraint, Violation,
+    ViolationKey, ViolationSink,
 };
 pub use context::{
     BellScheduleFact, BellScheduleResolution, CampusFact, CycleDayFact, CycleFact, CycleKind,

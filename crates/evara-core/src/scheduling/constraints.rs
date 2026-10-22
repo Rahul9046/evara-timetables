@@ -388,6 +388,42 @@ impl CompiledConstraint {
     }
 }
 
+/// A `constraint_instance` row as stored, before the registry has made sense of it.
+///
+/// # Why the un-compiled form is a type, and why it lives here
+///
+/// `evara-db` reads the row and `evara-constraints` validates it — the schemas live beside
+/// the evaluators — and `evara-db` may not depend on `evara-constraints`. So the hand-over
+/// needs a shape both can name, and it sits in the crate underneath both.
+///
+/// Every field is as stored: `type_key` and `level` are the raw strings, `params` is the raw
+/// JSON text. Nothing here is interpreted, which is the point — interpretation is
+/// `Registry::compile`'s job and it is allowed to fail, with
+/// [`ConstraintError`] saying which stored value it could not accept.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredConstraint {
+    /// The row's identity.
+    pub id: Uuid,
+    /// `constraint_instance.type_key`, as stored.
+    pub type_key: String,
+    /// `constraint_instance.level`, as stored.
+    pub level: String,
+    /// `constraint_instance.weight`.
+    pub weight: i64,
+    /// `constraint_instance.enabled`.
+    pub enabled: bool,
+    /// `constraint_instance.params`, as stored JSON text.
+    ///
+    /// A `String` rather than a parsed value, because `evara-core` holds no JSON parser —
+    /// see this module's header for why that is deliberate.
+    pub params: String,
+    /// `constraint_instance.term_id`.
+    pub term: Option<Uuid>,
+    /// The `constraint_ref` rows that scope it.
+    pub applies_to: Vec<ScopeRef>,
+}
+
 /// One way a candidate timetable breaks one rule.
 ///
 /// # Structured, never a string
