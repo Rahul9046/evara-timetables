@@ -84,6 +84,15 @@ studentGroups: number,
  */
 availabilityRules: number, 
 /**
+ * Configured constraints owned by the school.
+ *
+ * `V16`'s `constraint_instance.school_id` is a RESTRICT edge, so one of these refuses
+ * the delete. Counted rather than left out: a refusal the count did not predict is the
+ * screen saying "nothing is in the way" and then failing, which is the one thing this
+ * figure exists to prevent.
+ */
+constraints: number, 
+/**
  * Teachers another school created whom this one employs.
  *
  * Counted separately from [`SchoolDependents::teachers`] so the two never

@@ -74,6 +74,10 @@ pub use crate::migrations::supported_schema_version;
 pub use crate::repo::availability::{
     Availability, AvailabilityEntity, AvailabilityRule, AvailabilityRuleInput, AvailabilityStatus,
 };
+pub use crate::repo::constraints::{
+    ConstraintInstance, ConstraintInstanceInput, ConstraintScopeEntry, ConstraintScopeEntryInput,
+    Constraints, ScopeEntity, ScopeRole,
+};
 pub use crate::repo::curriculum::{
     Curriculum, Department, DepartmentDependents, DepartmentInput, QualifiedSubject,
     QualifiedTeacher, Subject, SubjectDependents, SubjectInput, TeacherDepartment,
@@ -410,6 +414,19 @@ impl Database {
         Availability::new(self)
     }
 
+    /// Reads and writes configured constraints.
+    ///
+    /// Separate from [`Database::scheduling`] because the two are opposite directions through
+    /// the same subject: this reads and writes the rows a school *configures*, and that
+    /// compiles a school into the problem those rules are evaluated against. A row here tunes
+    /// a rule rather than adding one — every implemented type is evaluated whatever this table
+    /// holds (ADR 0039) — which is why there is no `enable` method and why removing a
+    /// configuration returns the school to the shipped level rather than switching a check
+    /// off. See [`Constraints`].
+    pub fn constraints(&mut self) -> Constraints<'_> {
+        Constraints::new(self)
+    }
+
     /// Reads and writes school membership, campus eligibility and enrolment history.
     ///
     /// Separate from [`Database::people`] because the two answer different questions. A
@@ -613,3 +630,7 @@ mod tests_lessons;
 /// Stage D: a spreadsheet becomes a reviewed plan, and the plan is applied or it is not.
 #[cfg(test)]
 mod tests_import;
+
+/// M5: a configured rule, and the refusals that keep a stored row compilable.
+#[cfg(test)]
+mod tests_constraints;

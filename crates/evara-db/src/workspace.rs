@@ -24,6 +24,7 @@ use crate::Database;
 use crate::cloud_sync::{self, SyncedFolder};
 use crate::error::{DbError, Result};
 use crate::repo::availability::Availability;
+use crate::repo::constraints::Constraints;
 use crate::repo::curriculum::Curriculum;
 use crate::repo::lessons::Lessons;
 use crate::repo::membership::Membership;
@@ -321,6 +322,19 @@ impl Workspace {
             .as_mut()
             .ok_or(DbError::NoProjectOpen)?
             .availability())
+    }
+
+    /// The constraint repository for the open project.
+    ///
+    /// # Errors
+    ///
+    /// [`DbError::NoProjectOpen`] if nothing is open.
+    pub fn constraints(&mut self) -> Result<Constraints<'_>> {
+        Ok(self
+            .open
+            .as_mut()
+            .ok_or(DbError::NoProjectOpen)?
+            .constraints())
     }
 
     /// The scheduling loader for the open project.

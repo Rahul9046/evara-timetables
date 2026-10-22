@@ -116,6 +116,13 @@ pub enum EntityKind {
     AvailabilityRule,
     /// A bookable resource.
     Resource,
+    /// A year level.
+    ///
+    /// Appended rather than placed beside [`EntityKind::StudentGroup`], where it belongs by
+    /// subject: the enum derives `Ord`, several reports sort by it, and a variant inserted in
+    /// the middle would reorder findings that nothing had changed. Added for `V16`'s
+    /// `constraint_ref`, whose `entity_kind` lists it.
+    YearLevel,
 }
 
 /// A thing a finding names, by stored identity.
