@@ -465,6 +465,26 @@ fn declared_disjoint_ancestor(
     a: GroupIx,
     b: GroupIx,
 ) -> Option<GroupIx> {
+    separating_parent(groups, hierarchy, a, b, |parent| {
+        parent.children_are_disjoint.proves_children_disjoint()
+    })
+}
+
+/// The parent under which `a`'s line and `b`'s line separate, where it satisfies `accept`.
+///
+/// Rule 6's search, with the declaration test left to the caller. Two callers need the same
+/// `path(A)` x `path(B)` matching and differ only in which declarations count:
+/// [`declared_disjoint_ancestor`] accepts a parent that has declared its children disjoint,
+/// and [`resolvable_by_declaration`] accepts one that has not answered — which is what makes
+/// the predicted figure an answer about *this* rule rather than a second reading of the
+/// hierarchy that could disagree with it (ADR 0038 SS3).
+fn separating_parent(
+    groups: &[GroupFact],
+    hierarchy: &Hierarchy,
+    a: GroupIx,
+    b: GroupIx,
+    accept: impl Fn(&GroupFact) -> bool,
+) -> Option<GroupIx> {
     for up_a in hierarchy.path_of(a) {
         for up_b in hierarchy.path_of(b) {
             if up_a == up_b {
@@ -480,15 +500,56 @@ fn declared_disjoint_ancestor(
             if parent_a != parent_b {
                 continue;
             }
-            if groups
-                .get(parent_a.get())
-                .is_some_and(|parent| parent.children_are_disjoint.proves_children_disjoint())
-            {
+            if groups.get(parent_a.get()).is_some_and(&accept) {
                 return Some(parent_a);
             }
         }
     }
     None
+}
+
+/// How many undecided pairs would be settled if every open declaration were answered
+/// *disjoint*.
+///
+/// # The figure ADR 0038 deferred, computed by the component that owns rule 6
+///
+/// ADR 0035 SS6's example promises a user "answering this would resolve 412 of them", and
+/// [ADR 0038](../../../../docs/adr/0038-counting-unanswered-questions-is-not-evaluating-overlap.md)
+/// declined to produce it in M3 because *"two implementations of rule 6 that can disagree is
+/// worse than one missing number"*. This is that number, produced here — beside rule 6, by
+/// the same path matching rule 6 uses — rather than in the validator.
+///
+/// It is an **upper bound on what declarations alone can do**, and it is exact for the
+/// hypothesis it states: every `NotStated` parent answers *disjoint*. A pair counted here is
+/// one whose two lines separate under such a parent, so rule 6 would fire for it. A pair not
+/// counted here cannot be settled by any declaration — truth table row 17's unrelated groups
+/// share no ancestor — and only membership will do it, which is what the validator's second
+/// branch already says.
+///
+/// Rules 1 to 5 are unaffected by the hypothesis: a pair that is currently `Indeterminate`
+/// has already failed every earlier rule, and changing a declaration from *not stated* to
+/// *disjoint* cannot make an earlier rule fire. So the prediction needs no member identities
+/// and no re-evaluation.
+#[must_use]
+pub fn resolvable_by_declaration(groups: &[GroupFact], relation: &OverlapRelation) -> usize {
+    let hierarchy = Hierarchy::of(groups);
+    let mut count = 0;
+    for a in 0..groups.len() {
+        for b in (a + 1)..groups.len() {
+            let (a, b) = (index(a), index(b));
+            if relation.get(a, b).is_decided() {
+                continue;
+            }
+            if separating_parent(groups, &hierarchy, a, b, |parent| {
+                parent.children_are_disjoint.is_unanswered()
+            })
+            .is_some()
+            {
+                count += 1;
+            }
+        }
+    }
+    count
 }
 
 /// A group's declared size, where it has one.

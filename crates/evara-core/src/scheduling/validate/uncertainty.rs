@@ -216,9 +216,30 @@ fn indeterminate_overlap(pass: &Pass<'_>, report: &mut DiagnosticReport) {
         } else {
             format!("{}, and {more} more", names.join(", "))
         };
+        // The arithmetic ADR 0038 deferred, now that rule 6 exists to produce it. Still
+        // "would settle" rather than "resolves": the figure is exact for the hypothesis that
+        // every open declaration answers *disjoint*, and a parent that answers *may overlap*
+        // has answered without settling anything.
+        let settled = crate::scheduling::overlap::resolvable_by_declaration(
+            &pass.problem.groups,
+            &pass.problem.overlap,
+        );
+        let effect = if settled == 0 {
+            String::from(
+                "would narrow this; some pairs may still need membership information as well.",
+            )
+        } else if settled == pairs {
+            String::from("would settle all of them.")
+        } else {
+            format!(
+                "would settle {settled} of them; the other {} have no common parent to \
+                 declare about, so only the memberships themselves will settle those.",
+                pairs - settled
+            )
+        };
         format!(
             "Answering \"do these groups share students?\" on {} parent group{} — {listed} — \
-             would narrow this; some pairs may still need membership information as well.",
+             {effect}",
             unanswered.len(),
             if unanswered.len() == 1 { "" } else { "s" }
         )

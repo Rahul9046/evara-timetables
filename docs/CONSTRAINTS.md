@@ -4,6 +4,19 @@ Constraints are **first-class data**: rows in `constraint_instance` with a `type
 level, a weight, an enabled flag and JSON parameters. Code provides a registry of
 evaluators keyed by `type_key`; it does not provide a list of hardcoded rules.
 
+> **This file is the catalogue; [CONSTRAINT-ENGINE.md](CONSTRAINT-ENGINE.md) is the engine.**
+> Everything below is what Evara intends to support, and the `Status` column is a plan. The
+> eight types that exist, what each one actually checks and what it deliberately does not,
+> are in that file, and where the two disagree about a semantic detail it is the record of
+> what the code does.
+>
+> One thing stated here because it changes how this file reads: a rule whose absence would
+> make a timetable wrong is **mandatory in the registry rather than seeded as a row**
+> ([adr/0039](adr/0039-a-mandatory-constraint-lives-in-the-registry.md)). Evaluation runs
+> every implemented type whatever the database holds, and a `constraint_instance` row *tunes*
+> one. Constraints are still data — a weight, a term, a level, a parameter — and what is
+> withheld is only the ability to turn a safety rule off.
+
 Every constraint type must have:
 
 1. a stable `type_key` and a registry entry in `crates/evara-constraints/`
@@ -28,6 +41,12 @@ Levels are compared lexicographically and are **configurable per instance**: a s
 run "teacher preferred times" at `SOFT` while another runs it at `HARD`. The default level
 shipped with each type is listed below, not baked in.
 
+The configuration runs **upwards** for a mandatory type: `activity-scheduled` may be raised
+from MEDIUM to HARD by a school that will not accept an unplaced lesson, and
+`teacher-clash` may not be lowered to SOFT. "A teacher in two rooms at once is a preference"
+is not a disagreement about policy; it is a request for a timetable nobody can run. ADR 0039
+§3 is the floor and both the repository and the compiler enforce it.
+
 ---
 
 ## 2. Scope
@@ -45,16 +64,31 @@ is uniform and referentially intact:
 
 No `appliesTo` rows means project-wide. `term_id` on the instance scopes it in time.
 
+> **None of the eight implemented types can be narrowed, and a `constraint_ref` for one is
+> refused.** Each is a property of the whole timetable: narrowing `teacher-clash` to three
+> named teachers does not mean "check these carefully", it means "stop checking everybody
+> else", and a safety rule that is off for part of a school is worse than one that is off
+> everywhere because nothing says so. `ConstraintType::supports_narrowing()` is where that is
+> stated, and the first narrowable type returns `true` from it. ADR 0039 §4.
+
 ---
 
 ## 3. Core registry
 
 Status: `M1` = Milestone 1, `M2+` = later, `R` = schema reserved only.
 
-> **The `Status` column is a plan, not a record of what works.** As of `V15`, **nothing in
-> this file is implemented**: `crates/evara-constraints` holds no `struct`, no `trait` and no
-> `fn`, there is no `constraint_instance` table, and no evaluator has ever run. See
-> [SCHEDULING-READINESS-AUDIT.md](SCHEDULING-READINESS-AUDIT.md) §5 for the measured state.
+> **The `Status` column is a plan, not a record of what works.** As of `V16`, **eight of
+> the types below are implemented** and the rest are not: the engine, the two tables and the
+> eight evaluators exist, and `evara evaluate` runs them headlessly. The eight are
+> `teacher-clash`, `student-clash`, `room-clash`, `room-type-required`, `entity-unavailable`,
+> `duration-contiguous`, `no-teaching-in-period` and `activity-scheduled`; each is marked
+> **✅ M5** in the tables. Every other row is still a plan.
+>
+> `activity-fixed` is the ninth type of the first set and is **deferred**: there is no
+> `activity.is_locked` column at `V16`, locks arrive with Phase 8's manual editing, and a
+> registered rule that cannot fire tells the user something is being checked when it is not.
+> It is not promoted to hard by implication —
+> [CONSTRAINT-ENGINE.md](CONSTRAINT-ENGINE.md) §3.
 >
 > `M1` here also means *specified for* Milestone 1 rather than *in the first solver*. The
 > first solver's set is nine types — eight hard plus `activity-scheduled` — and
@@ -69,12 +103,12 @@ Status: `M1` = Milestone 1, `M2+` = later, `R` = schema reserved only.
 
 | Key | Default | Semantics | Status |
 | --- | --- | --- | --- |
-| `teacher-clash` | HARD | A teacher may not be in two activities in one timeslot. `CORE-001` | M1 |
-| `student-clash` | HARD | Two activities may not overlap in time when any group attending one **confirmedly overlaps** any group attending the other. Overlap is the three-state function of [adr/0035](adr/0035-student-group-overlap-is-a-three-state-answer.md); an `Indeterminate` pair is reported, not enforced. `CORE-002` | M1 |
-| `room-clash` | HARD | A room may not host two activities at overlapping wall-clock times. Keyed **per `room_id`, project-wide** and evaluated within the school being solved — see the note below. `CORE-003` | M1 |
+| `teacher-clash` | HARD | A teacher may not be in two activities at **overlapping wall-clock times**. Not "in one timeslot": two campuses on two bell schedules hold different slots over the same minutes, and the note below applies to a person exactly as it does to a room. `CORE-001` | ✅ M5 |
+| `student-clash` | HARD | Two activities may not overlap in time when any group attending one **confirmedly overlaps** any group attending the other. Overlap is the three-state function of [adr/0035](adr/0035-student-group-overlap-is-a-three-state-answer.md); an `Indeterminate` pair is reported, not enforced. `CORE-002` | ✅ M5 |
+| `room-clash` | HARD | A room may not host two activities at overlapping wall-clock times. Keyed **per `room_id`, project-wide** and evaluated within the school being solved — see the note below. `CORE-003` | ✅ M5 |
 | `resource-clash` | HARD | Demand for a shared resource may not exceed its quantity at overlapping wall-clock times. | M1 |
 | `room-capacity` | HARD | Room capacity ≥ the activity's expected attendance. **Not in the first constraint set** — [adr/0034](adr/0034-expected-attendance-is-explicit-and-room-capacity-waits-for-it.md) defers it until `class_section.expected_attendance` exists, because nothing today supplies a left-hand side. `CORE-005` | M2+ |
-| `room-type-required` | HARD | Assigned room must match the required room type. `CORE-006` | M1 |
+| `room-type-required` | HARD | Assigned room must match the required room type. `CORE-006` | ✅ M5 |
 | `room-candidate-only` | HARD | If `activity_room_candidate` rows exist, the room must be one of them. | M1 |
 
 > **Shared rooms: occupancy is global.** Since `V6` a room may serve several campuses
@@ -93,32 +127,35 @@ Status: `M1` = Milestone 1, `M2+` = later, `R` = schema reserved only.
 > `timeslot_id` is *not* the same as comparing time: the obvious implementation is wrong
 > exactly when sharing matters, and wrong silently.
 >
+> **Implemented in M5, and tested on exactly this case.** `the_clash_across_two_bell_schedules_is_found_on_the_minutes`
+> puts one teacher and one shared hall across two campuses whose period 1 differ by half an
+> hour: two different `timeslot_id`s, overlapping minutes, both found.
+>
 > **D22 is resolved** by [adr/0032](adr/0032-timetable-generation-is-scoped-to-one-school.md).
 > Two placements conflict when they fall on the same `cycle_day` and their
 > `[starts_at, ends_at)` intervals overlap — within the school being solved, which needs no
 > timezone and no calendar date. Which bell schedule an activity draws its times from is
 > [adr/0033](adr/0033-an-activity-schedules-against-one-resolved-bell-schedule.md). **Across
 > schools the comparison is not made at all**: it is reported by name, per that record's
-> rule 3, and a timetable is never described as conflict-free. Nothing is implemented yet —
-> this is M5's work, and the status column above is a plan.
+> rule 3, and a timetable is never described as conflict-free.
 
 ### Availability and time windows
 
 | Key | Default | Semantics | Status |
 | --- | --- | --- | --- |
-| `entity-unavailable` | HARD | Honours `availability.status = UNAVAILABLE` for teachers, rooms, groups, resources, campuses. `CORE-004` | M1 |
+| `entity-unavailable` | HARD | Honours `availability.status = UNAVAILABLE` for teachers, rooms and groups — the three an occurrence occupies. A `DISCOURAGED` slot is legal and merely worse; a missing rule is not a restriction. A `RESOURCE`, `CAMPUS` or `SUBJECT` rule is reported as not enforced rather than silently dropped. `CORE-004` | ✅ M5 |
 | `preferred-time` | SOFT | Reward/penalise against `PREFERRED` / `DISCOURAGED` availability. `CORE-012` | M1 |
 | `subject-time-window` | SOFT | A subject prefers (or must take) certain periods — e.g. PE not in period 1, Maths in the morning. | M1 |
-| `activity-fixed` | HARD | A locked activity keeps its timeslot and room. `CORE-007` | M1 |
-| `no-teaching-in-period` | HARD | A period kind (`BREAK`, `REGISTRATION`) holds no lessons. | M1 |
+| `activity-fixed` | HARD | A locked activity keeps its timeslot and room. **Deferred**: `activity.is_locked` does not exist at `V16` and locks arrive with Phase 8. `CORE-007` | M2+ |
+| `no-teaching-in-period` | HARD | A period kind (`BREAK`, `REGISTRATION`) holds no lessons. Reads the stored `timeslot.is_teaching` rather than inferring from a label. | ✅ M5 |
 
 ### Frequency, duration, distribution
 
 | Key | Default | Semantics | Status |
 | --- | --- | --- | --- |
-| `activity-scheduled` | MEDIUM | Every activity in scope must be placed somewhere. | M1 |
+| `activity-scheduled` | MEDIUM | Every activity in scope must be placed somewhere. One violation per unplaced occurrence, because each is a separate thing to place. | ✅ M5 |
 | `periods-per-cycle` | MEDIUM | A course's scheduled periods per cycle must equal its target. `CORE-008` | M1 |
-| `duration-contiguous` | HARD | A multi-period activity occupies consecutive periods on one day, not spanning a break unless permitted. | M1 |
+| `duration-contiguous` | HARD | A multi-period activity occupies consecutive periods on one day, not spanning a break unless permitted (`params: { allowBreakSpan }`). The measure is ADR 0033 §5's `runs_on`, so a wall-clock gap between consecutive bells does not break a run and a non-teaching period does. | ✅ M5 |
 | `spread-across-days` | SOFT | Repeated lessons of one course for one group should fall on different days. `CORE-009` | M1 |
 | `max-per-day` | SOFT | At most N periods of a subject for a group per day (`params: { max }`). | M1 |
 | `different-day` | HARD/SOFT | Named activities must not share a day. | M2+ |
@@ -200,7 +237,7 @@ vendor concepts. Recorded here so research stays traceable.
 | Edval "clash tables", "composites" | derived from `student_group` hierarchy and `student-clash` |
 | TimeTabler "schedule structure", "doubles" | `period_structure`; `duration_periods = 2` + `duration-contiguous` |
 | Veracross "blocks / rotations" | `cycle` + `cycle_day` + `calendar_day` |
-| Any vendor's "fixed lesson" | `activity.is_locked` + `activity-fixed` |
+| Any vendor's "fixed lesson" | `activity.is_locked` + `activity-fixed` (both deferred to Phase 8) |
 
 Where a vendor's concept cannot be expressed, the fix is a **new generic constraint type**
 with a vendor-neutral name — never a vendor branch in the core.

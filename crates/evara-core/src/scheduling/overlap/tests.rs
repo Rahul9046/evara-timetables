@@ -13,7 +13,7 @@
 
 use uuid::Uuid;
 
-use super::{Contradiction, GroupMembers, evaluate};
+use super::{Contradiction, GroupMembers, evaluate, resolvable_by_declaration};
 use crate::scheduling::index::{GroupIx, StudentIx};
 use crate::scheduling::population::{DisjointnessDeclaration, Overlap};
 use crate::scheduling::problem::{GroupFact, GroupKind};
@@ -597,4 +597,106 @@ fn a_mask_grows_past_its_initial_capacity() {
     mask.insert(student(500));
     assert!(mask.contains(student(500)));
     assert_eq!(mask.iter().collect::<Vec<_>>(), vec![student(500)]);
+}
+
+// =======================================================================================
+// What answering an open declaration would buy — ADR 0038's deferred arithmetic
+// =======================================================================================
+
+#[test]
+fn the_prediction_counts_the_pairs_one_answer_would_settle() {
+    // Two classes under an unanswered cohort: the pair between them is the one a declaration
+    // reaches, and rule 4 has already settled each class against the cohort itself.
+    let groups = vec![
+        group("Year 9", None, None, DisjointnessDeclaration::NotStated),
+        group("9A", Some(0), None, DisjointnessDeclaration::NotStated),
+        group("9B", Some(0), None, DisjointnessDeclaration::NotStated),
+    ];
+    let outcome = evaluate(&groups, &mut GroupMembers::new(groups.len(), 0));
+    assert_eq!(
+        outcome.relation.get(GroupIx::new(1), GroupIx::new(2)),
+        Overlap::Indeterminate
+    );
+    assert_eq!(resolvable_by_declaration(&groups, &outcome.relation), 1);
+}
+
+#[test]
+fn a_pair_with_no_common_parent_is_not_predicted() {
+    // Truth table row 17: two groups in different year groups share no ancestor, and
+    // *unrelated is not disjoint*. No declaration can settle them, so promising that one
+    // would is exactly the false claim ADR 0038 refused to make.
+    let groups = vec![
+        group("Year 9", None, None, DisjointnessDeclaration::NotStated),
+        group("9A", Some(0), None, DisjointnessDeclaration::NotStated),
+        group("Year 10", None, None, DisjointnessDeclaration::NotStated),
+        group("10A", Some(2), None, DisjointnessDeclaration::NotStated),
+    ];
+    let outcome = evaluate(&groups, &mut GroupMembers::new(groups.len(), 0));
+    let pairs = outcome.relation.indeterminate_pairs();
+    assert!(pairs > 0);
+    assert_eq!(
+        resolvable_by_declaration(&groups, &outcome.relation),
+        0,
+        "{pairs} undecided pairs and not one of them is a declaration away"
+    );
+}
+
+#[test]
+fn an_answered_parent_predicts_nothing_even_though_its_answer_settled_nothing() {
+    // `MayOverlap` has been answered. Counting it would send somebody back to a field they
+    // have already filled in — which is why ADR 0035 keeps `NotStated` and `MayOverlap`
+    // apart despite their giving the same overlap answer.
+    let groups = vec![
+        group("Year 9", None, None, DisjointnessDeclaration::MayOverlap),
+        group("9A", Some(0), None, DisjointnessDeclaration::NotStated),
+        group("9B", Some(0), None, DisjointnessDeclaration::NotStated),
+    ];
+    let outcome = evaluate(&groups, &mut GroupMembers::new(groups.len(), 0));
+    assert_eq!(
+        outcome.relation.get(GroupIx::new(1), GroupIx::new(2)),
+        Overlap::Indeterminate
+    );
+    assert_eq!(resolvable_by_declaration(&groups, &outcome.relation), 0);
+}
+
+#[test]
+fn the_prediction_is_exact_for_the_hypothesis_it_states() {
+    // Rule 6 matches on `path(A)` x `path(B)`, so declaring `Year 9`'s children disjoint
+    // settles `9A-Reading` against `9B-Reading` too — truth table row 12. The prediction uses
+    // the same search, which is why it can be checked against actually answering.
+    let groups = vec![
+        group("Year 9", None, None, DisjointnessDeclaration::NotStated),
+        group("9A", Some(0), None, DisjointnessDeclaration::NotStated),
+        group("9B", Some(0), None, DisjointnessDeclaration::NotStated),
+        group(
+            "Reading A",
+            Some(1),
+            None,
+            DisjointnessDeclaration::NotStated,
+        ),
+        group(
+            "Reading B",
+            Some(2),
+            None,
+            DisjointnessDeclaration::NotStated,
+        ),
+    ];
+    let mut members = GroupMembers::new(groups.len(), 0);
+    let before = evaluate(&groups, &mut members);
+    let predicted = resolvable_by_declaration(&groups, &before.relation);
+
+    let mut answered = groups.clone();
+    answered[0].children_are_disjoint = DisjointnessDeclaration::Disjoint;
+    let mut again = GroupMembers::new(answered.len(), 0);
+    let after = evaluate(&answered, &mut again);
+
+    assert_eq!(
+        before.relation.indeterminate_pairs() - after.relation.indeterminate_pairs(),
+        predicted,
+        "the prediction must equal what answering actually settles"
+    );
+    assert!(
+        predicted >= 4,
+        "the four cross pairs at least, since disjointness propagates: {predicted}"
+    );
 }

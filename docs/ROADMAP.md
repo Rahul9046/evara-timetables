@@ -569,6 +569,26 @@ stating once rather than rediscovering:
 
 **Closes M1-8** (data and configuration; evaluation is Phase 5).
 
+**✅ The data and the registry are done (M5).** The migration is `V16` rather than `0004`;
+the registry, the trait, the eight schemas and the repositories exist, with param validation
+split between the repository and the compiler because the schemas live in a crate `evara-db`
+may not depend on ([adr/0039](adr/0039-a-mandatory-constraint-lives-in-the-registry.md) §5).
+
+**Two deliberate departures from the bullets above**, both recorded as ADRs rather than
+carried out as written:
+
+- **No default set is seeded.** The implemented types are mandatory in the *registry*, so an
+  unconfigured project evaluates all of them and no row's deletion can disable a safety rule.
+  A row tunes a rule. [adr/0039](adr/0039-a-mandatory-constraint-lives-in-the-registry.md).
+- **The scope picker has nothing to pick yet.** None of the eight implemented types can be
+  narrowed, and a `constraint_ref` for one is refused by name — narrowing a clash rule would
+  switch it off everywhere it was not named. The table and its repository exist for the first
+  narrowable type. Same record, §4.
+
+**Still to do in this phase:** the screens. Nothing in the interface writes a
+`constraint_instance` row; the repository, the schemas and `evara evaluate` are the whole
+of M5's configuration surface.
+
 ---
 
 ## Phase 5 — Scorer, validator, diagnostics
@@ -591,13 +611,22 @@ in M4 and M5 — [PRE-SOLVE-VALIDATION.md](PRE-SOLVE-VALIDATION.md) §6. M3 also
 shared bell-schedule resolver ([adr/0036](adr/0036-one-bell-schedule-resolver-shared-by-validation-and-loading.md)),
 which M4's loader must reuse rather than reimplement.
 
-**Still to do in this phase:** the ~22 constraint evaluators, `ReferenceScorer`,
-`IncrementalScorer` and the property test between them, `Explanation` plumbing and
-`validate_move`. None of those exists.
+**✅ The engine and the first eight evaluators are done (M5).** `evara-constraints` holds
+the registry, `Occupancy`, eight evaluators and the evaluation API;
+[CONSTRAINT-ENGINE.md](CONSTRAINT-ENGINE.md) is what they do. `evara evaluate <fixture>`
+scores a fixture's own known-feasible arrangement and finds nothing hard in any of them, and
+`evara evaluate --project` compiles a real school's configuration over the mandatory set.
+`Explanation` is implemented per rule, so the wording lives with the check that produced it.
+
+**Still to do in this phase:** the remaining `M1` evaluators (CONSTRAINTS.md §3 lists about
+twenty-two in total, of which eight exist), `IncrementalScorer` and the property test against
+the reference scorer, and the `validate_move` command — the engine's
+`evaluate_placement` is what that command will call, but no Tauri handler exposes it yet.
 
 **Done when:** the infeasible fixture produces specific, actionable diagnostics with no
 solver involved — **met**: `evara validate infeasible-duration` names the occurrence, both
-figures and the remedy, and exits 1.
+figures and the remedy, and exits 1. M5 adds the other half of that sentence: `evara evaluate
+tiny` scores an arrangement and explains every violation, still with no solver involved.
 
 ---
 

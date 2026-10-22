@@ -1265,8 +1265,15 @@ fn an_indeterminate_relation_produces_one_aggregate_warning() {
         finding.message
     );
     assert!(
-        finding.message.contains("would narrow") || finding.message.contains("already answered"),
-        "and never claims how many pairs an answer resolves: {}",
+        finding.message.contains("would settle")
+            || finding.message.contains("would narrow")
+            || finding.message.contains("already answered"),
+        "and says what answering buys, now that rule 6 can predict it: {}",
+        finding.message
+    );
+    assert!(
+        !finding.message.contains("resolves"),
+        "a prediction about a hypothesis, not a promise: {}",
         finding.message
     );
 }
@@ -2366,4 +2373,81 @@ fn a_member_row_beats_a_declaration_and_the_disagreement_is_named() {
     // It warns and does not block: the clash is already prevented, and refusing to generate
     // over a data error the engine has handled correctly would be the wrong trade.
     assert!(found.may_solve(), "{}", found.headline());
+}
+
+#[test]
+fn a_section_taught_to_two_proved_disjoint_sized_groups_knows_its_attendance() {
+    // ADR 0034 §3 clause 3 in full, which is item 4 of M4's §20 contract. Before `V16` no
+    // *pair* of groups could be proved disjoint, so a section taught to two of them was
+    // `Unknown` however much its groups declared.
+    let (mut project, school) = unknown_overlap();
+    let cohort = school.groups[0];
+    let classes = [school.groups[1], school.groups[2]];
+
+    let mut school = school;
+    let lecture_subject = school.subject(&mut project, "Further Mathematics");
+    let teacher = school.teacher(&mut project, "Pellow");
+    let section = school.section(
+        &mut project,
+        lecture_subject,
+        "9 Mathematics lecture",
+        None,
+        None,
+        Some(1),
+        false,
+    );
+    school.teach(&mut project, section, teacher);
+    for group in classes {
+        school.attend(&mut project, section, group);
+    }
+    school.occurrences(&mut project, section, 1, 1);
+    project.reopen();
+
+    let lecture = |project: &Project, school: &School| {
+        assemble(project, school)
+            .problem
+            .sections
+            .iter()
+            .find(|s| s.name == "9 Mathematics lecture")
+            .expect("the lecture")
+            .expected_attendance
+    };
+
+    // Undeclared: the two groups might share students, and summing would count somebody
+    // twice. An over-stated attendance is a room a school is told is too small.
+    assert_eq!(lecture(&project, &school), ExpectedAttendance::Unknown);
+
+    School::declare_children(&mut project, cohort, Some(true));
+    project.reopen();
+
+    assert_eq!(
+        lecture(&project, &school),
+        ExpectedAttendance::Known { people: 60 },
+        "two groups of thirty, proved disjoint, is sixty people"
+    );
+}
+
+#[test]
+fn the_summary_predicts_how_many_pairs_an_answer_would_settle() {
+    // ADR 0038's future acceptance test 7: the two figures M3 shipped are unchanged, and the
+    // prediction is added beside them rather than rewording either.
+    let (mut project, school) = unknown_overlap();
+    let before = report(&project, &school).summary;
+    assert_eq!(before.indeterminate_group_pairs, 6);
+    assert_eq!(before.unanswered_disjointness, 1);
+    assert_eq!(
+        before.resolvable_by_declaration, 6,
+        "one answer on the cohort would settle all six"
+    );
+
+    School::declare_children(&mut project, school.groups[0], Some(true));
+    project.reopen();
+
+    let after = report(&project, &school).summary;
+    assert_eq!(after.indeterminate_group_pairs, 0);
+    assert_eq!(after.unanswered_disjointness, 0);
+    assert_eq!(
+        after.resolvable_by_declaration, 0,
+        "nothing is left to predict once the question has been answered"
+    );
 }

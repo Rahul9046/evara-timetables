@@ -700,6 +700,11 @@ becomes an explicit, optional `class_section.expected_attendance`; it is derived
 declared group sizes over provably disjoint groups, and is `Unknown` otherwise.
 
 Recorded as [adr/0034](adr/0034-expected-attendance-is-explicit-and-room-capacity-waits-for-it.md).
+**Honoured in M5:** `ConstraintType` has no `RoomCapacity` variant, so nothing claims to check
+a room's size, and `CONSTRAINT-ENGINE.md` §9 lists it among what is deliberately absent. What
+M5 did add is the left-hand side's missing half — `lessons::attendance` now sums a section's
+groups where they are **proved** pairwise disjoint, which is clause 3 in full rather than the
+one-group case M4 could reach.
 The type is **not registered** in M5 and `CONSTRAINTS.md` moves it from `M1` to `M2+`,
 because an evaluator written now could only be tested against a left-hand side that is
 `Unknown` everywhere — failing [CLAUDE.md](../CLAUDE.md) §4's fourth requirement — and a
@@ -739,6 +744,32 @@ written avoids shipping a registered `type_key` that cannot be evaluated — whi
 
 ---
 
+### D36 — Is the first constraint set seeded as rows, or built into the registry? ✅ RESOLVED 2026-10-22 (M5)
+
+**Decided: built into the registry, and no rows are seeded.** Recorded as
+[adr/0039](adr/0039-a-mandatory-constraint-lives-in-the-registry.md).
+
+Raised while implementing [ROADMAP.md](ROADMAP.md) Phase 4's *"the default constraint set
+seeded into new projects"*. Three things were wrong with it, in ascending order: a seeded row
+can be **deleted**, which produces timetables that double-book teachers and report no
+violation; it can be **disabled**, which leaves the rule visible in the configuration list
+while the engine does not run it; and it has **no honest author**, because `evara_site_id()`
+is not registered while refinery applies a migration, so a row seeded in `V16` would be
+unattributable in the change feed or refused outright.
+
+So evaluation runs every implemented type whatever the database holds, and a
+`constraint_instance` row *tunes* one — weight, term, parameters, and a level it may **raise**
+but not weaken. Constraints remain data, which is what ADR 0005 decided and this does not
+revisit; what is withheld is only the ability to turn a safety rule off. The configuration
+list of an unconfigured school is empty, and that is the correct reading: it has not disagreed
+with anything.
+
+The related question — where a stored `params` value is validated, given that the JSON Schemas
+live in a crate `evara-db` may not depend on — is settled in that record's §5 as a division of
+labour rather than a dependency.
+
+---
+
 ### D22 — note added 2026-10-16, discharged 2026-10-21
 
 [adr/0032](adr/0032-timetable-generation-is-scoped-to-one-school.md) was **Proposed** when
@@ -754,6 +785,13 @@ A wrong delta score silently produces a wrong timetable, and it is the hardest p
 any solver to debug. **Mitigation:** the two-scorer design plus the property test in
 [SOLVER.md](SOLVER.md) §4, in CI, as a gate on every new constraint. Non-negotiable.
 
+**M5 shipped the reference half and nothing else, deliberately.** `evaluate` is the reference
+scorer; `evaluate_placement` selects by `affected()` and then evaluates each selected rule in
+full, holding no cache and no index — incremental-*friendly*, not incremental. The mitigation
+above only works if the thing a delta is checked against exists first, so M6 inherits
+`IncrementalScorer` **and** the property test in the same milestone. Neither half may land
+without the other.
+
 ### R2 — Solver quality is open-ended work
 
 "Generate a timetable" is binary; "generate a timetable a timetabler accepts" is years of
@@ -763,6 +801,12 @@ than argued about. Set expectations that M1 produces a *feasible* timetable, not
 competitive one.
 
 ### R3 — Constraint count is the real scope
+
+**Eight exist as of M5**, against the twenty-two `M1` names and the sixty-odd eventual ones —
+and the per-constraint definition of done the mitigation below asks for is what the eight
+were held to: a registry entry, a JSON Schema, documented semantics, an isolated test with a
+fixture, and an `explain()`. `CONSTRAINTS.md` §3 marks which are real with ✅ M5, so a
+coverage claim can be checked rather than believed.
 
 ~22 constraint types in M1, 60+ eventually, each needing an evaluator, an incremental
 path, a param schema, an explanation, a test and a fixture. This dominates the effort —

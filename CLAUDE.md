@@ -234,6 +234,25 @@ disagree about whether a placement is legal, the product is broken.
   `Database::open_for_inspection`, which does none of the three and hands back a `query_only`
   connection with no `evara_site_id()` registered. Never reach for the mutating path to avoid
   a `SchemaUpgradeRequired`; that refusal is the user's decision to make.
+- **A rule whose absence would make a timetable wrong is mandatory in the registry, not a
+  row.** Evaluation runs every implemented `ConstraintType` whatever the database holds, and
+  **no constraint rows are seeded**: a `constraint_instance` row *tunes* a rule — weight,
+  term, parameters, and a level it may **raise** but never weaken — so no deletion can
+  disable a safety check. None of the eight can be narrowed, and a `constraint_ref` for one
+  is refused rather than ignored. The repository refuses what the registry would refuse, so a
+  stored row is always compilable; the one thing it cannot judge is the **shape** of
+  `params`, because the JSON Schemas live beside the evaluators and `evara-db` may not depend
+  on `evara-constraints` — `Registry::compile` is the other half.
+  [adr/0039](docs/adr/0039-a-mandatory-constraint-lives-in-the-registry.md),
+  [CONSTRAINT-ENGINE.md](docs/CONSTRAINT-ENGINE.md).
+- **A clash is overlapping minutes, and an occupancy is resolved once.** Every clash rule
+  compares `[start, end)` intervals on a cycle day, never a `timeslot_id` — two campuses on
+  two bell schedules hold different slots over the same minutes, so the obvious
+  implementation is wrong exactly when sharing matters. `Occupancy` resolves what each
+  occurrence occupies once and every evaluator reads it, so no two rules can disagree about a
+  span. An evaluator never restates a predicate that exists: `RoomFact::is_candidate_for`,
+  `runs_on`, `Overlap::clashes` and `SlotAvailability::permits_placement` are each the one
+  implementation of their question.
 - **Solving is deterministic.** Seeded RNG, recorded on the run. No `Instant::now()` or
   unseeded randomness inside the solver's decisions. The same rule binds the fixture
   generator: it reads no clock and depends on no RNG crate, so a fixture's bytes cannot
@@ -280,5 +299,6 @@ keeps incremental scoring honest, and a wrong delta silently produces a wrong ti
 | `cargo run -p evara-cli -- fixture --list` | List the synthetic scheduling fixtures |
 | `cargo run -p evara-cli -- fixture tiny` | Write one as JSON — synthetic test data, **not** a timetable |
 | `cargo run -p evara-cli -- validate tiny` | Pre-solve validation of a fixture's inputs; exits 1 on a blocking finding |
+| `cargo run -p evara-cli -- evaluate tiny` | Score an arrangement against the constraint rules; exits 1 on a hard violation |
 | `cargo run -p evara-cli -- validate --project <path> --list` | What schools, cycles and terms a `.evaraproj` holds, with their identifiers |
 | `cargo run -p evara-cli -- validate --project <path> --school <id> --cycle <id>` | Pre-solve validation of a **real project**, read-only — migrates nothing, writes nothing |

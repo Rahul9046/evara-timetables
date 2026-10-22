@@ -207,7 +207,7 @@ follow-up the mutation layer should take.
 | Code | Owner | Why not M3 |
 | --- | --- | --- |
 | `orphan-availability-reference` | M4 — **implemented** | About a stored row a compiled `Problem` has already dropped — [ADR 0037](adr/0037-stored-row-diagnostics-belong-to-the-loader.md) |
-| `group-overlap-contradiction` | M5 | Needs member **identities** and rule 3 beaten against rule 6. A `Problem` carries a member *count*, so M3 could not detect it even if it owned the rule |
+| `group-overlap-contradiction` | M5 — **implemented** | Needs member **identities** and rule 3 beaten against rule 6. A `Problem` carries a member *count*, so M3 could not detect it even if it owned the rule. The overlap evaluator returns the contradictions it meets and the loader reports them |
 
 ### Informational
 
@@ -221,10 +221,11 @@ A test asserts every declared code is **implemented or deferred with a named own
 and never neither**, and that no deferred code is ever produced by any fixture at any seed. So
 a code cannot drift into being quietly abandoned, nor be fabricated to reach full coverage.
 
-**After M4, 22 of the 23 codes have a producer.** The loader implements its three, and
-`evara_db::scheduling::LOADER_DIAGNOSTICS` names them so a test can assert the two producers'
-sets are disjoint rather than trusting it. Only `group-overlap-contradiction` is left, and it
-is M5's because it needs member *identities* rather than a count.
+**After M5, all 23 codes have a producer.** The loader implements its four —
+`evara_db::scheduling::LOADER_DIAGNOSTICS` names them, so a test asserts the two producers'
+sets are disjoint rather than trusting it — and the last of them,
+`group-overlap-contradiction`, arrived with the overlap evaluator that can see a member row
+contradicting a declaration.
 
 ## 7. Required message content
 
@@ -388,6 +389,14 @@ user to answer one would send them to a field that cannot help.
 
 `unanswered_declarations` is the one implementation of the hierarchy walk. M5 should reuse it.
 
+**M5 did, and added the figure this section says it could not produce.** Rule 6 exists in
+`evara_core::scheduling::overlap`, and `resolvable_by_declaration` — written beside it, using
+its path matching — counts the undecided pairs that answering every open declaration would
+settle. So the warning now says *"would settle 6 of them"* rather than *"would narrow this"*,
+`ValidationSummary` carries the figure as a third beside the two it already had, and both
+earlier figures are unchanged. It is still a prediction about a stated hypothesis, never
+*"resolves"*: a parent that answers *may overlap* has answered and settled nothing.
+
 ## 11. The Layer-1 counting checks
 
 **Four of six implemented; two deferred for a missing table.**
@@ -452,7 +461,9 @@ one question soundly in one direction: *is every option already removed?* If any
 no finding. It never decides that a run **is** a legal placement, and it considers no other
 activity.
 
-M5's `entity-unavailable` enforces the same stored rules against a candidate timetable; both
+M5's `entity-unavailable` — **implemented**, see
+[CONSTRAINT-ENGINE.md](CONSTRAINT-ENGINE.md) §2 — enforces the same stored rules against a
+candidate timetable; both
 read the one compiled index.
 
 ### Checks 5 and 6 — deferred, with evidence

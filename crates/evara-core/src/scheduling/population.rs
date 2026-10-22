@@ -70,26 +70,41 @@ impl Overlap {
     pub const fn is_decided(self) -> bool {
         !matches!(self, Self::Indeterminate)
     }
+
+    /// Whether no student is in both, **proved**.
+    ///
+    /// Only [`Overlap::Disjoint`] is. A method for the same reason [`Overlap::is_clash`] is
+    /// one, pointed the other way: a caller that needs positive proof — summing two groups'
+    /// sizes, licensing a concurrent placement — must not reach for `!= Overlaps` and quietly
+    /// treat [`Overlap::Indeterminate`] as permission.
+    #[must_use]
+    pub const fn is_disjoint(self) -> bool {
+        matches!(self, Self::Disjoint)
+    }
 }
 
 /// What a parent group declares about its children: the future
 /// `student_group.children_are_disjoint` column.
 ///
-/// # The column this mirrors is not written yet
+/// # The column exists since `V16`
 ///
 /// [ADR 0035](../../../../docs/adr/0035-student-group-overlap-is-a-three-state-answer.md)
-/// §4 specifies it, and `SCHEDULING-ARCHITECTURE-DECISIONS.md` §4.1 schedules it for **M5**,
-/// in the migration that already adds `constraint_instance` / `constraint_ref`:
+/// §4 specifies it, and M5 added it in the migration that adds `constraint_instance` /
+/// `constraint_ref`:
 ///
 /// ```sql
-/// -- FUTURE. Not in V10, and not written by M2.
 /// ALTER TABLE student_group
 ///     ADD COLUMN children_are_disjoint INTEGER
 ///         CHECK (children_are_disjoint IS NULL OR children_are_disjoint IN (0, 1));
 /// ```
 ///
-/// This milestone declares the in-memory value so that the fixtures can express the cases
-/// ADR 0035's truth table requires, and so M5 implements rule 6 against a named type rather
+/// **With no `DEFAULT`**, so every row written before it reads `NULL`, which is exactly the
+/// third state below — see
+/// [ADR 0040](../../../../docs/adr/0040-the-constraint-tables-are-entities-and-their-scope-is-cleared.md)
+/// §4 for why either default would have put words in a school's mouth.
+///
+/// M2 declared this type before the column so that the fixtures could express the cases ADR
+/// 0035's truth table requires, and so rule 6 would be written against a named type rather
 /// than against an `Option<bool>` whose `None` somebody will eventually read as "no".
 ///
 /// # The mapping, which is exact and must not be collapsed

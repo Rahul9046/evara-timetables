@@ -443,13 +443,35 @@ fn the_indeterminate_warning_is_one_aggregate_finding_with_arithmetic() {
         finding.message.contains("Year 10"),
         "the parent to answer is named"
     );
+    // M3 could only say "would narrow this", because the exact figure needed rule 6 and a
+    // second implementation of rule 6 is worse than a missing number (ADR 0038). Rule 6
+    // exists now, so the sentence says how much the answer buys — ADR 0038's acceptance
+    // test 7, and ADR 0035 §6's example made good on.
+    let settled =
+        crate::scheduling::overlap::resolvable_by_declaration(&problem.groups, &problem.overlap);
     assert!(
-        finding.message.contains("would narrow"),
-        "it must not claim the answers resolve everything"
+        settled > 0,
+        "this fixture's pairs are declaration-resolvable"
     );
+    if settled == pairs {
+        assert!(
+            finding.message.contains("would settle all of them"),
+            "{}",
+            finding.message
+        );
+    } else {
+        assert!(
+            finding
+                .message
+                .contains(&format!("would settle {settled} of them")),
+            "{}",
+            finding.message
+        );
+    }
     assert!(
         !finding.message.contains("resolves"),
-        "the exact resolved count needs M5's evaluator and must not be claimed"
+        "still a prediction about a hypothesis, not a promise: \"would settle\", never \
+         \"resolves\""
     );
     assert!(report.may_solve(), "indeterminate never blocks");
 }

@@ -176,6 +176,25 @@ what it could not place, instead of returning nothing.
 The explicit requirement is no single giant scheduling function. Each constraint family
 is an independent unit, individually testable.
 
+> **Implemented in M5**, with four signature changes from the sketch below, each because a
+> type that did not exist when it was written now does.
+> [CONSTRAINT-ENGINE.md](CONSTRAINT-ENGINE.md) is the shipped engine; this section is the
+> design it was built from.
+>
+> - `fn constraint_type(&self) -> ConstraintType` rather than `type_key(&self) -> &str`. The
+>   key is still the stored identity and still spelled out in a `match`; dispatch on a
+>   `&'static str` would have made a typo a silent no-op.
+> - `evaluate` takes an `&Occupancy` rather than an `&Assignment`. Resolving which minutes
+>   each occurrence occupies is the same work for five of the eight rules, so it happens once
+>   and no two rules can disagree about a span. §5 of that file.
+> - `affected(…, changed: ActivityIx)` rather than `changed: u32`, for the reason M2 made the
+>   indices newtypes: mixing two kinds of index would be a plausible wrong answer rather than
+>   a crash.
+> - `explain(&self, p, v: &Violation)` — no `&Assignment` and no `&CompiledConstraint`. A
+>   `Violation` already carries the occurrences, the entities, the day, the span and the
+>   penalty, so an explanation that needed the assignment back would be re-deriving what the
+>   violation was built from.
+
 ```rust
 pub trait ConstraintEvaluator: Send + Sync {
     fn type_key(&self) -> &'static str;
@@ -217,6 +236,14 @@ A property test applies thousands of random moves to random synthetic problems a
 asserts `IncrementalScorer == ReferenceScorer` after every single one. The incremental
 path is only trusted because the cheap path keeps proving it right. This test runs in CI
 and is the gate on any new constraint.
+
+> **M5 shipped the reference half and not the incremental one.** `evaluate` is
+> `ReferenceScorer`; `evaluate_placement` runs only the rules whose `affected()` set contains
+> the occurrence that moved and then evaluates each **in full**, holding no cache and no
+> index. That is incremental-*friendly*, not incremental, and the stopping point is
+> deliberate: the thing a delta is checked against has to exist first. `IncrementalScorer`
+> and the property test between them are M6's, and this paragraph is the gate they will be
+> held to.
 
 ---
 
