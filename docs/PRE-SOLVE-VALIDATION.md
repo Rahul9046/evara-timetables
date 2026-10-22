@@ -470,10 +470,22 @@ Neither was stubbed. Inventing the vocabulary is not M3's job.
 evara validate <fixture> [--seed N] [--json]
 evara validate --fixture <fixture> [--seed N] [--json]
 evara validate --list
+evara validate --project <path.evaraproj> --school <id> --cycle <id> [--term <id>] [--json]
+evara validate --project <path.evaraproj> --list
 ```
 
-Both spellings of the fixture argument work, and a test asserts they agree. It reads no
-project, opens no database, applies no migration and starts no solver.
+Both spellings of the fixture argument work, and a test asserts they agree. The fixture form
+reads no project, opens no database, applies no migration and starts no solver.
+
+**The project form arrived with M4** and reads a real `.evaraproj`. It likewise applies no
+migration and starts no solver, and it **writes nothing**: it opens through
+`Database::open_for_inspection`, not `open_existing`, which stamps
+`last_opened_with_app_version` on every open. `--school` and `--cycle` are required and never
+defaulted — a project holds several schools, and a cycle chosen for the user would validate a
+grid they did not choose — while `--term` is optional, because a grid materialised for the
+whole year has no term. `--project --list` prints the identifiers to pass back.
+[SCHEDULING-PROBLEM-ASSEMBLY.md](SCHEDULING-PROBLEM-ASSEMBLY.md) §15 has the four read-only
+guarantees and how each is tested.
 
 ```text
 $ evara validate tiny
@@ -493,7 +505,7 @@ is feasible"*; a test asserts the usage text carries the disclaimer too.
 | --- | --- |
 | 0 | Validation completed and found nothing blocking |
 | 1 | Validation completed and found blocking findings |
-| 2 | The command itself failed — unknown fixture, bad option |
+| 2 | The command itself failed — unknown fixture, bad option, a file that is not a project, a school or cycle the project does not hold |
 
 Warnings and informational findings leave the code at **0**. A blocking finding is not a
 command failure: the command did its job and the answer was "no", so the two cannot share a
