@@ -31,6 +31,7 @@ use crate::scheduling::diagnostics::{
 use crate::scheduling::index::GroupIx;
 use crate::scheduling::problem::Problem;
 
+use super::super::hierarchy::Hierarchy;
 use super::{Pass, push};
 
 /// Every warning, in a fixed order.
@@ -270,22 +271,11 @@ fn indeterminate_overlap(pass: &Pass<'_>, report: &mut DiagnosticReport) {
 /// Returned in group-index order so a message built from it is deterministic. M5 may reuse
 /// this rather than restating the walk.
 pub(super) fn unanswered_declarations(problem: &Problem) -> Vec<GroupIx> {
-    let mut children: Vec<usize> = vec![0; problem.groups.len()];
-    for group in &problem.groups {
-        if let Some(parent) = group.parent
-            && parent.get() < children.len()
-        {
-            children[parent.get()] += 1;
-        }
-    }
-
-    problem
-        .groups
-        .iter()
-        .enumerate()
-        .filter(|(ix, group)| children[*ix] >= 2 && group.children_are_disjoint.is_unanswered())
-        .map(|(ix, _)| GroupIx::new(u32::try_from(ix).unwrap_or(u32::MAX)))
-        .collect()
+    // Reads the one shared hierarchy rather than counting children here. ADR 0038 §3 asks
+    // M5's rule 6 to reuse this walk, and the way to honour that is for both to read one
+    // implementation — "two readings of a hierarchy are two places for a MAX_GROUP_DEPTH
+    // assumption to differ".
+    Hierarchy::of(&problem.groups).unanswered_parents(&problem.groups)
 }
 
 // =======================================================================================

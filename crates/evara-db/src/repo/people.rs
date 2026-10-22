@@ -1266,15 +1266,12 @@ fn ensure_no_cycle(tx: &Transaction<'_>, group: Uuid, parent: Uuid) -> Result<()
 
 /// How far the parent walk will go before calling the hierarchy broken.
 ///
-/// Schools nest a few levels — school, cohort, band, set. Anything beyond this is a
-/// mistake or a loop, and either way the user needs to be told rather than kept waiting.
-///
-/// Visible to the crate because the scheduling loader walks the same hierarchy, downwards,
-/// to count a group's effective membership. Two readings of one hierarchy with two depth
-/// limits is two places for the limit to differ — which is the duplication
+/// Re-exported from `evara-core` rather than defined here. Since M5 the overlap evaluator
+/// walks the same hierarchy downwards, and
 /// [ADR 0038](../../../docs/adr/0038-counting-unanswered-questions-is-not-evaluating-overlap.md)
-/// §3 asks M5 to avoid for the same walk.
-pub(crate) const MAX_GROUP_DEPTH: usize = 64;
+/// §3 is explicit that two readings of one hierarchy are two places for this limit to
+/// differ. One definition, two directions of travel.
+pub(crate) use evara_core::scheduling::hierarchy::MAX_GROUP_DEPTH;
 
 // -------------------------------------------------------------------- group membership
 
