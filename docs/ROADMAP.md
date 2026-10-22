@@ -603,8 +603,16 @@ figures and the remedy, and exits 1.
 
 ## Phase 6 — Solver v1
 
-- Problem loader: database → dense-index `Problem`. Solution writer: `Assignment` →
-  `timetable_entry`, transactionally.
+- ✅ Problem loader: **done in M4**, as `evara_db::scheduling`. Database → dense-index
+  `Problem` for one `(school, cycle, term)`, reusing M3's bell-schedule resolver rather than
+  reimplementing it, with reverse identifier maps, the three stored-row diagnostics ADR 0037
+  assigns it, and a combined report that runs `Problem::integrity` and M3's validator.
+  `evara validate --project <path> --school <id> --cycle <id>` runs it headlessly over a real
+  `.evaraproj`, through a genuinely read-only open that migrates nothing. Twelve
+  database-backed fixtures, 29 statements per load independent of school size, no migration.
+  See [SCHEDULING-PROBLEM-ASSEMBLY.md](SCHEDULING-PROBLEM-ASSEMBLY.md).
+- Solution writer: `Assignment` → `timetable_entry`, transactionally. **Not built** — it is
+  M7's, and there is nothing to write until a solver exists.
 - Construction heuristic (most-constrained-first, locks placed first).
 - Late Acceptance Hill Climbing with the move set from [SOLVER.md](SOLVER.md) §5, seeded
   RNG, termination config, cancel token.

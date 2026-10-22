@@ -1268,7 +1268,13 @@ fn ensure_no_cycle(tx: &Transaction<'_>, group: Uuid, parent: Uuid) -> Result<()
 ///
 /// Schools nest a few levels — school, cohort, band, set. Anything beyond this is a
 /// mistake or a loop, and either way the user needs to be told rather than kept waiting.
-const MAX_GROUP_DEPTH: usize = 64;
+///
+/// Visible to the crate because the scheduling loader walks the same hierarchy, downwards,
+/// to count a group's effective membership. Two readings of one hierarchy with two depth
+/// limits is two places for the limit to differ — which is the duplication
+/// [ADR 0038](../../../docs/adr/0038-counting-unanswered-questions-is-not-evaluating-overlap.md)
+/// §3 asks M5 to avoid for the same walk.
+pub(crate) const MAX_GROUP_DEPTH: usize = 64;
 
 // -------------------------------------------------------------------- group membership
 

@@ -680,8 +680,16 @@ every school. Options, not yet weighed:
 | **B — a solve names its bell schedule(s) and refuses an ambiguous activity** | The pre-flight check reports every activity that could belong to two grids, with the remedy ("give this section a campus") | Honest, and makes the user finish a setup they may consider finished |
 | **C — the activity names its grid** | A column, or a per-solve mapping table | Most explicit, a migration, and a third place campus information lives |
 
-Nothing is implemented in any direction. A provisional answer in the loader would be a
-scheduling rule in the crate that owns SQL.
+The options above are the weighing that produced Option B; they are kept because the rejected
+shapes are the useful part of the record.
+
+**Implemented in M4, and in a way that honours the last sentence above.** A provisional answer
+in the loader would indeed have been a scheduling rule in the crate that owns SQL — so the
+rule is not there. `evara_core::scheduling::resolve` is the one implementation (ADR 0036), and
+`evara_db::scheduling` *calls* it: it builds the context, derives `G` from the materialised
+slots, and resolves once per section, which is why sections are the last table it assembles.
+`Problem::integrity` reports any drift between the recorded answer and the relation, so a
+second copy could not survive a test run.
 
 ---
 
@@ -841,6 +849,11 @@ fixtures are a named pathology each — an unresolvable bell schedule, a contrad
 disjointness declaration, an unbookable specialist room, an occurrence longer than any
 teaching run — which a reviewer can read in full and a failing assertion can name. A dial
 produces a school nobody can characterise, and "tightness 0.8 failed" is not a diagnosis.
+
+**M4 widened the fixture surface without closing the risk either.** Twelve database-backed
+fixtures now exist in `evara-db`, including a `medium` at the same scale written through the
+repositories — so the *loader* is exercised at 125 sections and 500 occurrences. They are
+hand-built named cases like M2's, for the same reason, and the one below still stands.
 
 **The risk is not closed.** The `medium` fixture is deliberately comfortable — every class
 needs 20 of its 30 slots, no teacher carries more than 8 occurrences — so it exercises scale

@@ -13,15 +13,22 @@
 //! - The connection factory and pragma enforcement
 //! - Forward-only numbered migrations embedded in the binary
 //! - Repositories, one per domain boundary group
-//! - The problem loader (database to dense-index `Problem`) and the solution writer
+//! - The problem loader (database to dense-index `Problem`), in [`scheduling`] since M4
+//! - The solution writer, which is M7's and does not exist
 //!
 //! # Status
 //!
-//! Phases 1A and 1B implement the foundations only: connection policy, migrations,
-//! project identity, the change feed, installation settings and the project lifecycle.
-//! **There are deliberately no entity tables yet.** The point of building this first is
-//! that every table added later inherits the same guarantees automatically rather than
-//! having them retro-fitted.
+//! `V15` holds the entity tables through Stage C's lessons and activities. Since M4 this
+//! crate also compiles one school into the solver's [`scheduling::Assembly`]; there is still
+//! no solver, no constraint registry and no `timetable_entry`.
+//!
+//! # Two ways to open a project, and the difference matters
+//!
+//! [`Database::open_existing`] **writes**: it runs pending migrations, recreates any missing
+//! change-log trigger, and stamps `last_opened_with` on every open. That is right for the
+//! application. [`Database::open_for_inspection`] does none of the three and returns a
+//! connection SQLite refuses every write through, which is what lets `evara validate
+//! --project` answer questions about a live school file without touching it.
 //!
 //! A [`Workspace`] is the normal entry point â€” it owns the installation settings and the
 //! one open project, and attributes every write to this installation:
@@ -48,6 +55,7 @@ pub mod import;
 pub mod meta;
 mod migrations;
 pub mod repo;
+pub mod scheduling;
 pub mod settings;
 pub mod workspace;
 
@@ -100,6 +108,10 @@ pub use crate::repo::time_model::{
     TimeslotInput, WeeklyCycleDay,
 };
 pub use crate::repo::{Expected, Stamp};
+pub use crate::scheduling::{
+    Assembly, AssemblyReport, AssemblyStats, Completeness, ProblemIndex, ProblemIndexCounts,
+    Scheduling, SchedulingSelection,
+};
 pub use crate::settings::{MAX_RECENT_PROJECTS, RecentProject, Settings};
 pub use crate::workspace::{PROJECT_EXTENSION, ProjectSummary, Workspace};
 
@@ -120,6 +132,12 @@ pub struct Database {
     /// Set only on the open that actually performed the upgrade, which is the only time
     /// the interface has anything to tell the user about it.
     safety_backup: Option<PathBuf>,
+    /// Whether this project was opened for inspection only.
+    ///
+    /// `true` only for [`Database::open_for_inspection`]. [`Database::write`] refuses
+    /// immediately on one, so a caller that reaches for a repository on an inspection handle
+    /// gets a sentence rather than SQLite's *"attempt to write a readonly database"*.
+    read_only: bool,
 }
 
 /// File name of a path, for messages that must not carry the full path.
@@ -207,6 +225,7 @@ impl Database {
             schema_version,
             site_id,
             safety_backup,
+            read_only: false,
         })
     }
 
@@ -227,6 +246,76 @@ impl Database {
             |row| row.get(0),
         );
         Ok(matches!(found, Ok(count) if count > 0))
+    }
+
+    /// Opens an existing project for **inspection only**, migrating nothing.
+    ///
+    /// # Why this exists beside [`Database::open_existing`]
+    ///
+    /// An ordinary open writes. It runs pending migrations, recreates any missing change-log
+    /// trigger, and `meta::ensure` stamps `last_opened_with` on every single open. All three
+    /// are right for the application and wrong for a headless inspection of somebody's live
+    /// school file: `evara validate --project` must be able to answer questions about a
+    /// project without touching it, and a command that quietly upgraded the file it was asked
+    /// to look at would be the worst kind of surprise.
+    ///
+    /// So this path does none of the three. It verifies the file is an Evara project, refuses
+    /// one that is not at exactly the supported schema version — because reaching that
+    /// version is itself a write — reads the identity rather than ensuring it, and returns a
+    /// connection SQLite will not let anything write through. See
+    /// [`connection::open_query_only`] for the three independent guarantees.
+    ///
+    /// # Errors
+    ///
+    /// - [`DbError::ProjectNotFound`], [`DbError::NotAnEvaraProject`] as
+    ///   [`Database::open_existing`].
+    /// - [`DbError::SchemaTooNew`] if written by a newer Evara.
+    /// - [`DbError::SchemaUpgradeRequired`] if the project is behind this build. Opening it
+    ///   normally would upgrade it, so the choice is the user's to make deliberately.
+    /// - [`DbError::MissingMetadata`] if the project has no identity, which means it is not
+    ///   one.
+    pub fn open_for_inspection(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        if !path.is_file() {
+            return Err(DbError::ProjectNotFound {
+                name: file_name_of(path),
+            });
+        }
+        if !Self::looks_like_a_project(path)? {
+            return Err(DbError::NotAnEvaraProject {
+                name: file_name_of(path),
+            });
+        }
+
+        let conn = connection::open_query_only(path)?;
+        migrations::reject_if_newer_than_supported(&conn)?;
+        let schema_version = migrations::applied_schema_version(&conn)?;
+        let supported = migrations::supported_schema_version();
+        if schema_version != supported {
+            return Err(DbError::SchemaUpgradeRequired {
+                found: schema_version,
+                supported,
+            });
+        }
+
+        let identity = meta::read_identity(&conn)?;
+        Ok(Self {
+            conn,
+            path: path.to_path_buf(),
+            identity,
+            schema_version,
+            // No installation is attributed, because nothing can be written. The site-id
+            // function is deliberately not registered on this connection either.
+            site_id: Uuid::nil(),
+            safety_backup: None,
+            read_only: true,
+        })
+    }
+
+    /// Whether this project was opened for inspection only.
+    #[must_use]
+    pub const fn is_read_only(&self) -> bool {
+        self.read_only
     }
 
     /// Reads a project's schema version without migrating it.
@@ -358,6 +447,24 @@ impl Database {
         Lessons::new(self)
     }
 
+    /// Reads one school's scheduling inputs and compiles them into a solver `Problem`.
+    ///
+    /// **The only handle on this type that takes `&self`**, and deliberately so. Every other
+    /// repository can write, so each takes `&mut Database` and can reach
+    /// [`Database::write`]; this one cannot, which makes "the loader performs no writes" a
+    /// borrow-checker property rather than a convention. `evara validate --project` needs
+    /// exactly that guarantee before it is safe to point at a real school's file.
+    ///
+    /// Separate from [`Database::lessons`] and [`Database::time_model`] because it answers a
+    /// different question. Those read and write the rows a school edits; this one compiles a
+    /// whole school into the dense-index form a solver searches over, which is the one place
+    /// UUIDs become positions — `ARCHITECTURE.md` §3 rule 4. See
+    /// [`scheduling`](crate::scheduling) for the pipeline and the three kinds of failure it
+    /// keeps apart.
+    pub const fn scheduling(&self) -> Scheduling<'_> {
+        Scheduling::new(self)
+    }
+
     /// Previews and applies a spreadsheet import.
     ///
     /// Separate from every repository because an import is not an entity: it reads a file
@@ -413,6 +520,12 @@ impl Database {
         &mut self,
         work: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T>,
     ) -> Result<T> {
+        // Refused before a transaction is even opened. SQLite would refuse it too —
+        // `query_only` is on — and so would every change-log trigger, for want of
+        // `evara_site_id()`; this is the typed first of the three.
+        if self.read_only {
+            return Err(DbError::ReadOnlyProject);
+        }
         let tx = self.conn.transaction()?;
         let value = work(&tx)?;
         tx.commit()?;

@@ -5,7 +5,8 @@
 //! `evara-solver` must never depend on Tauri.
 //!
 //! Phase 0 shipped the binary and its help text only. Subcommands arrive with the phases
-//! that implement them: [`fixture`] (M2) and [`validate`] (M3).
+//! that implement them: [`fixture`] (M2) and [`validate`] (M3, extended in M4 to read a real
+//! `.evaraproj` — read-only, migrating nothing).
 //!
 //! `validate` took the name an earlier `PLANNED` entry held. That entry described *scoring a
 //! stored project and listing its violations*, which is M5's scorer and a different command,
@@ -37,7 +38,7 @@ const IMPLEMENTED: &[(&str, &str)] = &[
     ),
     (
         "validate",
-        "run pre-solve validation over a fixture (reports inputs, not a timetable)",
+        "validate a fixture or a project's inputs (reports inputs, not a timetable)",
     ),
 ];
 
@@ -89,8 +90,9 @@ fn help() {
         println!("  {name:<9} phase {phase:<2} {blurb}");
     }
     println!("\nSee docs/ROADMAP.md for the phase each command belongs to,");
-    println!("docs/SCHEDULING-FIXTURES.md for what `fixture` generates, and");
-    println!("docs/PRE-SOLVE-VALIDATION.md for what `validate` checks.");
+    println!("docs/SCHEDULING-FIXTURES.md for what `fixture` generates,");
+    println!("docs/PRE-SOLVE-VALIDATION.md for what `validate` checks, and");
+    println!("docs/SCHEDULING-PROBLEM-ASSEMBLY.md for how a project becomes a problem.");
 }
 
 #[cfg(test)]

@@ -323,6 +323,24 @@ impl Workspace {
             .availability())
     }
 
+    /// The scheduling loader for the open project.
+    ///
+    /// **Takes `&self`**, unlike every other accessor here, because the loader writes
+    /// nothing and the shared borrow is what makes that a type-level guarantee rather than
+    /// a promise — see [`Database::scheduling`]. A caller holding one of these cannot reach
+    /// a transaction, cannot consume a revision and cannot append to the change feed.
+    ///
+    /// # Errors
+    ///
+    /// [`DbError::NoProjectOpen`] if nothing is open.
+    pub fn scheduling(&self) -> Result<crate::scheduling::Scheduling<'_>> {
+        Ok(self
+            .open
+            .as_ref()
+            .ok_or(DbError::NoProjectOpen)?
+            .scheduling())
+    }
+
     /// Removes a project from the recent list. The file itself is untouched.
     ///
     /// # Errors

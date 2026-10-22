@@ -219,6 +219,21 @@ disagree about whether a placement is legal, the product is broken.
   `RoomFact::is_candidate_for` is the **one** implementation of the room candidate domain,
   and the loader, the move validator and the fixtures all call it rather than restating the
   predicate. [SCHEDULING-FIXTURES.md](docs/SCHEDULING-FIXTURES.md).
+- **The loader compiles one school and reuses every shared rule.** `evara_db::scheduling` is
+  the one place UUIDs become dense indices, and it **calls** `resolve::MaterialisedGrid` for
+  the bell schedule and `RoomFact::is_candidate_for` for the room domain rather than restating
+  either — a second copy is the failure §2's most important rule exists to prevent. It compiles
+  **no** overlap answers (`OverlapRelation::unknown`): ADR 0035 §3's seven rules are M5's, and
+  `clash_mask` admitting only `Overlaps` is what makes that safe rather than permissive. A
+  finding about a *stored row* is the loader's, not the validator's — a compiled `Problem` has
+  already dropped the row ([adr/0037](docs/adr/0037-stored-row-diagnostics-belong-to-the-loader.md)).
+  [SCHEDULING-PROBLEM-ASSEMBLY.md](docs/SCHEDULING-PROBLEM-ASSEMBLY.md).
+- **Opening a project writes; inspecting one must not.** `Database::open_existing` runs
+  migrations, recreates triggers and stamps `last_opened_with_app_version` on *every* open.
+  Anything headless that reads somebody's live file goes through
+  `Database::open_for_inspection`, which does none of the three and hands back a `query_only`
+  connection with no `evara_site_id()` registered. Never reach for the mutating path to avoid
+  a `SchemaUpgradeRequired`; that refusal is the user's decision to make.
 - **Solving is deterministic.** Seeded RNG, recorded on the run. No `Instant::now()` or
   unseeded randomness inside the solver's decisions. The same rule binds the fixture
   generator: it reads no clock and depends on no RNG crate, so a fixture's bytes cannot
@@ -265,3 +280,5 @@ keeps incremental scoring honest, and a wrong delta silently produces a wrong ti
 | `cargo run -p evara-cli -- fixture --list` | List the synthetic scheduling fixtures |
 | `cargo run -p evara-cli -- fixture tiny` | Write one as JSON — synthetic test data, **not** a timetable |
 | `cargo run -p evara-cli -- validate tiny` | Pre-solve validation of a fixture's inputs; exits 1 on a blocking finding |
+| `cargo run -p evara-cli -- validate --project <path> --list` | What schools, cycles and terms a `.evaraproj` holds, with their identifiers |
+| `cargo run -p evara-cli -- validate --project <path> --school <id> --cycle <id>` | Pre-solve validation of a **real project**, read-only — migrates nothing, writes nothing |

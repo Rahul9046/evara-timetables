@@ -55,10 +55,13 @@ Status: **design phase.** This document is the target architecture. See
 Three further crates sit at the edges: `evara-report` (timetable projections →
 HTML/CSV/PDF), `evara-import` (spreadsheet bytes → a parsed table, and the downloadable
 templates) and `evara-integrations` (future external adapters, empty and feature-gated).
-`evara-cli` is a headless binary used for tests, fixtures and solver benchmarking. One of
-its eight subcommands exists: `evara fixture` writes a synthetic scheduling problem as JSON.
-It generates **test data and not a timetable** — nothing in Evara generates a timetable
-yet — and it reads no project, opens no database and applies no migration.
+`evara-cli` is a headless binary used for tests, fixtures and solver benchmarking. Two of
+its subcommands exist. `evara fixture` writes a synthetic scheduling problem as JSON: **test
+data and not a timetable**, read from no project. `evara validate` runs pre-solve validation
+over a fixture, or — since M4 — over a real `.evaraproj`, through
+`Database::open_for_inspection`, which runs no migration, recreates no trigger, stamps no
+metadata and hands back a connection SQLite refuses every write through. Neither subcommand
+generates a timetable; nothing in Evara does yet.
 
 `evara-import` is the one with a dependency set nothing else should inherit — `calamine`,
 `csv`, `rust_xlsxwriter` — which is why it is its own crate rather than a module of
@@ -114,11 +117,17 @@ never a second hand-maintained model.
    header says why putting it here would have been the mistake.
 3. `evara-solver` depends on `evara-core` + `evara-constraints`. It receives a fully
    materialised problem **in memory** and returns a solution. It never opens a database.
-4. `evara-db` is the only crate that knows SQL. It *will* load a `Problem` for the solver and
-   persist a `Solution` back — the loader is M4's and the writer M7's, and neither exists at
-   `V15`. The rule is stated now because it decides where that code goes when it arrives:
-   the translation from UUIDs to the solver's dense indexes happens here, once, and no other
-   crate acquires a database handle to avoid it.
+4. `evara-db` is the only crate that knows SQL. Since M4 it loads a `Problem` for the solver,
+   in `evara_db::scheduling`; it will persist a `Solution` back, which is M7's and does not
+   exist. The translation from UUIDs to the solver's dense indexes happens here, once, and no
+   other crate acquires a database handle to avoid it. The loader **calls** `evara-core`'s
+   bell-schedule resolver and room-candidate predicate rather than restating either, so
+   generation, validation and the editor cannot disagree about what is legal —
+   [SCHEDULING-PROBLEM-ASSEMBLY.md](SCHEDULING-PROBLEM-ASSEMBLY.md) §6 and §10. It owns the
+   three diagnostics that are about a *stored row*, which a compiled `Problem` has already
+   dropped ([adr/0037](adr/0037-stored-row-diagnostics-belong-to-the-loader.md)).
+   `Database::open_for_inspection` is the read-only counterpart of `open_existing`, which
+   writes on every open; headless inspection takes the former and nothing else may.
 5. `evara-import` may depend on `evara-core` and nothing else. It turns bytes into an
    `evara_core::import::SourceTable` and writes templates; it never opens a file, never
    reaches the network, never evaluates a formula and never runs a macro. It is given bytes

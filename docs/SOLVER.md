@@ -68,7 +68,10 @@ pub trait SolverEngine {
 
 `Problem` is the compiled form of the database: entities flattened into `Vec`s and
 addressed by dense `u32` indexes, not UUIDs. UUID ↔ index translation happens once, in
-`evara-db`'s loader. The inner loop touches only integers and bitsets.
+`evara-db`'s loader — **implemented in M4** as `evara_db::scheduling`, which also keeps the
+reverse maps a diagnostic and the solution writer need
+([SCHEDULING-PROBLEM-ASSEMBLY.md](SCHEDULING-PROBLEM-ASSEMBLY.md)). The inner loop touches
+only integers and bitsets.
 
 ```rust
 // Implemented in M2 as `evara_core::scheduling`. Abridged: every field carries doc comments
@@ -114,8 +117,11 @@ Two planning variables per activity — **timeslot** and **room** — matching t
 plus a third later for teacher selection when a class has interchangeable staff
 (see [OPEN-DECISIONS.md](OPEN-DECISIONS.md) D7).
 
-**Three things M1's decisions fix about this shape.** The types are implemented (M2); the
-loader that fills them in is M4's, and nothing evaluates or searches yet.
+**Three things M1's decisions fix about this shape.** The types are implemented (M2) and the
+loader that fills them in is implemented (M4); nothing evaluates or searches yet. Two fields
+are deliberately still empty after a load: `overlap` is `Indeterminate` for every pair, because
+ADR 0035 §3's evaluator is M5's, and `pinned` is empty, because `activity.is_locked` does not
+exist.
 
 - **An activity's value range is one bell schedule's slots, resolved before the solve.** The
   grid of a `(cycle, term)` may hold slots from several `period_structure` rows, and

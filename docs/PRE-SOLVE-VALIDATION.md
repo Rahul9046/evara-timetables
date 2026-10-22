@@ -175,11 +175,19 @@ suppressed for sharing a code: `unknown-attendance` produces four
 | `teacher-load-exceeds-slots` | A teacher's assigned periods exceed the slots available to them | Teacher |
 | `group-demand-exceeds-slots` | A group's lessons exceed the slots available to it | Student group |
 
-### Blocking — owned by M4
+### Blocking — produced by M4's loader
 
 | Code | Why not M3 |
 | --- | --- |
 | `teacher-not-eligible-for-campus` | A violated database invariant, reported as corruption. ADR 0028 makes eligibility a trigger pair's job, and a solver-side duplicate would be a second implementation. [ADR 0037](adr/0037-stored-row-diagnostics-belong-to-the-loader.md) §4 |
+
+**Implemented in M4**, and it turned out to be *reachable* — ADR 0037 §4's claim that a
+consistent database cannot hold one is wrong at `V15`. The eligibility trigger pair fires on
+`class_teacher` and never on `teacher_campus`, and neither `assign_teacher_campus` nor
+`remove_teacher_campus` consults `class_teacher`, so narrowing a teacher who already teaches
+elsewhere reaches it through two ordinary calls. See
+[SCHEDULING-PROBLEM-ASSEMBLY.md](SCHEDULING-PROBLEM-ASSEMBLY.md) §12, which also names the
+follow-up the mutation layer should take.
 
 ### Warning — produced by M3
 
@@ -198,7 +206,7 @@ suppressed for sharing a code: `unknown-attendance` produces four
 
 | Code | Owner | Why not M3 |
 | --- | --- | --- |
-| `orphan-availability-reference` | M4 | About a stored row a compiled `Problem` has already dropped — [ADR 0037](adr/0037-stored-row-diagnostics-belong-to-the-loader.md) |
+| `orphan-availability-reference` | M4 — **implemented** | About a stored row a compiled `Problem` has already dropped — [ADR 0037](adr/0037-stored-row-diagnostics-belong-to-the-loader.md) |
 | `group-overlap-contradiction` | M5 | Needs member **identities** and rule 3 beaten against rule 6. A `Problem` carries a member *count*, so M3 could not detect it even if it owned the rule |
 
 ### Informational
@@ -207,11 +215,16 @@ suppressed for sharing a code: `unknown-attendance` produces four
 | --- | --- | --- |
 | `declared-periods-disagree` | M3 | A course's declared periods ≠ its section's actual demand |
 | `expected-attendance-disagrees-with-groups` | M3 | A stated attendance ≠ the sum of its groups' declared sizes |
-| `availability-entity-kind-not-scheduled` | M4 | A rule naming a `RESOURCE` or `SUBJECT`. ADR 0037 |
+| `availability-entity-kind-not-scheduled` | M4 — **implemented** | A rule naming a `RESOURCE` or `SUBJECT`. ADR 0037 |
 
 A test asserts every declared code is **implemented or deferred with a named owner, never both
 and never neither**, and that no deferred code is ever produced by any fixture at any seed. So
 a code cannot drift into being quietly abandoned, nor be fabricated to reach full coverage.
+
+**After M4, 22 of the 23 codes have a producer.** The loader implements its three, and
+`evara_db::scheduling::LOADER_DIAGNOSTICS` names them so a test can assert the two producers'
+sets are disjoint rather than trusting it. Only `group-overlap-contradiction` is left, and it
+is M5's because it needs member *identities* rather than a count.
 
 ## 7. Required message content
 
@@ -322,11 +335,16 @@ corrected and `MaterialisedGrid::of` reads `Problem::timeslots`.
   the first run, so M2's fixtures were right — which was worth establishing rather than
   assuming.
 
-## 9. M4 reuse requirements
+## 9. M4 reuse requirements — met
 
 M4's loader **must** call this resolver to produce the value it records on each `SectionFact`.
 It must not implement a second compatibility algorithm; ADR 0036 §2 is the record, and
 `Problem::integrity` will report any disagreement if it does.
+
+**It does.** `evara_db::scheduling` builds the context and the slots, derives the grid with
+`MaterialisedGrid::of`, and calls `resolve` once per section — which is why sections are
+assembled last. There is no compatibility logic in `evara-db`, and the database-backed
+fixtures cover all nine of §8's cases.
 
 The design permits resolution before the final `SectionFact` is built: `resolve` needs only a
 `SchedulingContext` and the section's campus, so a loader can build the context, derive the
@@ -551,15 +569,18 @@ in prose.
 
 1. **Three codes produce nothing until M4**, and one until M5. Their information is not in a
    `Problem` — ADR 0037.
-2. **No real project can be validated yet.** The only input is a fixture; `evara validate`
-   gains a project once M4's loader exists.
+2. ~~**No real project can be validated yet.**~~ **Closed by M4.** `evara validate --project
+   <path> --school <id> --cycle <id> [--term <id>]` compiles a real `.evaraproj` and runs these
+   checks over it, through an open that migrates nothing and writes nothing. The same three
+   exit codes.
 3. **Checks 5 and 6 are absent** because `line` and `activity.is_locked` do not exist.
 4. **Check 3 under-counts demand**, deliberately: overlapping groups' lessons are not
    attributed without M5's evaluator.
 5. **The indeterminate warning does not say how much each answer buys** — ADR 0038.
-6. **No Tauri command and no TypeScript binding.** There is no way to obtain a `Problem` from a
-   real project until M4, so a command would have nothing to validate. M3 adds nothing to
-   `evara-typegen`'s contract list and `npm run types:check` is unaffected.
+6. **No Tauri command and no TypeScript binding.** A `Problem` can be obtained from a real
+   project since M4, but the Generate screen is Phase 6's, so a command would have nothing to
+   render. Neither M3 nor M4 adds anything to `evara-typegen`'s contract list, and `npm run
+   types:check` is unaffected.
 7. **`validate` is `O(sections × activities)` in the demand sums.** 125 × 500 on `medium` is
    trivial; a school an order of magnitude larger would want an index. Not optimised, because
    no profile asked for it.
@@ -568,22 +589,35 @@ in prose.
 9. **The group-overlap relation's diagonal is `Indeterminate` in several M2 fixtures.** ADR
    0035 rule 2 makes a group against itself `Overlaps` unless provably empty, so the diagonal
    is a certainty those fixtures leave unstated. It affects nothing M3 does —
-   `indeterminate_pairs` counts `a < b` only — and M5 will want it declared.
+   `indeterminate_pairs` counts `a < b` only — and M5 will want it declared. **M4's loader
+   leaves it unstated too, and deliberately**: setting it would mean implementing one of ADR
+   0035 §3's seven rules in the one place that must not, and nothing reads it.
+10. **A loaded project has no overlap answers at all.** M4 compiles
+    `OverlapRelation::unknown`, because the evaluator is M5's. The visible effect is that every
+    real school with two or more student groups carries exactly one
+    `group-overlap-indeterminate` warning, and that `expected-attendance-unknown` fires for
+    every section with two or more attending groups.
 
 ## 15. How M4 and M8 should call it
 
-```rust
-let problem = loader.load(school, cycle, term)?;   // M4
-debug_assert!(problem.integrity().is_empty());     // catches a loader bug, not a data state
+M4 implements the first three lines, and a caller should use its combined form rather than
+assembling its own:
 
-let report = validate(&problem);                   // M3
-let summary = ValidationSummary::of(&problem, &report);
-if !summary.may_solve() {
-    return Err(refused(report));                   // M8 surfaces the blocking findings
+```rust
+let report = db.scheduling().validate(&selection)?;   // M4: load + integrity + M3 + merge
+if !report.may_solve() {
+    return Err(refused(report));                      // M8 surfaces the blocking findings
 }
-let outcome = engine.solve(&problem, …)?;          // M6
+let outcome = engine.solve(&problem, …)?;             // M6
 // carry `report` onto the timetable so it states what was not checked — §5 rule 4
 ```
+
+`AssemblyReport::may_solve()` is `false` for a blocking finding **or** a non-empty
+`Problem::integrity`, so a caller cannot be told a structurally broken problem is ready. The
+two channels stay apart: ADR 0036 §4 keeps an integrity error out of the user-facing findings,
+because its remedy is a code fix. The longhand is still available —
+`Scheduling::load` then `AssemblyReport::of` — for a caller that wants the `Problem` as well.
+See [SCHEDULING-PROBLEM-ASSEMBLY.md](SCHEDULING-PROBLEM-ASSEMBLY.md) §14 for the merge rule.
 
 M8 must **not** re-derive whether a solve may proceed from severities; `may_solve` is the
 question. M9 renders the warnings beside the generated timetable, so it is described as having
