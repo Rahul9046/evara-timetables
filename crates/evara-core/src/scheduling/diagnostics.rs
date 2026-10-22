@@ -210,6 +210,21 @@ pub enum DiagnosticCode {
     /// *Remedy: add a room of that type at that campus, make an existing one bookable, or
     /// clear the requirement.*
     NoRoomOfRequiredType,
+    /// More lessons need a kind of room than every room of that kind could hold.
+    ///
+    /// `SOLVER.md` §8 Layer 1, *room-type demand vs. supply*. A counting argument over
+    /// period-slots: a room hosts at most one lesson per slot, so the supply of a room type is
+    /// bounded by `eligible rooms × usable teaching slots`, and demand beyond that cannot be
+    /// met by any timetable.
+    ///
+    /// Distinct from [`DiagnosticCode::NoRoomOfRequiredType`], which is the **degenerate**
+    /// case of the same inequality — supply of zero. They are kept apart because the remedies
+    /// differ: one needs a room of that kind to exist at all, the other needs more of them,
+    /// fewer lessons requiring them, or more slots.
+    ///
+    /// **Added in M3.** M2 declared the degenerate case only, and the non-degenerate shortfall
+    /// had no code to be reported under.
+    RoomTypeDemandExceedsSupply,
     /// An activity's candidate set of `(timeslot, room)` pairs is empty for some other
     /// reason.
     ///
@@ -366,6 +381,7 @@ impl DiagnosticCode {
             Self::AmbiguousBellSchedule => "ambiguous-bell-schedule",
             Self::DurationExceedsLongestRun => "duration-exceeds-longest-run",
             Self::NoRoomOfRequiredType => "no-room-of-required-type",
+            Self::RoomTypeDemandExceedsSupply => "room-type-demand-exceeds-supply",
             Self::EmptyCandidateSet => "empty-candidate-set",
             Self::TeacherLoadExceedsSlots => "teacher-load-exceeds-slots",
             Self::GroupDemandExceedsSlots => "group-demand-exceeds-slots",
@@ -402,6 +418,7 @@ impl DiagnosticCode {
             | Self::AmbiguousBellSchedule
             | Self::DurationExceedsLongestRun
             | Self::NoRoomOfRequiredType
+            | Self::RoomTypeDemandExceedsSupply
             | Self::EmptyCandidateSet
             | Self::TeacherLoadExceedsSlots
             | Self::GroupDemandExceedsSlots
@@ -436,6 +453,7 @@ impl DiagnosticCode {
             Self::AmbiguousBellSchedule,
             Self::DurationExceedsLongestRun,
             Self::NoRoomOfRequiredType,
+            Self::RoomTypeDemandExceedsSupply,
             Self::EmptyCandidateSet,
             Self::TeacherLoadExceedsSlots,
             Self::GroupDemandExceedsSlots,
@@ -552,6 +570,20 @@ impl DiagnosticReport {
         self.findings
             .iter()
             .any(|f| f.severity() == Severity::Blocking)
+    }
+
+    /// Whether a solve may proceed.
+    ///
+    /// The one place a caller asks that question. It exists so no caller re-derives it by
+    /// filtering severities itself — a caller that did could quietly admit a blocking finding
+    /// by forgetting a variant.
+    ///
+    /// **A true answer is not a promise that a timetable exists.** It means pre-solve
+    /// validation found no input it could prove impossible. Only a solver can say more, and
+    /// `evara_core::lessons`' rule applies: never report that a demand *can* be scheduled.
+    #[must_use]
+    pub fn may_solve(&self) -> bool {
+        !self.blocks_solve()
     }
 
     /// How many findings carry one severity.

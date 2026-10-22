@@ -63,6 +63,8 @@ pub mod outcome;
 pub mod placement;
 pub mod population;
 pub mod problem;
+pub mod resolve;
+pub mod validate;
 
 // Fixtures are test and tooling infrastructure, not part of the shipped domain, so they are
 // behind a feature the desktop application does not enable. `test` is included so that this
@@ -99,5 +101,9 @@ pub use population::{
 };
 pub use problem::{
     ActivityFact, GroupFact, GroupKind, IntegrityError, OtherSchool, Problem, RoomFact,
-    RoomTypeFact, SectionFact, TimeslotFact,
+    RoomTypeFact, SectionFact, TeacherFact, TimeslotFact,
 };
+pub use resolve::{
+    MaterialisedGrid, is_compatible, longest_teaching_run, only_campus, runs_on, teaching_slots,
+};
+pub use validate::{ValidationSummary, validate};

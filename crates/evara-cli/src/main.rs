@@ -5,9 +5,15 @@
 //! `evara-solver` must never depend on Tauri.
 //!
 //! Phase 0 shipped the binary and its help text only. Subcommands arrive with the phases
-//! that implement them, and [`fixture`] is the first of them.
+//! that implement them: [`fixture`] (M2) and [`validate`] (M3).
+//!
+//! `validate` took the name an earlier `PLANNED` entry held. That entry described *scoring a
+//! stored project and listing its violations*, which is M5's scorer and a different command,
+//! so it keeps its phase under the name `score`. The planned `diagnose` is gone because
+//! `validate` is it.
 
 mod fixture;
+mod validate;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -17,18 +23,23 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const PLANNED: &[(&str, u8, &str)] = &[
     ("solve", 6, "solve a project and report its score"),
     ("bench", 6, "run fixtures against score baselines"),
-    ("validate", 5, "score a project, list violations"),
-    ("diagnose", 5, "report feasibility problems"),
+    ("score", 5, "score a stored project and list its violations"),
     ("export", 9, "write a portable *.evara archive"),
     ("import", 9, "read a *.evara archive"),
     ("migrate", 1, "apply pending migrations"),
 ];
 
 /// Subcommand and what it does, for the commands that exist.
-const IMPLEMENTED: &[(&str, &str)] = &[(
-    "fixture",
-    "write a synthetic scheduling problem as JSON (test data, not a timetable)",
-)];
+const IMPLEMENTED: &[(&str, &str)] = &[
+    (
+        "fixture",
+        "write a synthetic scheduling problem as JSON (test data, not a timetable)",
+    ),
+    (
+        "validate",
+        "run pre-solve validation over a fixture (reports inputs, not a timetable)",
+    ),
+];
 
 fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -45,6 +56,16 @@ fn main() -> std::process::ExitCode {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(message) => {
                 eprintln!("evara fixture: {message}");
+                std::process::ExitCode::from(2)
+            }
+        },
+        // Three outcomes, three codes. A blocking finding is not a command failure — the
+        // command did its job and the answer was "no" — so they cannot share an exit code.
+        Some("validate") => match validate::run(&args[1..]) {
+            Ok(validate::Outcome::Clean) => std::process::ExitCode::SUCCESS,
+            Ok(validate::Outcome::Blocked) => std::process::ExitCode::from(1),
+            Err(message) => {
+                eprintln!("evara validate: {message}");
                 std::process::ExitCode::from(2)
             }
         },
@@ -67,8 +88,9 @@ fn help() {
     for (name, phase, blurb) in PLANNED {
         println!("  {name:<9} phase {phase:<2} {blurb}");
     }
-    println!("\nSee docs/ROADMAP.md for the phase each command belongs to, and");
-    println!("docs/SCHEDULING-FIXTURES.md for what `fixture` generates.");
+    println!("\nSee docs/ROADMAP.md for the phase each command belongs to,");
+    println!("docs/SCHEDULING-FIXTURES.md for what `fixture` generates, and");
+    println!("docs/PRE-SOLVE-VALIDATION.md for what `validate` checks.");
 }
 
 #[cfg(test)]
@@ -119,6 +141,17 @@ mod tests {
             );
             assert!(blurb.len() > 10, "{name} needs a real description");
         }
+    }
+
+    #[test]
+    fn the_validate_command_does_not_describe_itself_as_producing_a_timetable() {
+        // It validates inputs. Nothing in Evara produces a timetable yet, and the help text
+        // is the first place that claim could leak in.
+        let (_, blurb) = IMPLEMENTED
+            .iter()
+            .find(|(name, _)| *name == "validate")
+            .expect("validate is implemented");
+        assert!(blurb.contains("not a timetable"));
     }
 
     #[test]

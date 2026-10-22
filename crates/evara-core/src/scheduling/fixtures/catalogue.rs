@@ -915,7 +915,15 @@ fn medium(seed: u64) -> SchedulingFixture {
                 ExpectedAttendance::Known { people: CLASS_SIZE },
                 "explicit value",
             )],
-            diagnostics: Vec::new(),
+            diagnostics: vec![ExpectedDiagnostic {
+                problem: 0,
+                code: DiagnosticCode::GroupOverlapIndeterminate,
+                subject_kind: EntityKind::School,
+                subject: problem.context.school.id,
+                because: "classes in different year levels are related by nothing, so the \
+                          pairs stay indeterminate and pre-flight must say so in arithmetic \
+                          rather than list them",
+            }],
             shared_identities: Vec::new(),
             feasible: None,
             notes: medium_notes(),
@@ -1060,6 +1068,13 @@ fn medium_lessons(
             };
             // Spread the sections over the staff, so each carries one or two.
             let teacher = teachers[(class_n * SUBJECTS.len() + subject_n) % TEACHERS];
+            // The course declares the periods its section actually demands. Every fifth
+            // section takes one of its four occurrences as a double, so it demands five
+            // periods and declares five — a disagreement is legitimate (ADR 0029 §3) and is
+            // not what this fixture is for, and declaring four everywhere would make a
+            // realistic school report 25 discrepancies that nobody put there on purpose.
+            let doubles = takes_a_double(sections.len());
+            let declared = i64::try_from(OCCURRENCES_PER_SECTION).unwrap_or(4) + i64::from(doubles);
             let mut spec = SectionSpec::new(&format!(
                 "{subject} {level}{}",
                 char::from(b'A' + u8::try_from(class_n % CLASSES_PER_YEAR).unwrap_or(0))
@@ -1068,7 +1083,7 @@ fn medium_lessons(
             .taught_by(teacher)
             .taught_to(*class)
             .attendance(ExpectedAttendance::Known { people: CLASS_SIZE })
-            .declares_periods(i64::try_from(OCCURRENCES_PER_SECTION).unwrap_or(4));
+            .declares_periods(declared);
             if let Some(room_type) = required {
                 spec = spec.requires_room_type(room_type);
             }
@@ -1077,7 +1092,7 @@ fn medium_lessons(
     }
 
     for (n, section) in sections.iter().enumerate() {
-        if n % 5 == 0 {
+        if takes_a_double(n) {
             builder.add_activities(*section, &[2, 1, 1, 1]);
         } else {
             builder.add_activities(*section, &[1, 1, 1, 1]);
@@ -1124,6 +1139,14 @@ fn medium_availability(
             }
         }
     }
+}
+
+/// Whether the section at `position` takes one of its four occurrences as a double.
+///
+/// Named so the declaration and the activities cannot drift: both read it, and M2's versions
+/// of them disagreed because the rule lived at two call sites.
+const fn takes_a_double(position: usize) -> bool {
+    position.is_multiple_of(5)
 }
 
 /// What a reader of the medium fixture should know that no assertion can state.

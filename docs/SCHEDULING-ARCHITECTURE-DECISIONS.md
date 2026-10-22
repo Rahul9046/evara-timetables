@@ -157,6 +157,14 @@ milestone.
 **Accepted future design.** Every row is one of four outcomes, and none is "assume it is
 fine". The classification exists so that no future reader has to re-derive it per case.
 
+> **Implemented in M3**, except where the row's information is not in a compiled `Problem`.
+> Every *hard validation error* and every *explicit warning* below is produced by
+> `evara_core::scheduling::validate`, with two exceptions owned by M4's loader — the two
+> availability rows, per [ADR 0037](adr/0037-stored-row-diagnostics-belong-to-the-loader.md) —
+> and one owned by M5, the group-overlap contradiction, which needs member identities. Every
+> *no effect* row produces no finding, and every *deferred* row is still unimplemented.
+> [PRE-SOLVE-VALIDATION.md](PRE-SOLVE-VALIDATION.md) §6 is the per-code ownership table.
+
 | Input condition | Classification | Behaviour | Record |
 | --- | --- | --- | --- |
 | No grid materialised for `(cycle, term)` | **Hard validation error** | Solve refused once, before any activity is examined | 0033 §3 |
@@ -298,7 +306,8 @@ M1  decisions  (this PR)              ── no code
  │
  ├─► M2  vocabulary + fixtures         0033 shapes TimeslotFact; 0034 shapes ActivityFact;
  │                                     0035 shapes GroupFact and the overlap relation
- ├─► M3  pre-solve diagnostics         consumes every "explicit warning" row of §3.2
+ ├─► M3  pre-solve diagnostics  ✅     consumes every "explicit warning" row of §3.2,
+ │                                     plus the one shared bell-schedule resolver M4 reuses
  ├─► M4  Problem loader                consumes 0033 §1–§4 and 0035 §2–§5. Blocked without both
  ├─► M5  registry + 8 evaluators       consumes 0034 §1 (one fewer type) and
  │                                     0035 §4 (one extra column in its migration)

@@ -331,7 +331,9 @@ Disruption weight is user-facing: "keep the current timetable as much as possibl
 A bare "no solution found" is the failure mode this product exists to avoid. Three
 layers, in increasing cost:
 
-**Layer 1 — Pre-solve diagnostics (cheap, runs before every solve).** Counting arguments
+**Layer 1 — Pre-solve diagnostics (cheap, runs before every solve).** **Implemented in M3**
+as `evara_core::scheduling::validate`, a pure function from a `Problem` to a
+`DiagnosticReport`; see [PRE-SOLVE-VALIDATION.md](PRE-SOLVE-VALIDATION.md). Counting arguments
 that catch most genuinely impossible setups, with actionable messages:
 
 - teacher load vs. available teaching slots, per teacher and per term
@@ -339,12 +341,19 @@ that catch most genuinely impossible setups, with actionable messages:
 - group period budget vs. slots available to that group
 - activities whose candidate (timeslot, room) set is empty — often a single bad
   availability entry
-- lines whose members exceed the number of rooms of the required type
-- pinned activities that already conflict with each other
+- lines whose members exceed the number of rooms of the required type — **deferred**, there
+  is no `line` table
+- pinned activities that already conflict with each other — **deferred**, there is no
+  `activity.is_locked` column
+
+Four of those six are implemented. Each carries its demand/capacity inequality and the
+direction it is sound in: demand is exact or under-estimated, capacity exact or
+over-estimated, so a finding proves impossibility and silence proves nothing. The two
+deferred checks were not stubbed, because their input vocabulary does not exist.
 
 Example output: *"Year 9 needs 42 periods per cycle but only 40 teaching slots exist.
 Reduce a course's periods per cycle, or add a period."* This layer is high value for low
-effort and should ship in Milestone 1.
+effort and shipped in M3.
 
 M1's decisions add two more kinds of output to this layer, and the distinction between them
 matters as much as the checks themselves:
@@ -368,7 +377,7 @@ every incomplete input into one of four outcomes.
 
 **Layer 2 — Post-solve hard-violation report.** When the best solution is infeasible,
 return the hard violations with full entity references and let the user click through to
-the exact clash. Also Milestone 1.
+the exact clash. **Not implemented** — it needs a solver, so it arrives with M6.
 
 **Layer 3 — Relaxation search (later).** Iteratively soften one constraint group at a
 time, re-solve with a short budget, and report which relaxations restore feasibility:

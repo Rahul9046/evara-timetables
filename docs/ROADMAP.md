@@ -584,8 +584,20 @@ stating once rather than rediscovering:
 - `Explanation` plumbing and the `validate_move` command.
 - Pre-solve feasibility diagnostics ([SOLVER.md](SOLVER.md) §8 Layer 1).
 
+**✅ Pre-solve diagnostics are done (M3).** `evara_core::scheduling::validate` produces 19
+of the 22 declared diagnostic codes from an in-memory `Problem`, with no database and no
+solver; `evara validate <fixture>` runs them headlessly. The remaining three have named owners
+in M4 and M5 — [PRE-SOLVE-VALIDATION.md](PRE-SOLVE-VALIDATION.md) §6. M3 also landed the one
+shared bell-schedule resolver ([adr/0036](adr/0036-one-bell-schedule-resolver-shared-by-validation-and-loading.md)),
+which M4's loader must reuse rather than reimplement.
+
+**Still to do in this phase:** the ~22 constraint evaluators, `ReferenceScorer`,
+`IncrementalScorer` and the property test between them, `Explanation` plumbing and
+`validate_move`. None of those exists.
+
 **Done when:** the infeasible fixture produces specific, actionable diagnostics with no
-solver involved.
+solver involved — **met**: `evara validate infeasible-duration` names the occurrence, both
+figures and the remedy, and exits 1.
 
 ---
 

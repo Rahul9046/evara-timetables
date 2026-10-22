@@ -52,7 +52,22 @@ pub struct SchedulingContext {
     pub campuses: Vec<CampusFact>,
     /// The cycle's positions, in ordinal order.
     pub cycle_days: Vec<CycleDayFact>,
-    /// The bell schedules with slots materialised into this grid — `G` of ADR 0033 §1.
+    /// Every bell schedule the school has **defined**.
+    ///
+    /// # This is not `G`
+    ///
+    /// M2 documented this field as *"the bell schedules with slots materialised into this
+    /// grid — `G` of ADR 0033 §1"*, and that was wrong. A school may define a sixth-form
+    /// timetable and never build a grid from it, and three fixtures do exactly that.
+    ///
+    /// `G` is *the distinct `period_structure` rows that have materialised `timeslot` rows in
+    /// `(cycle, term)`* — **derived from the slots**, by
+    /// [`MaterialisedGrid::of`](super::MaterialisedGrid::of). Resolving against this list
+    /// instead would report an ambiguity at a school that is correctly configured, which ADR
+    /// 0033 test 8 exists to forbid.
+    ///
+    /// The list is still needed: a schedule's campus drives the compatibility relation and its
+    /// name appears in an `AmbiguousBellSchedule` diagnostic, and both are read from here.
     pub bell_schedules: Vec<BellScheduleFact>,
     /// Every period of every schedule in [`SchedulingContext::bell_schedules`].
     ///
