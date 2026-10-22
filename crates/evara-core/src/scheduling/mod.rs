@@ -56,6 +56,7 @@
 
 pub mod availability;
 pub mod clock;
+pub mod constraints;
 pub mod context;
 pub mod diagnostics;
 pub mod hierarchy;
@@ -81,6 +82,10 @@ pub use availability::{
     AvailabilityStatus, EffectiveWindow, SlotAvailability, SlotMask, UnavailabilityIndex,
 };
 pub use clock::{DurationPeriods, TimeInterval, TimeOfDay};
+pub use constraints::{
+    AffectedSet, CompiledConstraint, ConstraintError, ConstraintLevel, ConstraintOptions,
+    ConstraintScope, ConstraintType, Explanation, ScopeRef, Violation, ViolationKey, ViolationSink,
+};
 pub use context::{
     BellScheduleFact, BellScheduleResolution, CampusFact, CycleDayFact, CycleFact, CycleKind,
     NoBellScheduleCause, PeriodFact, PeriodKind, SchedulingContext, SchoolFact, TermFact,
