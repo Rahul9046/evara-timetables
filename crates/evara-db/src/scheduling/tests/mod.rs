@@ -1137,43 +1137,107 @@ fn the_parent_edge_and_the_declared_size_are_both_loaded() {
 }
 
 #[test]
-fn no_group_pair_is_decided_and_the_declaration_is_unstated() {
-    // The inputs ADR 0035 §3 reads, with no answers computed: the evaluator is M5's, and a
-    // second implementation here is the duplication `CLAUDE.md` §2 forbids.
+fn containment_is_decided_and_sibling_pairs_are_not() {
+    // **Changed by M5, and this is the record of it.** M4 compiled
+    // `OverlapRelation::unknown`, so this fixture's ten pairs were all undecided and the
+    // test asserted exactly that. ADR 0035 §3's rules now run, and four of the ten are
+    // decided: the cohort contains each of its four children, which is rule 4.
+    //
+    // The remaining six are the four children against each other, and they stay
+    // `Indeterminate` because `Year 9` has not answered §4's question — which is the state
+    // every project is in until the `children_are_disjoint` column exists and is filled in.
+    // That is the honest answer, not a gap: `9-Mat-1` and `9-Fre-1` are structurally
+    // identical to `9A` and `9B` in the stored data.
     let (project, school) = unknown_overlap();
     let assembly = assemble(&project, &school);
+    let groups = &assembly.problem.groups;
 
-    assert_eq!(
-        assembly.problem.overlap.indeterminate_pairs(),
-        5 * 4 / 2,
-        "every unordered pair is undecided"
-    );
+    let cohort = groups
+        .iter()
+        .position(|g| g.name == "Year 9")
+        .expect("the cohort");
+    let cohort_ix = evara_core::scheduling::GroupIx::new(u32::try_from(cohort).expect("small"));
+
+    for (at, group) in groups.iter().enumerate() {
+        let ix = evara_core::scheduling::GroupIx::new(u32::try_from(at).expect("small"));
+        if at == cohort {
+            continue;
+        }
+        assert_eq!(
+            assembly.problem.overlap.get(cohort_ix, ix),
+            evara_core::scheduling::Overlap::Overlaps,
+            "the cohort contains {} — rule 4",
+            group.name
+        );
+    }
+
+    // Six child-against-child pairs, none of them settled.
+    assert_eq!(assembly.problem.overlap.indeterminate_pairs(), 6);
+
     assert!(
-        assembly
-            .problem
-            .groups
+        groups
             .iter()
             .all(|g| g.children_are_disjoint.is_unanswered()),
-        "`student_group.children_are_disjoint` is a future column, so every group reads \
-         NotStated"
+        "`student_group.children_are_disjoint` is still a future column, so every group \
+         reads NotStated and rule 6 cannot fire"
     );
 }
 
 #[test]
-fn an_undecided_pair_is_not_treated_as_disjoint_or_as_a_clash() {
-    // ADR 0038 §4: `clash_mask` admits only `Overlaps`, so with nothing decided a section's
-    // clash mask is exactly its own audience — which protects each group from itself and
-    // claims nothing about any other pair.
+fn the_diagonal_says_a_group_overlaps_itself() {
+    // `PRE-SOLVE-VALIDATION.md` §14's limitation 9, closed. M2's fixtures and M4's loader
+    // both left `overlap(g, g)` unstated; ADR 0035 rule 2 makes it `Overlaps`.
     let (project, school) = unknown_overlap();
     let assembly = assemble(&project, &school);
 
-    for section in &assembly.problem.sections {
+    for (at, group) in assembly.problem.groups.iter().enumerate() {
+        let ix = evara_core::scheduling::GroupIx::new(u32::try_from(at).expect("small"));
         assert_eq!(
-            section.clash_mask, section.audience_mask,
-            "{} must claim exactly what is proved",
+            assembly.problem.overlap.get(ix, ix),
+            evara_core::scheduling::Overlap::Overlaps,
+            "{} must overlap itself",
+            group.name
+        );
+    }
+}
+
+#[test]
+fn a_clash_mask_claims_what_is_proved_and_no_more() {
+    // **Changed by M5.** Under M4 nothing was decided, so every section's clash mask equalled
+    // its own audience and the test asserted that. Rule 4 now proves the cohort contains each
+    // child, so a section taught to one child clashes with anything taught to the cohort —
+    // which is the whole point of the constraint and is what M4 could not yet express.
+    //
+    // What has *not* changed is the discipline: `clash_mask` admits only `Overlaps`, so the
+    // six undecided sibling pairs are still absent from it. An undecided pair is neither a
+    // clash nor a licence (ADR 0038 §4).
+    let (project, school) = unknown_overlap();
+    let assembly = assemble(&project, &school);
+    let groups = &assembly.problem.groups;
+    let cohort = groups
+        .iter()
+        .position(|g| g.name == "Year 9")
+        .expect("the cohort");
+    let cohort_ix = evara_core::scheduling::GroupIx::new(u32::try_from(cohort).expect("small"));
+
+    for section in &assembly.problem.sections {
+        assert_eq!(section.audience_mask.len(), 1, "one group each");
+        let attending = section.audience[0];
+
+        // Its own audience, and the cohort above it. Nothing else: the sibling pairs are
+        // undecided and are not promoted into a clash.
+        assert!(section.clash_mask.contains(attending));
+        assert!(
+            section.clash_mask.contains(cohort_ix),
+            "{} is taught to a child of the cohort, so it clashes with the cohort",
             section.name
         );
-        assert_eq!(section.audience_mask.len(), 1);
+        assert_eq!(
+            section.clash_mask.len(),
+            2,
+            "{} must claim exactly what is proved — itself and its cohort",
+            section.name
+        );
     }
 }
 
@@ -1194,7 +1258,9 @@ fn an_indeterminate_relation_produces_one_aggregate_warning() {
         .find(|f| f.code == DiagnosticCode::GroupOverlapIndeterminate)
         .expect("the finding");
     assert!(
-        finding.message.contains("10 pairs"),
+        // Six, not ten: M5's rule 4 settled the four cohort-against-child pairs. The count
+        // is read from the relation, so it falls as the evaluator decides more.
+        finding.message.contains("6 pairs"),
         "it carries the arithmetic: {}",
         finding.message
     );
@@ -2022,4 +2088,98 @@ fn an_unbookable_room_is_in_no_candidate_set() {
     let found = report(&project, &school);
     assert!(!found.findings.has(DiagnosticCode::NoRoomOfRequiredType));
     assert!(found.may_solve(), "{}", found.headline());
+}
+
+#[test]
+fn two_schools_groups_are_never_compared() {
+    // ADR 0035 truth table row 20, and the one row that cannot be a unit test of the
+    // evaluator: it needs two schools to exist. `student_group.school_id` is `NOT NULL` and
+    // `V12`'s trigger pair holds a parent to its child's school, so a subtree never crosses a
+    // school boundary — the restriction is structural rather than remembered, and this
+    // asserts the structure rather than a guard.
+    let (project, north, south) = shared_teacher();
+    let from_north = assemble(&project, &north);
+    let from_south = assemble(&project, &south);
+
+    assert_eq!(from_north.problem.groups.len(), 1, "9A only");
+    assert_eq!(from_south.problem.groups.len(), 1, "12A only");
+    assert_ne!(
+        from_north.problem.groups[0].id, from_south.problem.groups[0].id,
+        "two schools teaching a same-named year hold two different groups"
+    );
+
+    // Each relation covers its own school's groups and no more, so there is no index at
+    // which the other school's group could be asked about.
+    assert_eq!(from_north.problem.overlap.groups(), 1);
+    assert_eq!(from_south.problem.overlap.groups(), 1);
+}
+
+#[test]
+fn a_shared_member_row_proves_overlap_without_any_declaration() {
+    // ADR 0035 rule 3, from a real project: two sibling groups sharing one student, with no
+    // `children_are_disjoint` answer anywhere — the column does not exist yet. The member row
+    // alone decides it, which is the half of the specification that works at `V15`.
+    let mut project = Project::new();
+    let mut school = School::new(&mut project, "Brackwell School", &["Brackwell"], 5);
+    school
+        .bells(&mut project, "Standard Day", None, STANDARD_DAY)
+        .materialise(&mut project);
+    school.room(&mut project, "Room 1", 0, None, 30, &[]);
+
+    let cohort = school.group(&mut project, "Year 9", None, None);
+    let set_x = school.group(&mut project, "Set X", None, Some(cohort));
+    let set_y = school.group(&mut project, "Set Y", None, Some(cohort));
+
+    // Three children in Set X, one of whom is also in Set Y.
+    let shared = school.student_in(&mut project, set_x, 0);
+    school.student_in(&mut project, set_x, 1);
+    school.student_in(&mut project, set_y, 2);
+    project
+        .db()
+        .people()
+        .add_student_group_member(&crate::StudentGroupMemberInput {
+            student_group_id: set_y,
+            student_id: shared,
+        })
+        .expect("the shared membership");
+    project.reopen();
+
+    let assembly = assemble(&project, &school);
+    let at = |name: &str| {
+        evara_core::scheduling::GroupIx::new(
+            u32::try_from(
+                assembly
+                    .problem
+                    .groups
+                    .iter()
+                    .position(|g| g.name == name)
+                    .expect("the group"),
+            )
+            .expect("small"),
+        )
+    };
+
+    assert_eq!(
+        assembly.problem.overlap.get(at("Set X"), at("Set Y")),
+        evara_core::scheduling::Overlap::Overlaps,
+        "one shared member row is a fact, and rule 3 reads it"
+    );
+
+    // The effective counts come from the same sets rule 3 intersected, so the subtree union
+    // is visible here too: the cohort holds all three children though it has no member row.
+    let count = |name: &str| assembly.problem.groups[at(name).get()].effective_members;
+    assert_eq!(count("Set X"), 2);
+    assert_eq!(count("Set Y"), 2);
+    assert_eq!(
+        count("Year 9"),
+        3,
+        "the subtree union, with no row of its own"
+    );
+
+    // No contradiction: nothing was declared, so nothing is contradicted.
+    assert!(
+        !AssemblyReport::of(&assembly)
+            .findings
+            .has(DiagnosticCode::GroupOverlapContradiction)
+    );
 }

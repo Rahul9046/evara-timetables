@@ -23,21 +23,103 @@
 //! shapes. There is no parallel diagnostic type here and there must never be one.
 
 use evara_core::scheduling::{
-    AvailabilityEntityKind, Diagnostic, DiagnosticCode, EntityKind, EntityRef, Problem,
+    AvailabilityEntityKind, Contradiction, Diagnostic, DiagnosticCode, EntityKind, EntityRef,
+    Problem,
 };
 
+use super::population::{Student, student_at};
 use super::rules::Orphan;
 
 /// Builds the loader's findings, most severe first.
 ///
 /// Returned as a plain `Vec` rather than a report, because the caller merges them with M3's
 /// by severity — see [`super::report`] for the merge rule and why it is not a concatenation.
-pub(super) fn of(problem: &Problem, orphans: &[Orphan], unscheduled: &[Orphan]) -> Vec<Diagnostic> {
+pub(super) fn of(
+    problem: &Problem,
+    orphans: &[Orphan],
+    unscheduled: &[Orphan],
+    contradictions: &[Contradiction],
+    students: &[Student],
+) -> Vec<Diagnostic> {
     let mut findings = Vec::new();
     findings.extend(ineligible_teachers(problem));
     findings.extend(orphans.iter().map(|row| orphan(problem, row)));
+    findings.extend(
+        contradictions
+            .iter()
+            .filter_map(|found| contradiction(problem, found, students)),
+    );
     findings.extend(unscheduled.iter().map(|row| not_scheduled(problem, row)));
     findings
+}
+
+/// A declaration the school's own member rows contradict.
+///
+/// # Named, never resolved
+///
+/// ADR 0035 §6.3: *"Contradictions are named, not resolved."* A parent declared its children
+/// disjoint and a student is in two of them, so rule 3 beats rule 6, the pair is `Overlaps`,
+/// and this says which rows disagree. Honouring the flag instead would hide a data error that
+/// matters — a child would be timetabled into two rooms at once and both timetables would
+/// report themselves clean.
+///
+/// The solve is **not** refused. `group-overlap-contradiction` is a warning, because the
+/// enforcement already went the safe way: the pair overlaps, the clash is prevented, and what
+/// remains is a disagreement the school should know about. Blocking would stop a school
+/// generating over a data error the engine has already handled correctly.
+///
+/// # Why this is produced here and not by M3
+///
+/// [ADR 0037](../../../../docs/adr/0037-stored-row-diagnostics-belong-to-the-loader.md)'s
+/// ownership table assigns the code to M5 because *"a `Problem` carries a member count, so M3
+/// could not detect it even if it owned the rule"*. M5 supplies the rule, and the rule runs
+/// where the member identities are — at relation-compile time, in this loader. So the finding
+/// joins the three the loader already owns rather than becoming a fourth producer: it is a
+/// finding about **stored rows**, which is precisely ADR 0037's criterion.
+fn contradiction(
+    problem: &Problem,
+    found: &Contradiction,
+    students: &[Student],
+) -> Option<Diagnostic> {
+    let a = problem.groups.get(found.a.get())?;
+    let b = problem.groups.get(found.b.get())?;
+    let parent = problem.groups.get(found.parent.get())?;
+    let student = student_at(students, found.student);
+    let named = student.map_or_else(|| String::from("A student"), |student| student.name.clone());
+
+    let mut finding = Diagnostic::new(
+        DiagnosticCode::GroupOverlapContradiction,
+        EntityRef::new(EntityKind::StudentGroup, parent.id, parent.name.clone()),
+        format!(
+            "{} says its child groups do not share students, and {named} is in both {} and \
+             {}. Evara has used the membership: the two groups overlap, so their lessons \
+             will not be timetabled at the same time.",
+            parent.name, a.name, b.name
+        ),
+    )
+    .with_remedy(format!(
+        "Either remove {named} from {} or from {}, or change {}'s answer to \"these groups \
+         may share students\".",
+        a.name, b.name, parent.name
+    ))
+    .with_related(EntityRef::new(
+        EntityKind::StudentGroup,
+        a.id,
+        a.name.clone(),
+    ))
+    .with_related(EntityRef::new(
+        EntityKind::StudentGroup,
+        b.id,
+        b.name.clone(),
+    ));
+    if let Some(student) = student {
+        finding = finding.with_related(EntityRef::new(
+            EntityKind::Student,
+            student.id,
+            student.name.clone(),
+        ));
+    }
+    Some(finding)
 }
 
 /// Every teacher given a section at a campus their eligibility excludes.
@@ -228,4 +310,7 @@ pub const PRODUCED: &[DiagnosticCode] = &[
     DiagnosticCode::TeacherNotEligibleForCampus,
     DiagnosticCode::OrphanAvailabilityReference,
     DiagnosticCode::AvailabilityEntityKindNotScheduled,
+    // Added in M5. ADR 0037's table named M5 as its owner because it needs member
+    // identities; it is produced here because that is where the member rows are read.
+    DiagnosticCode::GroupOverlapContradiction,
 ];

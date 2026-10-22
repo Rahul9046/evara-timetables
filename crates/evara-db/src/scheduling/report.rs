@@ -254,9 +254,15 @@ mod tests {
 
     #[test]
     fn the_loader_claims_only_the_codes_adr_0037_gave_it() {
-        // The ownership contract, asserted rather than trusted. Three codes, and the exact
-        // three the record names.
-        assert_eq!(LOADER_DIAGNOSTICS.len(), 3);
+        // The ownership contract, asserted rather than trusted.
+        //
+        // **Four since M5, not three.** `group-overlap-contradiction` is the addition, and
+        // ADR 0037's own table is why it belongs here rather than being a fourth producer:
+        // the code was assigned to M5 because *"a `Problem` carries a member count, so M3
+        // could not detect it even if it owned the rule"*, and M5's rule runs where the
+        // member identities are — in this loader, at relation-compile time. A finding about
+        // stored rows is the loader's, which is precisely ADR 0037's criterion.
+        assert_eq!(LOADER_DIAGNOSTICS.len(), 4);
         for code in LOADER_DIAGNOSTICS {
             assert!(
                 matches!(
@@ -264,8 +270,9 @@ mod tests {
                     DiagnosticCode::TeacherNotEligibleForCampus
                         | DiagnosticCode::OrphanAvailabilityReference
                         | DiagnosticCode::AvailabilityEntityKindNotScheduled
+                        | DiagnosticCode::GroupOverlapContradiction
                 ),
-                "{} is not one of ADR 0037's three",
+                "{} is not a code the loader owns",
                 code.key()
             );
         }

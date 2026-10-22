@@ -38,7 +38,8 @@
 //! milestone leaves behind.
 
 use evara_core::scheduling::{
-    DisjointnessDeclaration, GroupFact, GroupKind, OtherSchool, TeacherFact,
+    DisjointnessDeclaration, GroupFact, GroupKind, GroupMembers, OtherSchool, OverlapOutcome,
+    StudentIx, TeacherFact, evaluate_overlap,
 };
 use rusqlite::Connection;
 use uuid::Uuid;
@@ -46,7 +47,6 @@ use uuid::Uuid;
 use super::index::ProblemIndex;
 use super::{IN_SCOPE_TERM, SchedulingSelection, corrupt, require_index};
 use crate::error::Result;
-use crate::repo::people::MAX_GROUP_DEPTH;
 use crate::repo::row::{opt_text, parse_id_text, text};
 
 /// The teachers in scope, and how many of them are no longer employed here.
@@ -215,20 +215,22 @@ fn sharing(
     Ok(())
 }
 
-/// Reads every student group of the school.
+/// Reads every student group of the school, and who is in each one.
 ///
 /// All of them, not only the ones a section is taught to: `GroupFact::parent` indexes into
 /// this table, and an ancestor that attends nothing is still the group whose
-/// `children_are_disjoint` answer rule 6 will read. `V12`'s trigger pair holds a parent to
-/// its child's school, so loading the school's groups yields a closed parent set and no
-/// parent edge can dangle.
+/// `children_are_disjoint` answer rule 6 reads. `V12`'s trigger pair holds a parent to its
+/// child's school, so loading the school's groups yields a closed parent set and no parent
+/// edge can dangle — which is also why ADR 0035 truth table row 20 needs no check here: a
+/// subtree cannot cross a school boundary.
+///
+/// Returns the facts with `effective_members` still zero, because the count comes from the
+/// member sets and the sets are unioned by the evaluator. [`overlap`] fills both in.
 pub(super) fn groups(
     conn: &Connection,
     selection: &SchedulingSelection,
     index: &mut ProblemIndex,
-) -> Result<Vec<GroupFact>> {
-    let members = effective_members(conn, selection)?;
-
+) -> Result<(Vec<GroupFact>, GroupMembers, Vec<Student>)> {
     // Interned in one pass before any parent edge is resolved, because a group's parent may
     // sort after it and a forward reference must resolve to the same index either way.
     let mut rows = Vec::new();
@@ -267,9 +269,8 @@ pub(super) fn groups(
             kind: group_kind(&kind)?,
             parent,
             declared_size,
-            effective_members: members
-                .binary_search_by(|(group, _)| group.cmp(&id))
-                .map_or(0, |at| members[at].1),
+            // Filled in by `overlap`, from the union of the subtree's member sets.
+            effective_members: 0,
             // `student_group.children_are_disjoint` is a FUTURE column: ADR 0035 §4 defines
             // it and `SCHEDULING-ARCHITECTURE-DECISIONS.md` §4.1 schedules it for M5's
             // migration. Every existing project reads `NULL`, which is exactly what
@@ -280,75 +281,123 @@ pub(super) fn groups(
             children_are_disjoint: DisjointnessDeclaration::from_column(None),
         });
     }
-    Ok(facts)
+
+    let (members, students) = membership(conn, selection, index, facts.len())?;
+    Ok((facts, members, students))
 }
 
-/// How many students could actually be in the room, per group, sorted by identifier.
+/// A student whose membership the evaluator read, for a report that has to name them.
 ///
-/// ADR 0035 §2's `effective_members`, as a count: member rows over the group's whole
-/// subtree, restricted to students who are `is_active` and hold a
-/// `student_school_enrolment` spell at this school whose status is not `LEFT`.
+/// Kept beside the problem rather than in it. `Problem` holds groups and never an expanded
+/// student set — ADR 0035 §5, which ADR 0006 depends on — so these exist only so a
+/// `group-overlap-contradiction` can say *which* child is in two groups that were declared
+/// disjoint.
+pub(super) struct Student {
+    /// Stable identity, as stored.
+    pub(super) id: Uuid,
+    /// What to call them in a finding.
+    pub(super) name: String,
+}
+
+/// Reads the direct `student_group_member` rows, filtered to who could be in the room.
 ///
-/// Both halves of that filter are load-bearing and neither is obvious.
+/// # ADR 0035 §2's conjunction, in SQL
 ///
-/// **The subtree union**, because containment is what the parent edge means: a student named
-/// in `9-Mat-1` is in Year 9 whether or not a Year 9 member row exists, and a school that
-/// enters members only at the leaves — the natural way — would otherwise get no protection
-/// at its cohort level.
+/// A student counts when they are `is_active` **and** hold a `student_school_enrolment` spell
+/// at this school whose status is not `LEFT`. Both halves are load-bearing:
+/// `student_group_member` deliberately keeps history (`V13:468-470`), which is right for the
+/// record and wrong for a room — counting a child who has left would manufacture clashes
+/// between groups that no longer share anybody.
 ///
-/// **The `LEFT` and `is_active` filter**, because `student_group_member` deliberately keeps
-/// history (`V13:468-470`). That is right for the record and wrong for a room: counting a
-/// child who has left would manufacture clashes between groups that no longer share anybody.
-///
-/// One recursive query for the whole school rather than one per group, and the recursion is
-/// bounded by [`MAX_GROUP_DEPTH`] — the same limit
-/// [`People::add_student_group_member`](crate::repo::people::People) walks before a write, so
-/// a damaged file with a cycle longer than the schema's one-step `CHECK` refuses makes this
-/// stop rather than spin.
-fn effective_members(
+/// **Direct rows only.** The subtree union is the evaluator's, which is what makes
+/// `effective_members` and rule 3 read one set rather than two that have to agree. The
+/// recursive query this replaces computed only a count, and a count cannot answer rule 3.
+fn membership(
     conn: &Connection,
     selection: &SchedulingSelection,
-) -> Result<Vec<(Uuid, i64)>> {
-    let mut stmt = conn.prepare(
-        "WITH RECURSIVE descendant(root, id, depth) AS (
-             SELECT g.id, g.id, 0 FROM student_group g WHERE g.school_id = ?1
-             UNION ALL
-             SELECT d.root, c.id, d.depth + 1
-             FROM student_group c
-             JOIN descendant    d ON c.parent_group_id = d.id
-             WHERE d.depth < ?2
-         )
-         SELECT d.root, COUNT(DISTINCT m.student_id)
-         FROM descendant           d
-         JOIN student_group_member m ON m.student_group_id = d.id
-         JOIN student              s ON s.id = m.student_id AND s.is_active = 1
-         WHERE EXISTS (
-             SELECT 1 FROM student_school_enrolment e
-             WHERE e.student_id = m.student_id
-               AND e.school_id  = ?1
-               AND e.status    <> 'LEFT'
-         )
-         GROUP BY d.root
-         ORDER BY d.root",
-    )?;
-    let rows = stmt.query_map(
-        rusqlite::params![
-            text(selection.school_id),
-            i64::try_from(MAX_GROUP_DEPTH).unwrap_or(i64::MAX)
-        ],
-        |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-    )?;
-
-    let mut counts = Vec::new();
-    for row in rows {
-        let (raw, count) = row?;
-        counts.push((parse_id_text("student_group.id", &raw)?, count));
+    index: &mut ProblemIndex,
+    groups: usize,
+) -> Result<(GroupMembers, Vec<Student>)> {
+    let mut pairs = Vec::new();
+    let mut students = Vec::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT m.student_group_id, m.student_id, s.given_name, s.family_name
+             FROM student_group_member m
+             JOIN student_group       g ON g.id = m.student_group_id
+             JOIN student             s ON s.id = m.student_id
+             WHERE g.school_id = ?1
+               AND s.is_active = 1
+               AND EXISTS (
+                   SELECT 1 FROM student_school_enrolment e
+                   WHERE e.student_id = m.student_id
+                     AND e.school_id  = ?1
+                     AND e.status    <> 'LEFT'
+               )
+             ORDER BY s.family_name, s.given_name, s.id, g.name, g.id",
+        )?;
+        let read = stmt.query_map([text(selection.school_id)], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+        for row in read {
+            let (raw_group, raw_student, given_name, family_name) = row?;
+            let group = parse_id_text("student_group_member.student_group_id", &raw_group)?;
+            let student = parse_id_text("student_group_member.student_id", &raw_student)?;
+            // A group of another school cannot appear — the join restricts it — so a miss
+            // here would be corruption rather than an out-of-scope row.
+            let group = require_index(
+                &index.groups,
+                group,
+                "student_group_member.student_group_id",
+            )?;
+            if index.students.index_of(student).is_none() {
+                index.students.intern(student);
+                students.push(Student {
+                    id: student,
+                    name: format!("{given_name} {family_name}"),
+                });
+            }
+            let at = require_index(&index.students, student, "student_group_member.student_id")?;
+            pairs.push((group, at));
+        }
     }
-    // `ORDER BY d.root` orders by the stored text; the binary search above compares `Uuid`s,
-    // and the two orders are not the same for a hyphenated UUID. Sorted here so the search
-    // is over the order it assumes rather than the order SQLite happened to return.
-    counts.sort_unstable_by_key(|(group, _)| *group);
-    Ok(counts)
+
+    let mut members = GroupMembers::new(groups, index.students.len());
+    for (group, student) in pairs {
+        members.add(group, student);
+    }
+    Ok((members, students))
+}
+
+/// Compiles the three-state overlap answer for every pair, and the counts beside it.
+///
+/// # The evaluator is called, not reimplemented
+///
+/// `evara_core::scheduling::overlap` is ADR 0035 §3's only implementation, and this is the
+/// call site the record means by *"computed once per solve and never inside the search
+/// loop"*. There is no overlap logic in this crate; a second copy would be the duplication
+/// `CLAUDE.md` §2 forbids, with rule 3's precedence over rule 6 the thing most expensive to
+/// get differently wrong in two places.
+///
+/// `effective_members` is written from the same sets the evaluator intersected, so the count
+/// a report shows and the set rule 3 read cannot disagree.
+pub(super) fn overlap(facts: &mut [GroupFact], members: &mut GroupMembers) -> OverlapOutcome {
+    let outcome = evaluate_overlap(facts, members);
+    for (at, fact) in facts.iter_mut().enumerate() {
+        let group = evara_core::scheduling::GroupIx::new(u32::try_from(at).unwrap_or(u32::MAX));
+        fact.effective_members = members.effective_count(group);
+    }
+    outcome
+}
+
+/// The student a contradiction names, by index.
+pub(super) fn student_at(students: &[Student], at: StudentIx) -> Option<&Student> {
+    students.get(at.get())
 }
 
 /// Reads `student_group.kind`.
