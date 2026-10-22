@@ -626,17 +626,23 @@ timetable.
 
 ## 18. Performance
 
-**Twenty-nine prepared statements per load, thirty-one when a term is named, independent of
-school size.** Every relationship is read with one bulk query and resolved in memory against
-the identifier maps; nothing asks a question per row.
+**Twenty-eight statements per load, thirty when a term is named, independent of school
+size.** Every relationship is read with one bulk query and resolved in memory against the
+identifier maps; nothing asks a question per row.
 
 | Stage | Statements |
 | --- | --- |
-| Context (school, cycle + owner, term + owner, campuses, days, schedules, periods, slots) | 9, or 11 with a term |
-| Facilities (own room types, borrowed room types, rooms, room campuses, room sharing) | 5 |
-| Population (effective members, groups, employed teachers, assigned teachers, eligibility, sharing) | 6 |
-| Lessons (sections, staffing, audience, activities) | 4 |
-| Availability (4 entity-existence sweeps, 1 rule read) | 5 |
+| Context — campuses, days, schedules, periods, slots (5 prepared); school, cycle, cycle owner (3) | 8, or **10** with a term (its own row plus its owner check) |
+| Facilities — own room types, borrowed room types, rooms, room campuses, room sharing | 5 |
+| Population — effective members, groups, employed teachers, assigned teachers, eligibility, sharing | 6 |
+| Lessons — sections, staffing, audience, activities | 4 |
+| Availability — 4 entity-existence sweeps, 1 rule read | 5 |
+
+Counted from the code rather than measured by instrumentation, which is why the breakdown is
+spelled out: a reader can check the figure against the source, and a stage that gains a query
+has one table to update. Nothing enforces the number, so treat it as documentation rather than
+a guarantee. **The guarantee is the shape** — no count here depends on how many rows a school
+has, which is the property the performance test is set to catch a regression in.
 
 Measured on the fixtures above (Windows 11, debug profile with `opt-level = 1`):
 
@@ -646,7 +652,7 @@ Measured on the fixtures above (Windows 11, debug profile with `opt-level = 1`):
 | `medium` assembly (500 occurrences, 125 sections, 80 teachers) | **3.0 ms** |
 | `medium` validation (integrity + M3 + merge) | **1.8 ms** |
 
-62× the occurrences for 1.9× the time, which is the shape a fixed query count predicts. A test
+62× the occurrences for 1.9× the time, which is the shape a fixed statement count predicts. A test
 asserts a loose ceiling rather than a number — a wall-clock assertion on a shared runner is a
 flaky test — and it is set to catch the one failure that matters here, an accidental N+1, which
 would put `medium` into seconds.

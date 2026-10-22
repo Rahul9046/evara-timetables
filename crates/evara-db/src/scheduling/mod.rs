@@ -42,9 +42,9 @@
 //!
 //! # Queries
 //!
-//! Twenty-nine prepared statements per load, thirty-one when a term is named, **independent
-//! of school size**. Every relationship is read with one bulk query and resolved in memory
-//! against the identifier maps; nothing asks a question per row. The per-table list is in
+//! Twenty-eight statements per load, thirty when a term is named, **independent of school
+//! size**. Every relationship is read with one bulk query and resolved in memory against the
+//! identifier maps; nothing asks a question per row. The per-stage breakdown is in
 //! [`SCHEDULING-PROBLEM-ASSEMBLY.md`](../../../docs/SCHEDULING-PROBLEM-ASSEMBLY.md) §18.
 
 mod context;
