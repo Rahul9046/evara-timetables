@@ -63,7 +63,7 @@ use evara_core::scheduling::{
     ViolationSink,
 };
 
-pub use evaluation::{EvaluationReport, evaluate, evaluate_placement};
+pub use evaluation::{Completeness, EvaluationReport, evaluate, evaluate_placement};
 pub use occupancy::Occupancy;
 pub use params::schema_of;
 pub use registry::{Registry, evaluator_for};
