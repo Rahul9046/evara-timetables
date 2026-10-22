@@ -263,6 +263,17 @@ export function StudentGroups(props: { school: School; context?: SetupContext })
       parentGroupId: row?.parentGroupId ?? null,
       size: row?.size === null || row?.size === undefined ? "" : String(row.size),
       campusId: row?.campusId ?? null,
+      /**
+       * Carried, not edited. `children_are_disjoint` answers ADR 0035 §4's question — do
+       * this group's children share students? — and the scheduling engine reads it, but no
+       * control offers it yet. Round-tripping it through the draft is what stops an
+       * unrelated edit to a group silently clearing an answer somebody gave. Three states,
+       * so `null` must survive as `null` rather than collapsing to `false`.
+       */
+      childrenAreDisjoint:
+        row?.childrenAreDisjoint === null || row?.childrenAreDisjoint === undefined
+          ? ""
+          : String(row.childrenAreDisjoint),
     }),
     toInput: (draft) => ({
       schoolId: school.id,
@@ -273,6 +284,10 @@ export function StudentGroups(props: { school: School; context?: SetupContext })
       parentGroupId: textOrNull(draft, "parentGroupId"),
       size: text(draft, "size").length === 0 ? null : number(draft, "size"),
       campusId: textOrNull(draft, "campusId"),
+      childrenAreDisjoint:
+        text(draft, "childrenAreDisjoint").length === 0
+          ? null
+          : text(draft, "childrenAreDisjoint") === "true",
     }),
     list: () => listStudentGroups(school.id),
     create: (input) => createStudentGroup(input),

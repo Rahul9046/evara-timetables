@@ -236,7 +236,7 @@ pub(super) fn groups(
     let mut rows = Vec::new();
     {
         let mut stmt = conn.prepare(
-            "SELECT id, name, kind, parent_group_id, size
+            "SELECT id, name, kind, parent_group_id, size, children_are_disjoint
              FROM student_group WHERE school_id = ? ORDER BY name, id",
         )?;
         let read = stmt.query_map([text(selection.school_id)], |row| {
@@ -246,18 +246,19 @@ pub(super) fn groups(
                 row.get::<_, String>(2)?,
                 row.get::<_, Option<String>>(3)?,
                 row.get::<_, Option<i64>>(4)?,
+                row.get::<_, Option<bool>>(5)?,
             ))
         })?;
         for row in read {
             let row = row?;
             let id = parse_id_text("student_group.id", &row.0)?;
             index.groups.intern(id);
-            rows.push((id, row.1, row.2, row.3, row.4));
+            rows.push((id, row.1, row.2, row.3, row.4, row.5));
         }
     }
 
     let mut facts = Vec::with_capacity(rows.len());
-    for (id, name, kind, raw_parent, declared_size) in rows {
+    for (id, name, kind, raw_parent, declared_size, declares) in rows {
         let parent = raw_parent
             .map(|raw| parse_id_text("student_group.parent_group_id", &raw))
             .transpose()?
@@ -271,14 +272,13 @@ pub(super) fn groups(
             declared_size,
             // Filled in by `overlap`, from the union of the subtree's member sets.
             effective_members: 0,
-            // `student_group.children_are_disjoint` is a FUTURE column: ADR 0035 §4 defines
-            // it and `SCHEDULING-ARCHITECTURE-DECISIONS.md` §4.1 schedules it for M5's
-            // migration. Every existing project reads `NULL`, which is exactly what
-            // `NotStated` means — and `DisjointnessDeclaration::from_column(None)` is the
-            // one conversion, so when the column lands this line becomes a read rather
-            // than a constant. Defaulting to either answer would be inventing a statement
-            // the school has not made.
-            children_are_disjoint: DisjointnessDeclaration::from_column(None),
+            // `V16` added the column (ADR 0035 §4), so this is now a read rather than the
+            // constant M4 had to use. `NULL` is `NotStated` and is what every project
+            // migrated from `V15` holds — which is the behaviour that record defines for
+            // them. `from_column` is the one conversion, and it keeps `NotStated` and
+            // `MayOverlap` apart: they give the same overlap answer and are different
+            // states, and a default of either would be a statement the school has not made.
+            children_are_disjoint: DisjointnessDeclaration::from_column(declares),
         });
     }
 

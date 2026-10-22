@@ -794,6 +794,7 @@ fn group_in(project: &mut Project, fixture: &Fixture) -> Uuid {
             parent_group_id: None,
             size: None,
             campus_id: None,
+            children_are_disjoint: None,
         })
         .expect("create group")
         .id

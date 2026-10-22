@@ -2183,3 +2183,187 @@ fn a_shared_member_row_proves_overlap_without_any_declaration() {
             .has(DiagnosticCode::GroupOverlapContradiction)
     );
 }
+
+// =======================================================================================
+// V16 — the declaration rule 6 reads
+// =======================================================================================
+
+#[test]
+fn an_unanswered_declaration_is_not_an_answer_of_no() {
+    // `NULL` and `0` give the same overlap answer today and are different states, which is
+    // why `DisjointnessDeclaration` keeps them apart and why `V16`'s column has no DEFAULT.
+    // A migrated project reads `NULL`; a school that has said "they may overlap" reads `0`,
+    // and pre-flight should stop asking it.
+    let (mut project, school) = unknown_overlap();
+    let groups = school.groups.clone();
+
+    let before = assemble(&project, &school);
+    assert!(
+        before
+            .problem
+            .groups
+            .iter()
+            .all(|g| g.children_are_disjoint.is_unanswered()),
+        "every group of a project migrated from V15 reads NotStated"
+    );
+
+    School::declare_children(&mut project, groups[0], Some(false));
+    project.reopen();
+
+    let after = assemble(&project, &school);
+    let cohort = after
+        .problem
+        .groups
+        .iter()
+        .find(|g| g.name == "Year 9")
+        .expect("the cohort");
+    assert_eq!(
+        cohort.children_are_disjoint,
+        evara_core::scheduling::DisjointnessDeclaration::MayOverlap,
+        "an explicit `0` is MayOverlap, not NotStated"
+    );
+    assert!(!cohort.children_are_disjoint.is_unanswered());
+    assert!(!cohort.children_are_disjoint.proves_children_disjoint());
+
+    // And it changes no verdict: rule 6 needs a *true* declaration, so the six sibling
+    // pairs are still Indeterminate.
+    assert_eq!(after.problem.overlap.indeterminate_pairs(), 6);
+}
+
+#[test]
+fn a_declared_disjoint_parent_settles_its_childrens_pairs() {
+    // ADR 0035 rule 6, from a real project — the half of `student-clash` that could not work
+    // before `V16`. Six Indeterminate pairs become Disjoint on one answer, which is the
+    // "linear number of answers" the record chose a per-parent flag to get.
+    let (mut project, school) = unknown_overlap();
+    let cohort = school.groups[0];
+
+    assert_eq!(
+        assemble(&project, &school)
+            .problem
+            .overlap
+            .indeterminate_pairs(),
+        6
+    );
+
+    School::declare_children(&mut project, cohort, Some(true));
+    project.reopen();
+
+    let after = assemble(&project, &school);
+    assert_eq!(
+        after.problem.overlap.indeterminate_pairs(),
+        0,
+        "one answer on one parent settles every sibling pair beneath it"
+    );
+
+    // The cohort still contains each child — a declaration about siblings never reaches a
+    // parent-child pair, because rule 4 is consulted first.
+    let at = |name: &str| {
+        evara_core::scheduling::GroupIx::new(
+            u32::try_from(
+                after
+                    .problem
+                    .groups
+                    .iter()
+                    .position(|g| g.name == name)
+                    .expect("the group"),
+            )
+            .expect("small"),
+        )
+    };
+    assert_eq!(
+        after.problem.overlap.get(at("Year 9"), at("9A")),
+        evara_core::scheduling::Overlap::Overlaps
+    );
+    assert_eq!(
+        after.problem.overlap.get(at("9A"), at("9B")),
+        evara_core::scheduling::Overlap::Disjoint
+    );
+
+    // Nothing is left to warn about, so the aggregate warning stops firing entirely.
+    let found = report(&project, &school);
+    assert!(
+        !found
+            .findings
+            .has(DiagnosticCode::GroupOverlapIndeterminate)
+    );
+    assert!(found.may_solve(), "{}", found.headline());
+}
+
+#[test]
+fn a_member_row_beats_a_declaration_and_the_disagreement_is_named() {
+    // ADR 0035 truth table row 9 and §6.3, end to end: rule 3 before rule 6. The pair
+    // overlaps — the member row is what happened and the flag is what was intended — and the
+    // contradiction is reported rather than resolved.
+    let mut project = Project::new();
+    let mut school = School::new(&mut project, "Calderstone School", &["Calderstone"], 5);
+    school
+        .bells(&mut project, "Standard Day", None, STANDARD_DAY)
+        .materialise(&mut project);
+    school.room(&mut project, "Room 1", 0, None, 30, &[]);
+
+    let classes = school.group(&mut project, "Year 9 Classes", Some(120), None);
+    let nine_a = school.group(&mut project, "9A", Some(28), Some(classes));
+    let nine_b = school.group(&mut project, "9B", Some(28), Some(classes));
+    School::declare_children(&mut project, classes, Some(true));
+
+    // One child in both, which the declaration says cannot happen.
+    let shared = school.student_in(&mut project, nine_a, 0);
+    project
+        .db()
+        .people()
+        .add_student_group_member(&crate::StudentGroupMemberInput {
+            student_group_id: nine_b,
+            student_id: shared,
+        })
+        .expect("the contradicting membership");
+    project.reopen();
+
+    let assembly = assemble(&project, &school);
+    let at = |name: &str| {
+        evara_core::scheduling::GroupIx::new(
+            u32::try_from(
+                assembly
+                    .problem
+                    .groups
+                    .iter()
+                    .position(|g| g.name == name)
+                    .expect("the group"),
+            )
+            .expect("small"),
+        )
+    };
+    assert_eq!(
+        assembly.problem.overlap.get(at("9A"), at("9B")),
+        evara_core::scheduling::Overlap::Overlaps,
+        "the member row wins — rule 3 precedes rule 6"
+    );
+
+    let found = AssemblyReport::of(&assembly);
+    assert_eq!(
+        found
+            .findings
+            .count_code(DiagnosticCode::GroupOverlapContradiction),
+        1
+    );
+    let finding = found
+        .of_severity(Severity::Warning)
+        .find(|f| f.code == DiagnosticCode::GroupOverlapContradiction)
+        .expect("the finding");
+
+    // Named, not resolved: it says which parent declared it, which two groups, and who.
+    assert_eq!(finding.subject.label, "Year 9 Classes");
+    assert!(finding.message.contains("9A"), "{}", finding.message);
+    assert!(finding.message.contains("9B"), "{}", finding.message);
+    assert!(finding.message.contains("Pupil0"), "{}", finding.message);
+    assert!(finding.remedy.is_some());
+    assert_eq!(
+        finding.related.len(),
+        3,
+        "both groups and the student are all clickable"
+    );
+
+    // It warns and does not block: the clash is already prevented, and refusing to generate
+    // over a data error the engine has handled correctly would be the wrong trade.
+    assert!(found.may_solve(), "{}", found.headline());
+}

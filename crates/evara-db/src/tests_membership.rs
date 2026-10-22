@@ -207,6 +207,7 @@ impl Trust {
                 parent_group_id: None,
                 size,
                 campus_id: None,
+                children_are_disjoint: None,
             })
             .expect("create group")
             .id
