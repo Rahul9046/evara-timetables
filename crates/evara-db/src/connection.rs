@@ -84,6 +84,40 @@ pub(crate) fn open_plain(path: &Path) -> Result<Connection> {
     Ok(conn)
 }
 
+/// Opens a project for inspection and makes SQLite itself refuse every write.
+///
+/// # Three independent guarantees, because one is a promise and three are a property
+///
+/// 1. **`PRAGMA query_only = ON`**, read back and verified like every other pragma. SQLite
+///    refuses any statement that would change the database file, so a write does not depend
+///    on no Rust code attempting one.
+/// 2. **No `evara_site_id()` function.** Every change-log trigger calls it, so a write to any
+///    tracked table would fail with *"no such function"* even if the pragma were lifted —
+///    which is the same mechanism that stops another tool writing unattributable rows.
+/// 3. **No migration and no trigger installation.** Those are the two writes
+///    [`Database::open_existing`](crate::Database::open_existing) performs on an ordinary
+///    open, and the caller refuses a project that would need either rather than performing
+///    them quietly.
+///
+/// `configure` still runs, and its `journal_mode = WAL` is the one statement that could in
+/// principle write — to the file header, if the project were not already in WAL. Every Evara
+/// project is, because this is the only factory that creates one, and the pragma is applied
+/// before `query_only` so an upgrade path that needed it would not be silently broken.
+pub(crate) fn open_query_only(path: &Path) -> Result<Connection> {
+    let conn = open_plain(path)?;
+    conn.pragma_update(None, "query_only", "ON")?;
+
+    let query_only: i64 = conn.query_row("PRAGMA query_only", [], |row| row.get(0))?;
+    if query_only == 0 {
+        return Err(DbError::PragmaRejected {
+            pragma: "query_only",
+            expected: "1".to_owned(),
+            actual: "0".to_owned(),
+        });
+    }
+    Ok(conn)
+}
+
 /// Registers `evara_site_id()` for this connection.
 ///
 /// This is how the active installation is "supplied when writes occur". A SQL function is

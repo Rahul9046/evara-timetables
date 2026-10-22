@@ -28,3 +28,11 @@ evara-report = { workspace = true }
 evara-integrations = { workspace = true }
 # Writing a fixture out. Already in the tree, so this adds no new crate and no new licence.
 serde_json = { workspace = true }
+# `evara validate --project` names a school, a cycle and a term by identifier, so the
+# command has to parse one. Already in the tree.
+uuid = { workspace = true }
+
+[dev-dependencies]
+# `evara validate --project` is tested end to end against a real temporary project, which
+# is the only way to prove the read-only open path and the exit codes together.
+tempfile = { workspace = true }

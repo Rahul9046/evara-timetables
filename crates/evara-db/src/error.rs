@@ -342,6 +342,33 @@ pub enum DbError {
         source: InternalError,
     },
 
+    /// A project was opened read-only and is behind the current schema.
+    ///
+    /// Opening it normally would migrate it, which is a write — so a read-only inspection
+    /// cannot proceed, and silently taking the mutating path instead would be exactly the
+    /// substitution a read-only guarantee exists to prevent. The remedy is the user's and
+    /// belongs to them: open the project in Evara once, which upgrades it under the safety
+    /// copy `backup::before_schema_rebuild` takes.
+    #[error(
+        "this project uses schema version {found} and this build of Evara expects {supported}. \
+         Open it in Evara once to upgrade it, then inspect it again."
+    )]
+    SchemaUpgradeRequired {
+        /// Version currently applied to the project.
+        found: u32,
+        /// Version this build would migrate it to.
+        supported: u32,
+    },
+
+    /// A write was attempted through a connection opened read-only.
+    ///
+    /// Not reachable from the interface: a read-only project is opened only by headless
+    /// inspection. It is a typed refusal rather than a SQLite error so that a future caller
+    /// which reaches for a repository on one gets a sentence instead of
+    /// *"attempt to write a readonly database"*.
+    #[error("this project was opened for inspection only, so nothing can be written to it")]
+    ReadOnlyProject,
+
     /// Schema migration failed. Nothing was applied.
     #[error("migrating the project failed; no changes were applied")]
     Migration(#[source] InternalError),

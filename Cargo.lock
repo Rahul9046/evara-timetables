@@ -846,6 +846,8 @@ dependencies = [
  "evara-report",
  "evara-solver",
  "serde_json",
+ "tempfile",
+ "uuid",
 ]
 
 [[package]]

@@ -509,3 +509,31 @@ Stated so nothing below is mistaken for an oversight.
   still read by nothing.
 - No dependency upgrades, and one new dependency edge (`serde_json` on `evara-cli`) to a crate
   already in the tree.
+
+---
+
+## Database-backed fixtures (M4)
+
+These fixtures are `Problem`s built in memory, which is what lets `evara-core`,
+`evara-constraints` and `evara-solver` all use one — none of those three may open a database.
+That is the right shape for testing the vocabulary and the rules over it, and it cannot test a
+loader: a loader's job is precisely the translation these skip.
+
+So M4 added the other half, in `crates/evara-db/src/scheduling/tests/`. Twelve fixtures, each
+written into a temporary `.evaraproj` **through the ordinary repository API**, then closed,
+reopened and assembled. The catalogue, what each demonstrates, and the five places `V15` cannot
+represent an M2 fixture exactly are in
+[SCHEDULING-PROBLEM-ASSEMBLY.md](SCHEDULING-PROBLEM-ASSEMBLY.md) §16.
+
+Two differences from the fixtures above are worth knowing, because both look like gaps and
+neither is:
+
+- **A database-backed school is never findings-free once it has two student groups.** M4
+  compiles no overlap answers, so `group-overlap-indeterminate` always fires. M2's `tiny` is
+  asserted to produce nothing; its database-backed twin produces exactly that one warning.
+- **Identifiers differ between runs.** The repositories mint UUIDv7s, so no assertion names a
+  particular identifier. The contract is about order, counts, resolved facts and diagnostic
+  codes — which is what the loader actually guarantees.
+
+This file's fixtures remain the ones M5's evaluators are tested against, because they carry the
+declared `Expectations` an evaluator is compared to. The database-backed set tests the loader.
