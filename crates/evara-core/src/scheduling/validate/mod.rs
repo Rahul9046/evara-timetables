@@ -195,6 +195,13 @@ pub struct ValidationSummary {
     pub indeterminate_group_pairs: usize,
     /// Parent groups with children and no disjointness answer.
     pub unanswered_disjointness: usize,
+    /// Undecided pairs that answering every one of those declarations would settle.
+    ///
+    /// The figure [ADR 0038](../../../../docs/adr/0038-counting-unanswered-questions-is-not-evaluating-overlap.md)
+    /// deferred to M5 and its future acceptance test 7 asks for, **added beside** the two
+    /// above rather than replacing either. `indeterminate_group_pairs` minus this is how many
+    /// pairs no declaration can reach, which only membership will settle.
+    pub resolvable_by_declaration: usize,
     /// Sections whose room size will not be checked, because attendance is unknown.
     pub unchecked_attendance: usize,
     /// Entities in scope that another school also holds.
@@ -217,6 +224,10 @@ impl ValidationSummary {
             informational: report.count_of(Severity::Info),
             indeterminate_group_pairs: problem.overlap.indeterminate_pairs(),
             unanswered_disjointness: uncertainty::unanswered_declarations(problem).len(),
+            resolvable_by_declaration: crate::scheduling::overlap::resolvable_by_declaration(
+                &problem.groups,
+                &problem.overlap,
+            ),
             unchecked_attendance: problem
                 .sections
                 .iter()

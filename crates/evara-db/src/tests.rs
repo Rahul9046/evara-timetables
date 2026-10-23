@@ -199,6 +199,9 @@ fn the_schema_contains_exactly_the_phases_shipped_so_far() {
             "class_group".to_owned(),
             "class_section".to_owned(),
             "class_teacher".to_owned(),
+            // V16 — constraints as data.
+            "constraint_instance".to_owned(),
+            "constraint_ref".to_owned(),
             "course".to_owned(),
             "cycle".to_owned(),
             "cycle_day".to_owned(),
@@ -259,9 +262,9 @@ fn the_schema_contains_exactly_the_phases_shipped_so_far() {
         "line_member",
         "activity_link",
         "activity_link_member",
-        // Phase 5 onwards — constraints, scheduling, operations.
-        "constraint_instance",
-        "constraint_ref",
+        // Phase 5 onwards — scheduling and operations. `constraint_instance` and
+        // `constraint_ref` left this list in `V16`: M5 lands them with the registry, so the
+        // `type_key`s and JSON Schemas they store are real ones rather than a promise.
         "timetable",
         "timetable_entry",
         "solve_run",

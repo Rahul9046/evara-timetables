@@ -42,4 +42,25 @@ size: number | null,
 /**
  * Campus it is taught on, if the school has more than one.
  */
-campusId: string | null, };
+campusId: string | null, 
+/**
+ * Whether this group's **children** share students.
+ *
+ * [ADR 0035](../../../docs/adr/0035-student-group-overlap-is-a-three-state-answer.md)
+ * §4's question, asked of the parent once: *no two of my child groups share a
+ * student*. Rule 6 of §3 reads it, and it is what lets `9A` and `9B` be proved
+ * disjoint without a single member row.
+ *
+ * Three states, and `None` is not `Some(false)`. `None` means the school has not
+ * said, which leaves every pair of children `Indeterminate`; `Some(false)` is an
+ * explicit *"they may overlap"*, which is worth distinguishing because it tells
+ * pre-flight to stop asking. `DisjointnessDeclaration::from_column` is the one
+ * conversion.
+ *
+ * **Carried, and not yet editable.** `V16` adds the column and the loader reads it,
+ * but no screen offers a control for it — the same shape Stage A used for the
+ * teacher workload fields. The interface preserves whatever is stored when a group
+ * is edited, so nothing is silently cleared; filling it in is a focused follow-up,
+ * and M2's sectioning will write it by construction (ADR 0035 §7).
+ */
+childrenAreDisjoint: boolean | null, };

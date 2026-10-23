@@ -41,6 +41,11 @@ tempted to undo it without knowing why.
 | [0033](0033-an-activity-schedules-against-one-resolved-bell-schedule.md) | An activity schedules against exactly one bell schedule, resolved by campus compatibility; an ambiguous one is refused, never guessed | Accepted |
 | [0034](0034-expected-attendance-is-explicit-and-room-capacity-waits-for-it.md) | Expected attendance is a stated number or it is unknown; `room-capacity` leaves the first constraint set | Accepted |
 | [0035](0035-student-group-overlap-is-a-three-state-answer.md) | Whether two student groups share students has three answers, and *indeterminate* is one of them | Accepted |
+| [0036](0036-one-bell-schedule-resolver-shared-by-validation-and-loading.md) | One bell-schedule resolver, shared by validation and loading | Accepted |
+| [0037](0037-stored-row-diagnostics-belong-to-the-loader.md) | A finding about a stored row belongs to the loader, not to the validator; `Problem` is not widened to carry rejected rows | Accepted |
+| [0038](0038-counting-unanswered-questions-is-not-evaluating-overlap.md) | Counting unanswered questions is not evaluating overlap; one shared hierarchy walk serves both | Accepted |
+| [0039](0039-a-mandatory-constraint-lives-in-the-registry.md) | A rule whose absence would make a timetable wrong lives in the registry, not in a row; a stored row tunes it and may raise but not weaken it | Accepted — amends the scope of *data* in [0005](0005-constraints-as-data.md) |
+| [0040](0040-the-constraint-tables-are-entities-and-their-scope-is-cleared.md) | A scope row is an entity with a change-log entry, and its deletion is written rather than cascaded | Accepted |
 
 Statuses: **Proposed** (awaiting a decision), **Accepted**, **Superseded by NNNN**,
 **Deprecated**. Accepted records are not edited to reflect a change of mind — a new

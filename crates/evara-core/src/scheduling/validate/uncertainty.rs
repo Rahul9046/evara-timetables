@@ -31,6 +31,7 @@ use crate::scheduling::diagnostics::{
 use crate::scheduling::index::GroupIx;
 use crate::scheduling::problem::Problem;
 
+use super::super::hierarchy::Hierarchy;
 use super::{Pass, push};
 
 /// Every warning, in a fixed order.
@@ -215,9 +216,30 @@ fn indeterminate_overlap(pass: &Pass<'_>, report: &mut DiagnosticReport) {
         } else {
             format!("{}, and {more} more", names.join(", "))
         };
+        // The arithmetic ADR 0038 deferred, now that rule 6 exists to produce it. Still
+        // "would settle" rather than "resolves": the figure is exact for the hypothesis that
+        // every open declaration answers *disjoint*, and a parent that answers *may overlap*
+        // has answered without settling anything.
+        let settled = crate::scheduling::overlap::resolvable_by_declaration(
+            &pass.problem.groups,
+            &pass.problem.overlap,
+        );
+        let effect = if settled == 0 {
+            String::from(
+                "would narrow this; some pairs may still need membership information as well.",
+            )
+        } else if settled == pairs {
+            String::from("would settle all of them.")
+        } else {
+            format!(
+                "would settle {settled} of them; the other {} have no common parent to \
+                 declare about, so only the memberships themselves will settle those.",
+                pairs - settled
+            )
+        };
         format!(
             "Answering \"do these groups share students?\" on {} parent group{} — {listed} — \
-             would narrow this; some pairs may still need membership information as well.",
+             {effect}",
             unanswered.len(),
             if unanswered.len() == 1 { "" } else { "s" }
         )
@@ -270,22 +292,11 @@ fn indeterminate_overlap(pass: &Pass<'_>, report: &mut DiagnosticReport) {
 /// Returned in group-index order so a message built from it is deterministic. M5 may reuse
 /// this rather than restating the walk.
 pub(super) fn unanswered_declarations(problem: &Problem) -> Vec<GroupIx> {
-    let mut children: Vec<usize> = vec![0; problem.groups.len()];
-    for group in &problem.groups {
-        if let Some(parent) = group.parent
-            && parent.get() < children.len()
-        {
-            children[parent.get()] += 1;
-        }
-    }
-
-    problem
-        .groups
-        .iter()
-        .enumerate()
-        .filter(|(ix, group)| children[*ix] >= 2 && group.children_are_disjoint.is_unanswered())
-        .map(|(ix, _)| GroupIx::new(u32::try_from(ix).unwrap_or(u32::MAX)))
-        .collect()
+    // Reads the one shared hierarchy rather than counting children here. ADR 0038 §3 asks
+    // M5's rule 6 to reuse this walk, and the way to honour that is for both to read one
+    // implementation — "two readings of a hierarchy are two places for a MAX_GROUP_DEPTH
+    // assumption to differ".
+    Hierarchy::of(&problem.groups).unanswered_parents(&problem.groups)
 }
 
 // =======================================================================================

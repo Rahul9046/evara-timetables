@@ -1028,17 +1028,25 @@ timetable_entry (id, timetable_id -> timetable ON DELETE CASCADE,
                  UNIQUE(timetable_id, activity_id, timeslot_id))
 timetable_entry_teacher (timetable_entry_id, teacher_id)  -- overrides activity_teacher
 
-constraint_instance (id, school_id, type_key TEXT NOT NULL,
+-- Built in V16. Three details differ from the sketch this comment replaces, each
+-- recorded in adr/0040: `constraint_ref` is an entity with audit columns and change-log
+-- triggers rather than a composite-key junction row, its edge is RESTRICT with the
+-- repository clearing the rows itself rather than CASCADE, and `weight` is an INTEGER.
+constraint_instance (id, school_id -> school ON DELETE RESTRICT,
+                     type_key TEXT NOT NULL,
                      level TEXT CHECK (level IN ('HARD','MEDIUM','SOFT')),
-                     weight REAL NOT NULL DEFAULT 1,
-                     enabled BOOLEAN NOT NULL DEFAULT 1,
-                     params TEXT NOT NULL DEFAULT '{}',   -- JSON, schema-validated
-                     term_id NULL, timetable_id NULL,     -- NULL = project-wide
-                     created_at, updated_at, rev)
-constraint_ref (constraint_id -> constraint_instance ON DELETE CASCADE,
-                role TEXT,                               -- 'subject', 'teacher', 'appliesTo'
-                entity_kind TEXT, entity_id TEXT,
-                PRIMARY KEY(constraint_id, role, entity_id))
+                     weight INTEGER NOT NULL DEFAULT 1 CHECK (weight >= 0),
+                     enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+                     params TEXT NOT NULL DEFAULT '{}'    -- JSON object, CHECKed as one
+                       CHECK (json_valid(params) AND json_type(params) = 'object'),
+                     term_id NULL -> term ON DELETE RESTRICT,  -- NULL = the whole year
+                     created_at, updated_at, rev)         -- no timetable_id until M7
+constraint_ref (id, constraint_id -> constraint_instance ON DELETE RESTRICT,
+                role TEXT CHECK (role IN ('appliesTo','subject','yearLevel','campus',
+                                          'timeslot','cycleDay','period')),
+                entity_kind TEXT, entity_id TEXT,         -- polymorphic, so no FK
+                created_at, updated_at, rev,
+                UNIQUE(constraint_id, role, entity_id))
 
 solve_run (id, timetable_id, status, engine, seed, settings TEXT,
            started_at, finished_at,
@@ -1060,8 +1068,21 @@ migration per constraint; a table per family means 40 repositories. Instead:
 type that both validates writes and generates the configuration form.
 
 The cost is that entity references inside JSON get no foreign key. `constraint_ref`
-exists to pay that back: scope references are normalised into real rows with a cascade,
-and `params` holds only scalars. See [CONSTRAINTS.md](CONSTRAINTS.md).
+exists to pay that back: scope references are normalised into real rows, and `params` holds
+only scalars. See [CONSTRAINTS.md](CONSTRAINTS.md) for the catalogue and
+[CONSTRAINT-ENGINE.md](CONSTRAINT-ENGINE.md) for what is implemented.
+
+Two things about these tables that the DDL cannot say:
+
+- **No rows are seeded, and the absence is the design.** The implemented types are mandatory
+  in the registry, so a project with an empty `constraint_instance` is fully checked and a
+  row here is a school's disagreement with a default.
+  [adr/0039](adr/0039-a-mandatory-constraint-lives-in-the-registry.md).
+- **Deleting an instance is written, not cascaded.** A trigger refuses an instance while any
+  scope row survives, and the repository removes them itself so each is a truthful change-log
+  entry — SQLite fires a `DELETE` trigger for a foreign-key action only under
+  `recursive_triggers`, which this project never enables.
+  [adr/0040](adr/0040-the-constraint-tables-are-entities-and-their-scope-is-cleared.md).
 
 ---
 

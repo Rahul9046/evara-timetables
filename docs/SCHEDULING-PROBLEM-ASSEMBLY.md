@@ -724,3 +724,15 @@ What M5 may rely on, and what it must supply.
 
 Unchanged by M5, and not to be relitigated: the loader owns the three stored-row diagnostics;
 `Problem` is not widened to carry rejected rows; and there is one bell-schedule resolver.
+
+**Delivered by M5 — all seven.**
+
+| # | Where it landed |
+| --- | --- |
+| 1 | `evara_core::scheduling::overlap::evaluate`, called by `population::overlap`. No overlap logic in `evara-db`: this crate supplies the group facts and the member rows, and the seven rules, the symmetry and the diagonal are the evaluator's |
+| 2 | The diagonal is `Overlaps`, or `Disjoint` where the group is provably empty — rule 2 with rule 1 ahead of it |
+| 3 | `V16`'s `ALTER TABLE student_group ADD COLUMN children_are_disjoint`, with **no default**, so an existing row reads `NotStated` ([adr/0040](adr/0040-the-constraint-tables-are-entities-and-their-scope-is-cleared.md) §4). The loader's one conversion was already `from_column`, so the change was a column in the `SELECT` |
+| 4 | `lessons::attendance` now sums every group's declared size where the audience is **pairwise proved disjoint**, which is ADR 0034 §3 clause 3 in full. `Indeterminate` is not disjoint, and it reads `Overlap::is_disjoint` — added for this, so no caller can reach for `!= Overlaps` and treat an unproven pair as permission |
+| 5 | `group-overlap-contradiction`, from `OverlapOutcome::contradictions`. The evaluator returns them because rule 3 is where a member row meets a declaration that denies it, and the recursive CTE this crate used to count members with is gone — the evaluator's subtree union supplies `effective_members` as well |
+| 6 | `Hierarchy::of` is the one walk, read by the loader, by the evaluator, and by M3's `unanswered_declarations` |
+| 7 | `ValidationSummary::resolvable_by_declaration`, computed by `overlap::resolvable_by_declaration` — beside rule 6, sharing rule 6's path matching, so the prediction cannot disagree with what answering actually does |

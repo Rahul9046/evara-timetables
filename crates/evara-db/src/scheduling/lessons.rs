@@ -304,7 +304,7 @@ pub(super) fn sections(
                 campus: row.campus,
                 bell_schedule: grid.resolve(context, row.campus),
                 teachers,
-                expected_attendance: attendance(&attending, groups),
+                expected_attendance: attendance(&attending, groups, overlap),
                 attendance_floor: floor(&attending, groups),
                 audience: attending,
                 audience_mask,
@@ -331,29 +331,50 @@ pub(super) fn sections(
 /// 3. **Every group's size declared and the groups pairwise `Disjoint`** — `Known(Σ size)`.
 /// 4. **Otherwise** — `Unknown`.
 ///
-/// Clause 3 is where this milestone is narrower than the record, and the reason is worth
-/// stating because the result looks like an omission and is not. M4 compiles no overlap
-/// answers at all — the `overlap` function in this module's parent records why — so no *pair*
-/// of groups is provably disjoint and
-/// clause 3 can only fire where there are no pairs — a section taught to exactly one group
-/// that declares its size. That is not a special case bolted on: "pairwise disjoint" over a
-/// one-element set is vacuously true, and it happens to be the commonest configuration in
-/// the product.
+/// Clause 3 reaches every pair since M5, and that is the one thing that changed here.
 ///
-/// A section taught to two sized groups is therefore `Unknown` here and will become
-/// `Known(Σ)` once M5 can prove the pair disjoint. `Unknown` is never `0`: ADR 0034 §3's last
-/// clause makes it a third value that propagates, and nothing in the first constraint set
-/// reads it, because `room-capacity` is not in that set.
-fn attendance(audience: &[GroupIx], groups: &[GroupFact]) -> ExpectedAttendance {
-    let [only] = audience else {
+/// M4 compiled no overlap answers at all, so no *pair* of groups was provably disjoint and
+/// clause 3 could fire only where there were no pairs — a section taught to exactly one sized
+/// group. The seven rules now exist (`population::overlap`), so a section taught to two groups
+/// that are **proved** disjoint and both declare a size is `Known(Σ)`, which is clause 3 as
+/// ADR 0034 §3 writes it. M4's §20 listed this as owed by M5.
+///
+/// `Overlap::Indeterminate` is **not** disjoint. A section whose groups might share students
+/// stays `Unknown`, because summing the sizes would count a student twice and an over-stated
+/// attendance is a room the school is told is too small. `Overlap::clashes` is not consulted
+/// either: this needs the positive proof, so it reads `is_disjoint` and nothing else.
+///
+/// `Unknown` is never `0`: ADR 0034 §3's last clause makes it a third value that propagates,
+/// and nothing in the first constraint set reads it, because `room-capacity` is not in that
+/// set.
+fn attendance(
+    audience: &[GroupIx],
+    groups: &[GroupFact],
+    overlap: &OverlapRelation,
+) -> ExpectedAttendance {
+    if audience.is_empty() {
         return ExpectedAttendance::Unknown;
-    };
-    groups
-        .get(only.get())
-        .and_then(|group| group.declared_size)
-        .map_or(ExpectedAttendance::Unknown, |people| {
-            ExpectedAttendance::Known { people }
-        })
+    }
+
+    let mut total: i64 = 0;
+    for group in audience {
+        let Some(size) = groups.get(group.get()).and_then(|held| held.declared_size) else {
+            return ExpectedAttendance::Unknown;
+        };
+        total = total.saturating_add(size);
+    }
+
+    // Pairwise disjoint, proved. Vacuously true for one group, which is why the common case
+    // needed no pair logic before M5 and needs none now.
+    for (at, a) in audience.iter().enumerate() {
+        for b in &audience[at + 1..] {
+            if !overlap.get(*a, *b).is_disjoint() {
+                return ExpectedAttendance::Unknown;
+            }
+        }
+    }
+
+    ExpectedAttendance::Known { people: total }
 }
 
 /// A floor on the attendance, from member rows.

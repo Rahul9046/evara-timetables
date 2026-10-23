@@ -125,6 +125,21 @@ dense_index!(
     "group"
 );
 dense_index!(
+    /// A student of the school being solved, where the school has entered any.
+    ///
+    /// **Not part of the scheduling population**, which is a set of groups
+    /// ([ADR 0035](../../../../docs/adr/0035-student-group-overlap-is-a-three-state-answer.md)
+    /// §5). This index exists for one purpose: rule 3 of §3 proves two groups overlap from a
+    /// shared `student_group_member` row, and a *count* of members cannot answer that. It
+    /// addresses the member sets the overlap evaluator intersects, and a `Contradiction`
+    /// carries one so a report can name the student whose membership breaks a declaration.
+    ///
+    /// A school with no `student` rows has none of these, which is ADR 0006's case and is
+    /// ordinary: rules 1, 4, 5 and 6 decide pairs without a single member row.
+    StudentIx,
+    "student"
+);
+dense_index!(
     /// A class section: the thing that has teachers, an audience and a room requirement.
     SectionIx,
     "section"

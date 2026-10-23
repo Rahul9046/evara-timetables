@@ -868,6 +868,7 @@ fn no_listing_leaks_one_schools_records_into_the_others() {
                 parent_group_id: None,
                 size: Some(30),
                 campus_id: None,
+                children_are_disjoint: None,
             })
             .expect("a group with the same name in each school");
         project
@@ -1089,6 +1090,7 @@ fn a_record_cannot_reference_another_schools_structures() {
             parent_group_id: None,
             size: None,
             campus_id: None,
+            children_are_disjoint: None,
         });
     assert!(
         wrong_group_year.is_err(),
@@ -1430,6 +1432,7 @@ fn fill(project: &mut TwoSchools, school: Uuid, tag: &str) -> Filled {
             parent_group_id: None,
             size: None,
             campus_id: None,
+            children_are_disjoint: None,
         })
         .expect("group")
         .id;

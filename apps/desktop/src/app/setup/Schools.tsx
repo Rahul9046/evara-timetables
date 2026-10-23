@@ -82,6 +82,7 @@ function blockers(found: SchoolDependents): readonly Blocker[] {
     [found.students, "student", "students"],
     [found.studentGroups, "student group", "student groups"],
     [found.availabilityRules, "availability rule", "availability rules"],
+    [found.constraints, "configured constraint", "configured constraints"],
     [found.sharedTeachers, "teacher shared from another school", "teachers shared from another school"],
     [found.sharedStudents, "student enrolled from another school", "students enrolled from another school"],
   ];

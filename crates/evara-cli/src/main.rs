@@ -9,10 +9,14 @@
 //! `.evaraproj` — read-only, migrating nothing).
 //!
 //! `validate` took the name an earlier `PLANNED` entry held. That entry described *scoring a
-//! stored project and listing its violations*, which is M5's scorer and a different command,
-//! so it keeps its phase under the name `score`. The planned `diagnose` is gone because
-//! `validate` is it.
+//! stored project and listing its violations*, which is a different command, so it keeps its
+//! name as `score`. The planned `diagnose` is gone because `validate` is it.
+//!
+//! M5 ships [`evaluate`], which scores an arrangement it is **given**. `score` stays planned
+//! and moves to phase 7, because scoring a *stored* timetable needs a stored timetable and the
+//! `timetable` table arrives with M7.
 
+mod evaluate;
 mod fixture;
 mod validate;
 
@@ -24,7 +28,11 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const PLANNED: &[(&str, u8, &str)] = &[
     ("solve", 6, "solve a project and report its score"),
     ("bench", 6, "run fixtures against score baselines"),
-    ("score", 5, "score a stored project and list its violations"),
+    (
+        "score",
+        7,
+        "score a stored timetable and list its violations",
+    ),
     ("export", 9, "write a portable *.evara archive"),
     ("import", 9, "read a *.evara archive"),
     ("migrate", 1, "apply pending migrations"),
@@ -39,6 +47,10 @@ const IMPLEMENTED: &[(&str, &str)] = &[
     (
         "validate",
         "validate a fixture or a project's inputs (reports inputs, not a timetable)",
+    ),
+    (
+        "evaluate",
+        "evaluate an arrangement against the constraint rules (scores what it is given,          generates nothing)",
     ),
 ];
 
@@ -70,6 +82,16 @@ fn main() -> std::process::ExitCode {
                 std::process::ExitCode::from(2)
             }
         },
+        // The same three outcomes as `validate`, and the same reason they cannot share a
+        // code: a hard violation is the command working and the answer being "no".
+        Some("evaluate") => match evaluate::run(&args[1..]) {
+            Ok(evaluate::Outcome::Usable) => std::process::ExitCode::SUCCESS,
+            Ok(evaluate::Outcome::Broken) => std::process::ExitCode::from(1),
+            Err(message) => {
+                eprintln!("evara evaluate: {message}");
+                std::process::ExitCode::from(2)
+            }
+        },
         Some(other) => {
             eprintln!("evara: `{other}` is not implemented yet\n");
             help();
@@ -91,7 +113,8 @@ fn help() {
     }
     println!("\nSee docs/ROADMAP.md for the phase each command belongs to,");
     println!("docs/SCHEDULING-FIXTURES.md for what `fixture` generates,");
-    println!("docs/PRE-SOLVE-VALIDATION.md for what `validate` checks, and");
+    println!("docs/PRE-SOLVE-VALIDATION.md for what `validate` checks,");
+    println!("docs/CONSTRAINT-ENGINE.md for what `evaluate` scores, and");
     println!("docs/SCHEDULING-PROBLEM-ASSEMBLY.md for how a project becomes a problem.");
 }
 

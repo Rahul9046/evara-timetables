@@ -37,7 +37,7 @@ use std::collections::BTreeMap;
 
 use evara_core::scheduling::{
     ActivityIx, BellScheduleIx, CampusIx, CycleDayIx, GroupIx, PeriodIx, RoomIx, RoomTypeIx,
-    SectionIx, TeacherIx, TimeslotIx,
+    SectionIx, StudentIx, TeacherIx, TimeslotIx,
 };
 use uuid::Uuid;
 
@@ -63,6 +63,7 @@ macro_rules! dense_index_for {
 }
 
 dense_index_for!(
+    StudentIx,
     ActivityIx,
     BellScheduleIx,
     CampusIx,
@@ -189,6 +190,7 @@ problem_index!(
     rooms: RoomIx, room_id, room_index, "room",
     teachers: TeacherIx, teacher_id, teacher_index, "teacher",
     groups: GroupIx, group_id, group_index, "student group",
+    students: StudentIx, student_id, student_index, "student",
     sections: SectionIx, section_id, section_index, "class section",
     activities: ActivityIx, activity_id, activity_index, "activity",
 );
@@ -211,6 +213,7 @@ impl ProblemIndex {
             rooms: self.rooms.len(),
             teachers: self.teachers.len(),
             groups: self.groups.len(),
+            students: self.students.len(),
             sections: self.sections.len(),
             activities: self.activities.len(),
         }
@@ -238,6 +241,11 @@ pub struct ProblemIndexCounts {
     pub teachers: usize,
     /// Student groups of the school.
     pub groups: usize,
+    /// Students whose membership the overlap evaluator read.
+    ///
+    /// Not the school's roll: only those in a group of this school who could be in the room —
+    /// ADR 0035 §2's filter. A school with no `student` rows has none, which is ordinary.
+    pub students: usize,
     /// Class sections in scope.
     pub sections: usize,
     /// Occurrences to be placed.

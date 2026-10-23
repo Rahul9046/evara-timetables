@@ -25,7 +25,7 @@
 //! | **M2** | this vocabulary, and [`fixtures`] | — |
 //! | M3 | pre-solve diagnostics | [`diagnostics`], every "explicit warning" of §3.2 |
 //! | M4 | the `Problem` loader | [`problem`], [`context`], [`availability`], [`population`] |
-//! | M5 | the constraint registry and eight hard evaluators | [`problem`], [`placement`], [`population`] |
+//! | M5 | the constraint registry, the hard evaluators, and [`overlap`] | [`problem`], [`placement`], [`population`], [`hierarchy`] |
 //! | M6 | the construction solver | [`placement`], [`outcome`] |
 //! | M7 | timetable persistence | [`outcome`] |
 //! | M9 | timetable review | [`outcome`], [`diagnostics`] |
@@ -56,10 +56,13 @@
 
 pub mod availability;
 pub mod clock;
+pub mod constraints;
 pub mod context;
 pub mod diagnostics;
+pub mod hierarchy;
 pub mod index;
 pub mod outcome;
+pub mod overlap;
 pub mod placement;
 pub mod population;
 pub mod problem;
@@ -79,6 +82,11 @@ pub use availability::{
     AvailabilityStatus, EffectiveWindow, SlotAvailability, SlotMask, UnavailabilityIndex,
 };
 pub use clock::{DurationPeriods, TimeInterval, TimeOfDay};
+pub use constraints::{
+    AffectedSet, CompiledConstraint, ConstraintError, ConstraintLevel, ConstraintOptions,
+    ConstraintScope, ConstraintType, Explanation, ScopeRef, StoredConstraint, Violation,
+    ViolationKey, ViolationSink,
+};
 pub use context::{
     BellScheduleFact, BellScheduleResolution, CampusFact, CycleDayFact, CycleFact, CycleKind,
     NoBellScheduleCause, PeriodFact, PeriodKind, SchedulingContext, SchoolFact, TermFact,
@@ -86,13 +94,17 @@ pub use context::{
 pub use diagnostics::{
     Diagnostic, DiagnosticCode, DiagnosticReport, EntityKind, EntityRef, Severity,
 };
+pub use hierarchy::{Hierarchy, MAX_GROUP_DEPTH};
 pub use index::{
     ActivityIx, BellScheduleIx, CampusIx, CycleDayIx, GroupIx, PeriodIx, RoomIx, RoomTypeIx,
-    SectionIx, TeacherIx, TimeslotIx,
+    SectionIx, StudentIx, TeacherIx, TimeslotIx,
 };
 pub use outcome::{
     HardViolationCount, ProblemIdentity, Score, Seed, SolveOutcome, SolveStatus,
     UnscheduledActivity, UnverifiedCounts,
+};
+pub use overlap::{
+    Contradiction, GroupMembers, OverlapOutcome, StudentMask, evaluate as evaluate_overlap,
 };
 pub use placement::{Assignment, Placement, PlacementSpan};
 pub use population::{

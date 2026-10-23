@@ -441,11 +441,46 @@ impl School {
                 parent_group_id: parent,
                 size,
                 campus_id: None,
+                children_are_disjoint: None,
             })
             .expect("create student group")
             .id;
         self.groups.push(id);
         id
+    }
+
+    /// Answers ADR 0035 §4's question for one group: do its children share students?
+    ///
+    /// `V16` added the column, and no screen offers a control for it yet — so a fixture sets
+    /// it the way the eventual screen will, through `update_student_group` carrying the row's
+    /// revision. Three states: `None` is "not stated", which is what every migrated project
+    /// holds.
+    pub(super) fn declare_children(project: &mut Project, group: Uuid, disjoint: Option<bool>) {
+        let current = project
+            .db()
+            .people()
+            .student_group(group)
+            .expect("read the group")
+            .expect("it is there");
+        project
+            .db()
+            .people()
+            .update_student_group(
+                group,
+                crate::Expected::Rev(current.rev),
+                &StudentGroupInput {
+                    school_id: current.school_id,
+                    name: current.name,
+                    code: current.code,
+                    kind: current.kind,
+                    year_level_id: current.year_level_id,
+                    parent_group_id: current.parent_group_id,
+                    size: current.size,
+                    campus_id: current.campus_id,
+                    children_are_disjoint: disjoint,
+                },
+            )
+            .expect("declare children disjointness");
     }
 
     /// Adds a student and puts them in a group.

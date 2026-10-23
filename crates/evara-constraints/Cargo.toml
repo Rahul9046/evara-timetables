@@ -17,3 +17,11 @@ evara-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+# A constraint instance is identified by its stored row, and a scope reference names one.
+# Already in the tree.
+uuid = { workspace = true }
+
+[dev-dependencies]
+# The evaluators are tested against M2's deterministic synthetic schools, which is the whole
+# reason the generator lives in `evara-core` behind a feature rather than in `evara-cli`.
+evara-core = { workspace = true, features = ["fixtures"] }

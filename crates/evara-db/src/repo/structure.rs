@@ -359,6 +359,8 @@ impl Structure<'_> {
             let student_groups = count("SELECT COUNT(*) FROM student_group WHERE school_id = ?")?;
             let availability_rules =
                 count("SELECT COUNT(*) FROM availability WHERE school_id = ?")?;
+            let constraints =
+                count("SELECT COUNT(*) FROM constraint_instance WHERE school_id = ?")?;
             // V14's two. Resolved next to the tables they are about, so this function does
             // not become the second place that knows what a curriculum row means.
             let (departments, subjects) = curriculum_counts(conn, school_id)?;
@@ -394,6 +396,7 @@ impl Structure<'_> {
                     + students
                     + student_groups
                     + availability_rules
+                    + constraints
                     + shared_teachers
                     + shared_students,
                 campuses,
@@ -411,6 +414,7 @@ impl Structure<'_> {
                 students,
                 student_groups,
                 availability_rules,
+                constraints,
                 shared_teachers,
                 shared_students,
             })
@@ -529,6 +533,13 @@ pub struct SchoolDependents {
     pub student_groups: i64,
     /// Availability rules recorded against the school.
     pub availability_rules: i64,
+    /// Configured constraints owned by the school.
+    ///
+    /// `V16`'s `constraint_instance.school_id` is a RESTRICT edge, so one of these refuses
+    /// the delete. Counted rather than left out: a refusal the count did not predict is the
+    /// screen saying "nothing is in the way" and then failing, which is the one thing this
+    /// figure exists to prevent.
+    pub constraints: i64,
     /// Teachers another school created whom this one employs.
     ///
     /// Counted separately from [`SchoolDependents::teachers`] so the two never

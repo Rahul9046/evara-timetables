@@ -109,7 +109,13 @@ never a second hand-maintained model.
    synthetic-school generator sits beside them behind a `fixtures` feature the desktop binary
    does not enable. No rule is evaluated and nothing is solved there;
    [SCHEDULING-FIXTURES.md](SCHEDULING-FIXTURES.md) §1 says what each later milestone adds.
-2. `evara-constraints` depends on `evara-core` only. It never touches SQLite. The solver
+2. `evara-constraints` depends on `evara-core` only. It never touches SQLite. Since M5 it
+   holds the evaluator registry and the eight implemented rules —
+   [CONSTRAINT-ENGINE.md](CONSTRAINT-ENGINE.md) — and the dependency runs one way only:
+   `evara-db` reads `constraint_instance` rows and hands them over as
+   `evara_core::scheduling::StoredConstraint`, because the vocabulary two crates share has to
+   sit underneath both. That is also why a stored `params` value is validated in two places;
+   [adr/0039](adr/0039-a-mandatory-constraint-lives-in-the-registry.md) §5 records it. The solver
    and the validator both consume it. **It holds one kind of thing**: `type_key`-addressed
    evaluators with a JSON Schema and an `explain()`, each scored against a candidate
    timetable. A rule that has an answer *before* any placement exists is not one of those

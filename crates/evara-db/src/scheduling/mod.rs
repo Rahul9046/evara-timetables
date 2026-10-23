@@ -57,7 +57,7 @@ mod report;
 mod rules;
 
 use evara_core::scheduling::{
-    AvailabilityRule, Diagnostic, IntegrityError, MaterialisedGrid, OverlapRelation, Problem,
+    AvailabilityRule, Diagnostic, IntegrityError, MaterialisedGrid, Problem,
 };
 use rusqlite::Connection;
 use uuid::Uuid;
@@ -294,12 +294,14 @@ fn assemble(conn: &Connection, selection: &SchedulingSelection) -> Result<Assemb
 
     let section_rows = lessons::section_rows(conn, selection, &mut index)?;
     let teachers = population::teachers(conn, selection, &mut index)?;
-    let groups = population::groups(conn, selection, &mut index)?;
+    let (mut groups, mut members, students) = population::groups(conn, selection, &mut index)?;
     let staffing = lessons::staffing(conn, selection, &index)?;
     let audience = lessons::audience(conn, selection, &index)?;
     let activities = lessons::activities(conn, selection, &mut index)?;
 
-    let overlap = overlap(groups.len());
+    // ADR 0035 §3's seven rules, evaluated once per solve by the one implementation of them.
+    // Writes `effective_members` from the same sets rule 3 intersected.
+    let overlap = population::overlap(&mut groups, &mut members);
     let compiled = rules::load(conn, selection, &index, &timeslots)?;
 
     // Assembled with no sections so that `MaterialisedGrid::of` can derive `G` from the
@@ -315,7 +317,7 @@ fn assemble(conn: &Connection, selection: &SchedulingSelection) -> Result<Assemb
         groups,
         sections: Vec::new(),
         activities,
-        overlap,
+        overlap: overlap.relation,
         unavailable: compiled.index,
         // `activity.is_locked` is not in `V15` — the roadmap keeps lock toggles with Phase
         // 8's manual editing, because a lock is about a *placed* timetable rather than about
@@ -336,7 +338,13 @@ fn assemble(conn: &Connection, selection: &SchedulingSelection) -> Result<Assemb
         audience,
     );
 
-    let findings = findings::of(&problem, &compiled.orphans, &compiled.unscheduled);
+    let findings = findings::of(
+        &problem,
+        &compiled.orphans,
+        &compiled.unscheduled,
+        &overlap.contradictions,
+        &students,
+    );
     let completeness = if compiled.unscheduled.is_empty() {
         Completeness::Complete
     } else {
@@ -362,45 +370,35 @@ fn assemble(conn: &Connection, selection: &SchedulingSelection) -> Result<Assemb
     })
 }
 
-/// The three-state overlap answer for every pair of the school's groups.
+/// Where the three-state overlap answer comes from.
 ///
-/// # Every pair is `Indeterminate`, and that is this milestone's answer
+/// # M5 replaced a placeholder here, and this is the record of it
 ///
+/// M4 compiled `OverlapRelation::unknown(groups)` — every pair `Indeterminate` — because
 /// [ADR 0035](../../../docs/adr/0035-student-group-overlap-is-a-three-state-answer.md) §3's
-/// seven ordered rules are **M5's**, and a second implementation of them in the loader is the
-/// duplication `CLAUDE.md` §2 forbids — with the sharpest consequence available, since rule 3
-/// before rule 6 is what makes a member row beat a declaration and two evaluators that
-/// disagreed would have the product honouring a clash in one place and not the other.
+/// seven rules were M5's and a second implementation of them in the loader is the duplication
+/// `CLAUDE.md` §2 forbids. The rules now exist, in `evara_core::scheduling::overlap`, and
+/// [`population::overlap`] calls them.
 ///
-/// So M4 assembles the *inputs* §3 reads — the parent edge, the declared size, the effective
-/// membership count, and the parent's disjointness declaration — and compiles no answers.
-/// [`GroupFact`](evara_core::scheduling::GroupFact)'s own documentation says where the answer
-/// lives: *"in `Problem::overlap`, compiled once per solve, because it is a property of a
-/// pair and not of a group."* M5 supplies that compilation.
+/// There is still **no overlap logic in this crate**. What this crate supplies is the two
+/// inputs the evaluator cannot read for itself: the group facts, and the direct
+/// `student_group_member` rows filtered to the students who could be in the room (ADR 0035
+/// §2). The subtree union, the seven rules, the symmetry and the diagonal are all the
+/// evaluator's.
 ///
-/// # What an undecided relation does, and does not, permit
+/// # What changed for a caller
 ///
-/// `clash_mask` admits only [`Overlaps`](evara_core::scheduling::Overlap::Overlaps), so an
-/// undecided pair is **not** treated as disjoint and **not** treated as a clash: each
-/// section's clash mask is exactly its own audience, which protects every group from being
-/// double-booked against itself and claims nothing about any other pair.
-/// [ADR 0038](../../../docs/adr/0038-counting-unanswered-questions-is-not-evaluating-overlap.md)
-/// §4 states that this is the correct compiled behaviour — *"`clash_mask` already admits only
-/// `Overlaps`, so the compiled form enforces exactly what is proved"* — and M3's
-/// `group-overlap-indeterminate` is what makes the gap loud rather than silent.
+/// Three things a reader comparing against M4's behaviour should expect:
 ///
-/// # The diagonal is left alone
-///
-/// ADR 0035 rule 2 makes a group against itself `Overlaps`, so the diagonal is a certainty
-/// this relation leaves unstated — exactly as M2's fixtures do, which
-/// `PRE-SOLVE-VALIDATION.md` §14 records as known limitation 9. Setting it here would be
-/// implementing one of the seven rules in the one place that must not, and would make a
-/// database-backed problem differ from the synthetic fixture it was seeded from for no gain:
-/// `clash_mask` already contains the audience, and `indeterminate_pairs` counts `a < b` only,
-/// so the diagonal is read by nothing. It is M5's to declare along with the other six.
-fn overlap(groups: usize) -> OverlapRelation {
-    OverlapRelation::unknown(groups)
-}
+/// 1. **The diagonal is answered.** `overlap(g, g)` is `Overlaps`, or `Disjoint` where the
+///    group is provably empty — closing `PRE-SOLVE-VALIDATION.md` §14's limitation 9.
+/// 2. **`clash_mask` is now wider than `audience_mask`** wherever a proved overlap exists. A
+///    section taught to a cohort now clashes with one taught to a class of it, which is the
+///    whole point and is what M4 could not yet do.
+/// 3. **`group-overlap-indeterminate` fires less often**, because rules 1, 3, 4, 5 and 6
+///    decide pairs M4 left undecided. It still fires wherever nothing proves an answer, which
+///    at a school that has not answered §4's question is most sibling pairs.
+mod overlap_is_evaluated_not_assumed {}
 
 /// Resolves a stored reference to a dense index, or reports the project as damaged.
 ///

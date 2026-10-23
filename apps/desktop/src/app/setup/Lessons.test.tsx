@@ -367,6 +367,9 @@ function group(id: string, name: string, size: number | null): StudentGroup {
     parentGroupId: null,
     size,
     campusId: null,
+    // ADR 0035 §4's declaration. Unanswered here, which is what every group reads until a
+    // school fills it in, and what leaves sibling pairs Indeterminate.
+    childrenAreDisjoint: null,
     ...STAMP,
   };
 }

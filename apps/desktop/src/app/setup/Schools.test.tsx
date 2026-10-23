@@ -114,6 +114,7 @@ function empty(): SchoolDependents {
     students: 0,
     studentGroups: 0,
     availabilityRules: 0,
+    constraints: 0,
     sharedTeachers: 0,
     sharedStudents: 0,
   };

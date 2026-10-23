@@ -177,6 +177,25 @@ entity! {
         size: Option<i64>,
         /// Campus it is taught on, if the school has more than one.
         campus_id: Option<Uuid>,
+        /// Whether this group's **children** share students.
+        ///
+        /// [ADR 0035](../../../docs/adr/0035-student-group-overlap-is-a-three-state-answer.md)
+        /// §4's question, asked of the parent once: *no two of my child groups share a
+        /// student*. Rule 6 of §3 reads it, and it is what lets `9A` and `9B` be proved
+        /// disjoint without a single member row.
+        ///
+        /// Three states, and `None` is not `Some(false)`. `None` means the school has not
+        /// said, which leaves every pair of children `Indeterminate`; `Some(false)` is an
+        /// explicit *"they may overlap"*, which is worth distinguishing because it tells
+        /// pre-flight to stop asking. `DisjointnessDeclaration::from_column` is the one
+        /// conversion.
+        ///
+        /// **Carried, and not yet editable.** `V16` adds the column and the loader reads it,
+        /// but no screen offers a control for it — the same shape Stage A used for the
+        /// teacher workload fields. The interface preserves whatever is stored when a group
+        /// is edited, so nothing is silently cleared; filling it in is a focused follow-up,
+        /// and M2's sectioning will write it by construction (ADR 0035 §7).
+        children_are_disjoint: Option<bool>,
     }
 }
 
@@ -990,10 +1009,10 @@ impl People<'_> {
 // --------------------------------------------------------------------- student group
 
 pub(crate) const STUDENT_GROUP_COLUMNS: &str = "id, school_id, name, code, kind, year_level_id, \
-     parent_group_id, size, campus_id, created_at, updated_at, rev";
+     parent_group_id, size, campus_id, children_are_disjoint, created_at, updated_at, rev";
 
 const STUDENT_GROUP_ASSIGNMENTS: &str = "name = ?, code = ?, kind = ?, year_level_id = ?, \
-     parent_group_id = ?, size = ?, campus_id = ?";
+     parent_group_id = ?, size = ?, campus_id = ?, children_are_disjoint = ?";
 
 impl People<'_> {
     /// Creates a student group.
@@ -1015,8 +1034,9 @@ impl People<'_> {
 
             tx.execute(
                 "INSERT INTO student_group (id, school_id, name, code, kind, year_level_id,
-                     parent_group_id, size, campus_id, created_at, updated_at, rev)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                     parent_group_id, size, campus_id, children_are_disjoint,
+                     created_at, updated_at, rev)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 rusqlite::params![
                     text(stamp.id),
                     text(input.school_id),
@@ -1027,6 +1047,7 @@ impl People<'_> {
                     opt_text(input.parent_group_id),
                     input.size,
                     opt_text(input.campus_id),
+                    input.children_are_disjoint,
                     &stamp.created_at,
                     &stamp.updated_at,
                     stamp.rev,
@@ -1106,6 +1127,7 @@ impl People<'_> {
                     opt_text(input.parent_group_id),
                     input.size,
                     opt_text(input.campus_id),
+                    input.children_are_disjoint,
                 ],
             )
         })?;
@@ -1266,15 +1288,12 @@ fn ensure_no_cycle(tx: &Transaction<'_>, group: Uuid, parent: Uuid) -> Result<()
 
 /// How far the parent walk will go before calling the hierarchy broken.
 ///
-/// Schools nest a few levels — school, cohort, band, set. Anything beyond this is a
-/// mistake or a loop, and either way the user needs to be told rather than kept waiting.
-///
-/// Visible to the crate because the scheduling loader walks the same hierarchy, downwards,
-/// to count a group's effective membership. Two readings of one hierarchy with two depth
-/// limits is two places for the limit to differ — which is the duplication
+/// Re-exported from `evara-core` rather than defined here. Since M5 the overlap evaluator
+/// walks the same hierarchy downwards, and
 /// [ADR 0038](../../../docs/adr/0038-counting-unanswered-questions-is-not-evaluating-overlap.md)
-/// §3 asks M5 to avoid for the same walk.
-pub(crate) const MAX_GROUP_DEPTH: usize = 64;
+/// §3 is explicit that two readings of one hierarchy are two places for this limit to
+/// differ. One definition, two directions of travel.
+pub(crate) use evara_core::scheduling::hierarchy::MAX_GROUP_DEPTH;
 
 // -------------------------------------------------------------------- group membership
 

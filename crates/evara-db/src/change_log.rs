@@ -191,6 +191,11 @@ pub const TRACKED_TABLES: &[&str] = &[
     "class_group",
     "class_enrolment",
     "activity",
+    // V16 — constraints as data. `student_group.children_are_disjoint` needs no entry: it
+    // is a column on a table already tracked, and the triggers interpolate only the table
+    // name, `id` and `rev`.
+    "constraint_instance",
+    "constraint_ref",
 ];
 
 /// Installs the change-log triggers for one table.

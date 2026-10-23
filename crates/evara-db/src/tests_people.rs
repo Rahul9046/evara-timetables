@@ -141,6 +141,7 @@ fn group(school_id: Uuid, name: &str, kind: GroupKind) -> StudentGroupInput {
         parent_group_id: None,
         size: None,
         campus_id: None,
+        children_are_disjoint: None,
     }
 }
 
