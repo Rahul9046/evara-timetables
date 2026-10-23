@@ -55,6 +55,14 @@ Status: **design phase.** This document is the target architecture. See
 Three further crates sit at the edges: `evara-report` (timetable projections →
 HTML/CSV/PDF), `evara-import` (spreadsheet bytes → a parsed table, and the downloadable
 templates) and `evara-integrations` (future external adapters, empty and feature-gated).
+
+Since M8 `evara-report` is real: it holds the projection a grid is drawn from and the findings
+view beside it, and it is the one place a timetable becomes something a reader can scan. Its
+dependency edge is `-> core, constraints` rather than `-> core` alone, which
+[adr/0043](adr/0043-a-report-renders-a-rules-own-explanation.md) records: a finding renders the
+**rule's own** `explain()`, because wording composed in a report would drift from the check that
+produced it. It still opens nothing — no SQLite, no file, no network — and judges nothing. The
+renderers the name promises are Phase 10's.
 `evara-cli` is a headless binary used for tests, fixtures and solver benchmarking. Two of
 its subcommands exist. `evara fixture` writes a synthetic scheduling problem as JSON: **test
 data and not a timetable**, read from no project. `evara validate` runs pre-solve validation

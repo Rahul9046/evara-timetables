@@ -372,13 +372,13 @@ Named assertions worth knowing:
 | **No scenario lineage.** `based_on_timetable_id` is not in `V17` | repair is what needs it | `SOLVER.md` §7 |
 | **No export.** The contract is recorded, not built | Phase 9 | `PROJECT-FORMAT.md` §3 |
 | **A watermark refuses on an unrelated edit** | safe-by-default classification — §4 | narrowable later, with evidence |
-| **No "current timetable" pointer.** The UI lists by `generated_at` | that is a selection a screen remembers, and there is no screen | Phase 6's Generate screen |
+| **No "current timetable" pointer.** The UI lists by `generated_at` | that is a selection a screen remembers — and since M8 the Generate screen remembers it by opening what it just saved | settled; no pointer was added |
 | **Revalidation keeps one snapshot, not a history** | a history of scorings grows without bound and nothing asks for one | if a reason appears |
-| **No Tauri command.** Nothing in the interface saves a timetable | the orchestration milestone | — |
+| ~~**No Tauri command.** Nothing in the interface saves a timetable~~ | ✅ **done in M8** | [TIMETABLE-VIEWS.md](TIMETABLE-VIEWS.md) |
 
 ---
 
-## 13. The M8 orchestration contract
+## 13. The M8 orchestration contract — ✅ discharged
 
 **Supplied by M7.**
 
@@ -389,13 +389,28 @@ Named assertions worth knowing:
 - `StoredArrangement`, which turns stored rows back into an `Assignment` the constraint engine
   takes unchanged.
 
-**Owed by M8.**
+**Owed by M8 — all four paid.**
 
-1. **Tauri command handlers** for the above, each taking `expectedRev` where the table above says
-   so — and **no handler constructing `Expected::Any`** (ADR 0027 §2).
-2. **A background thread and `solver://progress` events.** `ProgressSink` and `Cancel` exist and
-   the construction drives them; nothing runs a solve off the main thread.
-3. **A decision about what the Generate screen does after a save** — open the new timetable, or
-   list it beside the others. That is the "current timetable" question §12 defers.
-4. **The `InputsChanged` message in the interface.** The remedy is *generate again*, and a screen
-   that showed a raw error rather than offering that would make a correct refusal look like a bug.
+1. ✅ **Tauri command handlers.** `commands::solve` (seven) and `commands::views` (six).
+   `rename`, `delete` and `revalidate` take `expectedRev`; `save` takes none, because there is no
+   previous version of a row that does not exist and the watermark is its precondition.
+   **No handler constructs `Expected::Any`** — ADR 0027 §2.
+2. ✅ **A background thread and `solver://progress`.** The command thread compiles the `Assembly`
+   under the workspace lock, releases it, and **moves** it to a dedicated worker; a
+   `send_assertions` test in `evara_db::scheduling` keeps that possible as the types change.
+   Progress coalesces to one event per 50 ms plus the final one, so 2 000 placements are not
+   2 000 events — and `elapsed_ms` is the **caller's**, because the engine still reads no clock.
+3. ✅ **What the Generate screen does after a save: it opens the new timetable.** The user asked
+   for a timetable, and a screen that answered with a list entry would make them click again for
+   what they just made. **No "current timetable" pointer was introduced** — §12's question is
+   settled by a screen remembering a selection, which is what it said the answer would be.
+4. ✅ **The `InputsChanged` message.** Its own `SetupError` kind, deliberately not
+   `ReviewRequired`: that one means *re-read the plan and confirm it*, and this one means
+   **generate again** — there is no plan to re-read. The screen renders the remedy as a button.
+
+One thing M8 found that this record did not anticipate, and it is worth stating because the
+failure is silent: a solve takes about a second, and in that second a user can close the campus
+file and open another. The session's `Assembly` then describes a database that is no longer open.
+`save_generated`'s identity check would catch it, but only after a transaction had opened and
+only if the identifiers happened not to collide — so M8 added a **project epoch**, bumped on
+every create, open and close, and refuses the save earlier with the same *generate again* remedy.

@@ -867,9 +867,18 @@ whole command included. No run terminates on a limit, and the shipped caps are a
 magnitude above what the upper end uses.
 [TIMETABLE-CONSTRUCTION-SOLVER.md](TIMETABLE-CONSTRUCTION-SOLVER.md) §14.
 
-Two of the three figures this risk names are **still unmeasured**: load time (M4's loader is 28
-statements per load independent of school size, which is a strong argument and not a measurement)
-and grid rendering, which has no grid to render until Phase 7.
+**Grid rendering is now measured too, in M8.** 2 000 occurrences projected in 3.8 ms; four scope
+grids laid out from that projection in 417 µs; a scope grid is 40 cells for a five-day,
+eight-period school and **does not grow with the school** — a teacher's grid is the same size in a
+200-occurrence school and a 2 000-occurrence one, which is the claim the desktop design rests on
+and is asserted rather than argued. The master grid is one panel of 40 cells as well, with the
+lessons stacked inside them, which is why pagination rather than virtualisation is its answer if
+one is ever needed. [TIMETABLE-VIEWS.md](TIMETABLE-VIEWS.md) §9, reproducible from
+`evara-report`'s `projection::budget` with `--nocapture`.
+
+**One of the three figures this risk names is still unmeasured**: load time. M4's loader is a fixed
+statement count per load independent of school size, which is a strong argument and not a
+measurement, and M8 did not turn it into one.
 
 One note on the fixture half of the mitigation: the upper-end school is built in the test that
 measures it rather than added to M2's catalogue, whose largest fixture is `medium` at 500.

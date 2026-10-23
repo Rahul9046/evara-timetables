@@ -37,7 +37,7 @@ well it works.
 apps/desktop/src        React — view layer, no rules, no SQL
 apps/desktop/src-tauri  command handlers — orchestration only
 crates/evara-project    .evara import/export        -> core, db
-crates/evara-report     projections and renderers   -> core
+crates/evara-report     projections and renderers   -> core, constraints
 crates/evara-import     spreadsheet parsing, templates -> core ONLY
 crates/evara-integrations external adapters         -> core ONLY
 crates/evara-db         the only crate with SQL     -> core
@@ -298,6 +298,39 @@ disagree about whether a placement is legal, the product is broken.
   it builds a `Violation`, so `Score::PERFECT` is the top of the order and `Ord` is the comparison
   a search can use with no wrapper (`SOLVER.md` §3). Weights become integer penalties at compile
   time, not at scoring time.
+- **A grid cell holds a list, and `rowSpan` is decided in Rust.** Two occurrences can occupy one
+  cell — ordinary in a master grid, a clash in a teacher's — and a run can be non-contiguous when
+  a slot inside it was never materialised. Either produces a broken table and a lost lesson if a
+  renderer works out its own spans, so `evara-report` emits one `TimetableCell` per
+  `(day, period)` and a lesson earns a span **only** when it is alone in every cell it occupies
+  and contiguous in that axis. Everything else is `Pinned` at `rowSpan` 1, carrying **every**
+  lesson involved: nothing is discarded to make a table render. `GridPanel::is_well_formed`
+  asserts it. **One axis per bell schedule, never merged** — two campuses' Period 3 is not one
+  row. The view **groups** already-resolved lessons and resolves nothing: no span, no clash, no
+  end time, no weekday, and never a judgement about whether a cause is impossible.
+  [TIMETABLE-VIEWS.md](docs/TIMETABLE-VIEWS.md).
+- **A report renders the rule's own sentence, and a label is never a scheduling input.**
+  `explain()` belongs to the evaluator that produced the violation, so `evara-report` **calls**
+  it rather than composing wording that would drift from the check
+  ([adr/0043](docs/adr/0043-a-report-renders-a-rules-own-explanation.md)) — and a stored
+  `violation` row deliberately carries no sentence, so the stored tier renders the fact and not
+  prose. The names a *grid* needs and a solve does not — subject, course, year level, building,
+  student — live in `evara_core::scheduling::display`, are populated by `evara-db` on request and
+  are **never** added to `Problem`: ADR 0037 §2's refusal to widen it for a diagnostic-only field
+  binds a report-only one identically. A per-student view is derived from `class_enrolment` and
+  from **nothing else** — never a group's membership, never `student_group.size` — because
+  substituting one presents a guess as a child's confirmed schedule.
+  [adr/0044](docs/adr/0044-the-display-vocabulary-sits-beside-the-problem.md).
+- **A solve never holds the workspace lock, and a save is claimed once.** The command thread
+  compiles the `Assembly` under the lock, releases it, and **moves** it to a worker —
+  `ARCHITECTURE.md` §3.3 is what permits that, and `evara_db::scheduling`'s `send_assertions`
+  test is what keeps it true. Cancellation is a **request**: it sets an `AtomicBool` the engine
+  reads between steps and changes no state, so the worker is the only thing that leaves
+  `Running` and a cancel racing a finish has one deterministic outcome. A save is claimed by a
+  compare-and-swap into `Saving` *before* any database work, because two clicks otherwise both
+  pass a "has it finished?" test and write twice; `Saved` is terminal. A session records the
+  project epoch it began under, so a timetable generated against one campus file can never be
+  saved into another.
 
 ## 4. Definition of done for a constraint
 
