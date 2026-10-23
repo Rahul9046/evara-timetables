@@ -104,6 +104,25 @@ impl Project {
             .expect("a project is open")
             .load(selection)
     }
+
+    /// Reads the display labels for one selection, through the same read-only handle.
+    pub(crate) fn labels(
+        &self,
+        selection: &SchedulingSelection,
+    ) -> crate::Result<evara_core::scheduling::display::LabelSet> {
+        self.workspace
+            .scheduling()
+            .expect("a project is open")
+            .labels(selection)
+    }
+
+    /// Reads one timetable's stored entry flags.
+    pub(crate) fn entry_flags(&self, timetable_id: Uuid) -> crate::Result<Vec<(Uuid, bool, bool)>> {
+        self.workspace
+            .scheduling()
+            .expect("a project is open")
+            .entry_flags(timetable_id)
+    }
 }
 
 /// One seeded school, and the identifiers a test needs to address it.
@@ -602,6 +621,20 @@ impl School {
             .id;
         self.sections.push(section);
         section
+    }
+
+    /// Puts one named student on one section's roster.
+    ///
+    /// A **roster overlay**, not a second scheduling population: ADR 0029 §4 and `CLAUDE.md`
+    /// §3 both say a section's audience is its student groups and the individual roster is
+    /// never added to it. What this enables in a test is the per-student *view*, which M8
+    /// derives from these rows and from nothing else.
+    pub(crate) fn enrol(&mut self, project: &mut Project, section: Uuid, student: Uuid) {
+        project
+            .db()
+            .lessons()
+            .enrol_in_class(self.id, section, student)
+            .expect("enrol the student in the class");
     }
 
     /// Gives a section a teacher.

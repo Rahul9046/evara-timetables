@@ -48,6 +48,12 @@
 
 mod backup;
 pub mod change_log;
+
+// The one implementation of this workspace's timestamp format: ISO-8601 UTC to
+// millisecond precision, which `CLAUDE.md` §3 requires and every stored column uses. Public
+// so the command layer and the CLI stamp a `solve_run` the same way the repositories stamp
+// `created_at`, rather than each formatting its own.
+pub use meta::now_iso8601;
 pub mod cloud_sync;
 mod connection;
 mod error;
@@ -609,6 +615,9 @@ mod tests_shared_rooms;
 mod tests_time_model;
 #[cfg(test)]
 mod tests_timetables;
+
+#[cfg(test)]
+mod tests_views;
 
 #[cfg(test)]
 mod tests_setup;
