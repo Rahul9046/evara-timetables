@@ -671,7 +671,7 @@ tiny` scores an arrangement and explains every violation, still with no solver i
 
 **Closes M1-9.**
 
-**✅ Timetable persistence is done (M7).** `V17` adds six tables; `evara save` writes a
+**✅ Timetable persistence is done (M7).** `V17` adds seven tables; `evara save` writes a
 timetable, its run and its findings; `evara evaluate --project --timetable <id>` scores a stored
 one read-only. Four things worth knowing, and
 [TIMETABLE-PERSISTENCE.md](TIMETABLE-PERSISTENCE.md) is the detail:

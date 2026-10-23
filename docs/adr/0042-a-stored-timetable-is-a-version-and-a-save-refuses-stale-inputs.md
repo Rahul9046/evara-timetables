@@ -92,7 +92,7 @@ Preservation is the default and not a setting because ADR 0010 makes deletion *"
 and default to refusing"*, and a regeneration that silently replaced the previous timetable would
 destroy the one thing a timetabler compares against.
 
-### D4 — Three of the six new tables are entities
+### D4 — Four of the seven new tables are entities
 
 | Table | Tracked? | Why |
 | --- | --- | --- |
@@ -282,7 +282,7 @@ does not match — the same guarantee without a second write.
 
 ## 5. Consequences
 
-- `V17` is additive: six tables, nine indexes, four triggers. No existing row is rewritten and
+- `V17` is additive: **seven** tables, twelve indexes, four triggers. No existing row is rewritten and
   every existing project reads the new tables as empty.
 - `evara-db` gains `evara-constraints` and `evara-solver` as **dev**-dependencies, so its tests
   can save a *real* `SolveOutcome` rather than a hand-built one that could drift from what the

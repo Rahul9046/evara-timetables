@@ -22,6 +22,8 @@ evara-db            the only SQL: V17, repo/timetables.rs, change_log::Watermark
 evara-cli           the harness:  evara save, evara evaluate --timetable
 ```
 
+Seven tables, twelve indexes and four triggers, all additive.
+
 | Table | Holds | Tracked? |
 | --- | --- | --- |
 | `timetable` | one timetable for one `(cycle, term)` | ✅ entity |

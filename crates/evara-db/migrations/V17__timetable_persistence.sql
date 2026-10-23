@@ -2,7 +2,7 @@
 --
 -- Forward-only. V1-V16 are untouched.
 --
--- Six tables, which is the whole of M7's schema need:
+-- Seven tables, which is the whole of M7's schema need:
 --
 --   * `timetable`              -- one timetable for one (cycle, term). Several may coexist,
 --                                 and that coexistence IS the versioning.
