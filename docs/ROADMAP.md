@@ -618,10 +618,18 @@ scores a fixture's own known-feasible arrangement and finds nothing hard in any 
 `evara evaluate --project` compiles a real school's configuration over the mandatory set.
 `Explanation` is implemented per rule, so the wording lives with the check that produced it.
 
+**✅ `IncrementalScorer` and the property test are done (M6).** Both landed together, which
+`OPEN-DECISIONS.md` R1 states as a shipping rule — *"neither half may land without the other"*.
+Two things differ from the bullet above and both are
+[adr/0041](adr/0041-the-incremental-scorer-lives-with-the-evaluators.md): it lives in
+`evara-constraints` beside the evaluators it must agree with rather than in `evara-solver`, and it
+has **no hand-written delta** — the delta is an identity derived from the fact that every
+violation names at most two occurrences. `evara-constraints`' `differential` module is the gate.
+
 **Still to do in this phase:** the remaining `M1` evaluators (CONSTRAINTS.md §3 lists about
-twenty-two in total, of which eight exist), `IncrementalScorer` and the property test against
-the reference scorer, and the `validate_move` command — the engine's
-`evaluate_placement` is what that command will call, but no Tauri handler exposes it yet.
+twenty-two in total, of which eight exist), and the `validate_move` command — `PlacementVerdict`
+is now exactly what that command returns, and it comes from the same scorer the generator uses, so
+the editor and the generator cannot disagree about a drop target. No Tauri handler exposes it yet.
 
 **Done when:** the infeasible fixture produces specific, actionable diagnostics with no
 solver involved — **met**: `evara validate infeasible-duration` names the occurrence, both
@@ -641,17 +649,50 @@ tiny` scores an arrangement and explains every violation, still with no solver i
   database-backed fixtures, 29 statements per load independent of school size, no migration.
   See [SCHEDULING-PROBLEM-ASSEMBLY.md](SCHEDULING-PROBLEM-ASSEMBLY.md).
 - Solution writer: `Assignment` → `timetable_entry`, transactionally. **Not built** — it is
-  M7's, and there is nothing to write until a solver exists.
-- Construction heuristic (most-constrained-first, locks placed first).
+  M7's. A solver now exists, so what it needs is a migration;
+  [TIMETABLE-CONSTRUCTION-SOLVER.md](TIMETABLE-CONSTRUCTION-SOLVER.md) §17 is the contract.
+- ✅ Construction heuristic (most-constrained-first, locks placed first): **done in M6**.
 - Late Acceptance Hill Climbing with the move set from [SOLVER.md](SOLVER.md) §5, seeded
-  RNG, termination config, cancel token.
-- Background thread, `solver://progress` events, `solve_run` persistence.
-- `evara-cli solve` + `bench`, with score baselines per fixture checked into CI so solver
-  regressions are caught.
+  RNG, termination config, cancel token. **Partly done:** the seeded RNG, the termination
+  configuration and the cancel token are M6's and are what the construction already runs on; the
+  local search itself is **not built**, because `SCHEDULING-ARCHITECTURE-DECISIONS.md` §6 keeps it
+  out of the MVP.
+- Background thread, `solver://progress` events, `solve_run` persistence. **Not built.** The two
+  traits the events need (`ProgressSink`, `Cancel`) exist and the construction drives them;
+  nothing runs a solve off the main thread and nothing persists a run.
+- ✅ `evara-cli solve`: **done in M6**, as `evara generate`, with `solve` kept as an accepted
+  alias. `bench` and the committed per-fixture score baselines are **still to do** — M6's figures
+  are in prose, which a reader can check and CI cannot (R2).
 - UI: Generate screen with settings, live progress, score, cancel, and the hard-violation
-  report on infeasibility.
+  report on infeasibility. **Not built**, and nothing in the interface calls the solver.
 
 **Closes M1-9.**
+
+**✅ The construction solver is done (M6).** `evara-solver` holds `SolverEngine`,
+`ConstructionSolver` and the `generate` orchestration; `evara generate <fixture>` and
+`evara generate --project` run it headlessly, read-only, persisting nothing.
+
+Five things worth knowing about what shipped, and
+[TIMETABLE-CONSTRUCTION-SOLVER.md](TIMETABLE-CONSTRUCTION-SOLVER.md) is the detail:
+
+- **It constructs and does not improve.** `SOLVER.md` §5's Phase A only; Phases B and C are not
+  built, and the result says *why the constructor stopped* rather than implying it found the best
+  arrangement.
+- **No generated timetable breaks a hard rule**, and that is asserted from outside the engine: the
+  whole M2 catalogue at three seeds each, re-evaluated by M5's reference scorer. `generate`
+  performs the same check internally and reports a disagreement as a defect in Evara rather than
+  returning an invalid timetable as a success.
+- **Pre-solve validation is a gate.** A problem whose inputs were refused is not searched at all;
+  the brief's exit code 3 exists for that outcome, distinct from a partial timetable's 1.
+- **A partial timetable is returned, with a per-occurrence cause** separating *"no timetable can
+  place this"* from *"this arrangement did not"*. The second is never phrased as the first.
+- **The figures:** 500 occurrences placed completely in 57 ms at 5.0 MiB peak; a 2 000-occurrence
+  synthetic upper end at 99.7% in about 900 ms, no run stopping on a limit. R5's budget.
+
+**Three departures from the bullets above**, each recorded rather than carried out as written: the
+command is `generate` with `solve` as an alias; the construction order is static with retry passes
+rather than dynamically re-ranked; and `IncrementalScorer` lives in `evara-constraints`
+([adr/0041](adr/0041-the-incremental-scorer-lives-with-the-evaluators.md)).
 
 ---
 

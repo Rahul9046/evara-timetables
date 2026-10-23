@@ -26,7 +26,7 @@
 //! | M3 | pre-solve diagnostics | [`diagnostics`], every "explicit warning" of §3.2 |
 //! | M4 | the `Problem` loader | [`problem`], [`context`], [`availability`], [`population`] |
 //! | M5 | the constraint registry, the hard evaluators, and [`overlap`] | [`problem`], [`placement`], [`population`], [`hierarchy`] |
-//! | M6 | the construction solver | [`placement`], [`outcome`] |
+//! | M6 | the construction solver | [`placement`], [`outcome`], [`resolve`], [`rng`] |
 //! | M7 | timetable persistence | [`outcome`] |
 //! | M9 | timetable review | [`outcome`], [`diagnostics`] |
 //!
@@ -67,6 +67,7 @@ pub mod placement;
 pub mod population;
 pub mod problem;
 pub mod resolve;
+pub mod rng;
 pub mod validate;
 
 // Fixtures are test and tooling infrastructure, not part of the shipped domain, so they are
@@ -100,8 +101,8 @@ pub use index::{
     SectionIx, StudentIx, TeacherIx, TimeslotIx,
 };
 pub use outcome::{
-    HardViolationCount, ProblemIdentity, Score, Seed, SolveOutcome, SolveStatus,
-    UnscheduledActivity, UnverifiedCounts,
+    HardViolationCount, ProblemIdentity, Score, Seed, SolveOutcome, SolveStatistics, SolveStatus,
+    Termination, UnplacedCause, UnscheduledActivity, UnverifiedCounts,
 };
 pub use overlap::{
     Contradiction, GroupMembers, OverlapOutcome, StudentMask, evaluate as evaluate_overlap,
@@ -118,4 +119,5 @@ pub use problem::{
 pub use resolve::{
     MaterialisedGrid, is_compatible, longest_teaching_run, only_campus, runs_on, teaching_slots,
 };
+pub use rng::Rng;
 pub use validate::{ValidationSummary, validate};

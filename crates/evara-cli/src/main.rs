@@ -15,9 +15,16 @@
 //! M5 ships [`evaluate`], which scores an arrangement it is **given**. `score` stays planned
 //! and moves to phase 7, because scoring a *stored* timetable needs a stored timetable and the
 //! `timetable` table arrives with M7.
+//!
+//! M6 ships [`generate`], which **constructs** one. It took the slot `solve` held in the
+//! planned list: `SOLVER.md` §9 called the command `solve`, and `generate` is what M6's brief,
+//! the roadmap's phase and the user-facing screen all call it. `solve` stays accepted as an
+//! alias, so the spelling the accepted record used still works, and there is one
+//! implementation behind both.
 
 mod evaluate;
 mod fixture;
+mod generate;
 mod validate;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -26,7 +33,6 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 ///
 /// Implemented commands are **not** listed here; see [`IMPLEMENTED`].
 const PLANNED: &[(&str, u8, &str)] = &[
-    ("solve", 6, "solve a project and report its score"),
     ("bench", 6, "run fixtures against score baselines"),
     (
         "score",
@@ -52,7 +58,18 @@ const IMPLEMENTED: &[(&str, &str)] = &[
         "evaluate",
         "evaluate an arrangement against the constraint rules (scores what it is given,          generates nothing)",
     ),
+    (
+        "generate",
+        "construct a timetable and report what it could not place (writes nothing)",
+    ),
 ];
+
+/// Commands that are another command under a second name.
+///
+/// One entry: `SOLVER.md` §9 spelled the generation command `solve` and M6 ships it as
+/// `generate`. Both work, one implementation, and the alias is listed rather than hidden so a
+/// reader following the accepted record is not told their command does not exist.
+const ALIASES: &[(&str, &str)] = &[("solve", "generate")];
 
 fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -92,6 +109,19 @@ fn main() -> std::process::ExitCode {
                 std::process::ExitCode::from(2)
             }
         },
+        // Four codes, because a partial timetable is neither a success nor a failure: it is
+        // the ordinary outcome of a hard school and the whole point of `activity-scheduled`
+        // being MEDIUM. A code that could not tell it from a broken run would undo that
+        // distinction at the last step.
+        Some("generate" | "solve") => match generate::run(&args[1..]) {
+            Ok(generate::Outcome::Complete) => std::process::ExitCode::SUCCESS,
+            Ok(generate::Outcome::Partial) => std::process::ExitCode::from(1),
+            Ok(generate::Outcome::Refused) => std::process::ExitCode::from(3),
+            Err(message) => {
+                eprintln!("evara generate: {message}");
+                std::process::ExitCode::from(2)
+            }
+        },
         Some(other) => {
             eprintln!("evara: `{other}` is not implemented yet\n");
             help();
@@ -107,6 +137,10 @@ fn help() {
     for (name, blurb) in IMPLEMENTED {
         println!("  {name:<9}          {blurb}");
     }
+    println!("\nAliases:\n");
+    for (alias, of) in ALIASES {
+        println!("  {alias:<9}          the same command as `{of}`");
+    }
     println!("\nPlanned:\n");
     for (name, phase, blurb) in PLANNED {
         println!("  {name:<9} phase {phase:<2} {blurb}");
@@ -114,13 +148,14 @@ fn help() {
     println!("\nSee docs/ROADMAP.md for the phase each command belongs to,");
     println!("docs/SCHEDULING-FIXTURES.md for what `fixture` generates,");
     println!("docs/PRE-SOLVE-VALIDATION.md for what `validate` checks,");
-    println!("docs/CONSTRAINT-ENGINE.md for what `evaluate` scores, and");
+    println!("docs/CONSTRAINT-ENGINE.md for what `evaluate` scores,");
+    println!("docs/TIMETABLE-CONSTRUCTION-SOLVER.md for how `generate` builds one, and");
     println!("docs/SCHEDULING-PROBLEM-ASSEMBLY.md for how a project becomes a problem.");
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{IMPLEMENTED, PLANNED};
+    use super::{ALIASES, IMPLEMENTED, PLANNED};
 
     #[test]
     fn planned_commands_are_unique() {
@@ -166,6 +201,37 @@ mod tests {
             );
             assert!(blurb.len() > 10, "{name} needs a real description");
         }
+    }
+
+    #[test]
+    fn an_alias_names_an_implemented_command_and_is_not_one_itself() {
+        // An alias that pointed at nothing, or that was also listed as a command, would make
+        // the help text lie about one of the two.
+        for (alias, of) in ALIASES {
+            assert!(
+                IMPLEMENTED.iter().any(|(name, _)| name == of),
+                "{alias} aliases {of}, which is not implemented"
+            );
+            assert!(
+                !IMPLEMENTED.iter().any(|(name, _)| name == alias),
+                "{alias} is both an alias and a command"
+            );
+            assert!(
+                !PLANNED.iter().any(|(name, _, _)| name == alias),
+                "{alias} is both an alias and planned"
+            );
+        }
+    }
+
+    #[test]
+    fn the_generate_command_says_it_writes_nothing() {
+        // Generation reads somebody's live school file. A blurb that did not say so would be
+        // the one claim a user cannot check for themselves before running it.
+        let (_, blurb) = IMPLEMENTED
+            .iter()
+            .find(|(name, _)| *name == "generate")
+            .expect("generate is implemented");
+        assert!(blurb.contains("writes nothing"), "{blurb}");
     }
 
     #[test]

@@ -202,7 +202,7 @@ fn an_empty_assignment_is_partial_usable_and_medium_only() {
     assert!(report.is_usable(), "nothing placed breaks no hard rule");
     assert!(!report.is_adoptable(), "but it is not a timetable yet");
     assert_eq!(report.score.hard, 0);
-    assert_eq!(report.score.medium, 3);
+    assert_eq!(report.score.medium, -3, "negative-going, per SOLVER.md §3");
 }
 
 #[test]
@@ -1056,9 +1056,13 @@ fn a_hard_violation_scores_hard_and_an_unplaced_activity_scores_medium() {
     assignment.place(a(1), Placement::in_room(slots[0], RoomIx::new(0)));
 
     let report = evaluate(&problem, &assignment, &rules());
-    assert!(report.score.hard > 0, "a room and teacher clash");
-    assert_eq!(report.score.medium, 1, "one occurrence still unplaced");
+    assert!(report.score.hard < 0, "a room and teacher clash");
+    assert_eq!(report.score.medium, -1, "one occurrence still unplaced");
     assert_eq!(report.score.soft, 0, "nothing soft is implemented");
+    assert!(
+        report.score < evara_core::scheduling::Score::PERFECT,
+        "a broken arrangement must order below a clean one, which is what makes `Ord` the          comparison a search can use"
+    );
 }
 
 #[test]

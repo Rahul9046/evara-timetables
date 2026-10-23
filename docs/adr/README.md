@@ -46,6 +46,7 @@ tempted to undo it without knowing why.
 | [0038](0038-counting-unanswered-questions-is-not-evaluating-overlap.md) | Counting unanswered questions is not evaluating overlap; one shared hierarchy walk serves both | Accepted |
 | [0039](0039-a-mandatory-constraint-lives-in-the-registry.md) | A rule whose absence would make a timetable wrong lives in the registry, not in a row; a stored row tunes it and may raise but not weaken it | Accepted — amends the scope of *data* in [0005](0005-constraints-as-data.md) |
 | [0040](0040-the-constraint-tables-are-entities-and-their-scope-is-cleared.md) | A scope row is an entity with a change-log entry, and its deletion is written rather than cascaded | Accepted |
+| [0041](0041-the-incremental-scorer-lives-with-the-evaluators.md) | The incremental scorer lives with the evaluators, and derives its delta from a property of the rules rather than hand-writing one | Accepted — implements [SOLVER.md](../SOLVER.md) §4 and discharges R1 |
 
 Statuses: **Proposed** (awaiting a decision), **Accepted**, **Superseded by NNNN**,
 **Deprecated**. Accepted records are not edited to reflect a change of mind — a new

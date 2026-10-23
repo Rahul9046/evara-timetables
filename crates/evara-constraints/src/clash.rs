@@ -10,7 +10,7 @@
 //! | --- | --- |
 //! | `teacher-clash` | the teacher: only the occurrences one person teaches can clash for them |
 //! | `room-clash` | the room: only occurrences booked into the same `room_id` |
-//! | `student-clash` | nothing, then filtered by mask: a pair clashes when one's `clash_mask` meets the other's `audience_mask` |
+//! | `student-clash` | the cycle day, then filtered by mask: a pair clashes when one's `clash_mask` meets the other's `audience_mask` |
 //!
 //! # Minutes, never timeslot identifiers
 //!
@@ -24,10 +24,20 @@
 //! implementation of that test.
 //!
 //! Adjacent lessons do not clash: the intervals are half-open, `[start, end)`.
+//!
+//! # Each rule has two drivers and one body
+//!
+//! `evaluate` sweeps the whole timetable; `evaluate_involving` asks the same question about one
+//! occurrence, for the incremental scorer. Both build their violations through the same
+//! `*_violation` function, so the narrowed answer cannot differ in wording, ordering or
+//! penalty from the swept one. The pair is always ordered `(lower index, higher index)` at the
+//! point the violation is built, which is what makes the two routes produce an identical
+//! [`Violation`] for the same clash — and therefore an identical
+//! [`ViolationKey`](evara_core::scheduling::ViolationKey) to deduplicate on.
 
 use evara_core::scheduling::{
     ActivityIx, AffectedSet, CompiledConstraint, ConstraintType, EntityKind, EntityRef,
-    Explanation, Problem, TeacherIx, Violation, ViolationSink,
+    Explanation, Problem, RoomIx, SectionFact, TeacherIx, Violation, ViolationSink,
 };
 
 use crate::occupancy::{Occupancy, day_label};
@@ -68,26 +78,37 @@ impl ConstraintEvaluator for TeacherClash {
         constraint: &CompiledConstraint,
         out: &mut ViolationSink,
     ) {
-        for (at, teacher) in problem.teachers.iter().enumerate() {
-            let ix = TeacherIx::new(u32::try_from(at).unwrap_or(u32::MAX));
-            let mine = occupancy.taught_by(ix);
+        for (at, _) in problem.teachers.iter().enumerate() {
+            let teacher = TeacherIx::new(u32::try_from(at).unwrap_or(u32::MAX));
+            let mine = occupancy.taught_by(teacher);
             if mine.len() < 2 {
                 continue;
             }
-            for (a, b) in occupancy.overlapping_pairs(&mine) {
-                let span = occupancy.at(a).map(|p| p.span.clone());
-                out.push(Violation {
-                    constraint_type: ConstraintType::TeacherClash,
-                    level: constraint.level,
-                    constraint_id: constraint.id,
-                    penalty: constraint.weight,
-                    activities: vec![a, b],
-                    subject: EntityRef::new(EntityKind::Teacher, teacher.id, teacher.name.clone()),
-                    related: sections_of(problem, occupancy, a, b),
-                    cycle_day: span.as_ref().map(|s| s.cycle_day),
-                    span: span.as_ref().map(|s| s.interval),
-                    detail: when(problem, occupancy, a),
-                });
+            for (a, b) in occupancy.overlapping_pairs(mine) {
+                teacher_violation(problem, occupancy, constraint, teacher, a, b, out);
+            }
+        }
+    }
+
+    /// Narrowed to the teachers of this occurrence's own section.
+    ///
+    /// Moving one lesson cannot create a clash for somebody who does not teach it, so the
+    /// outer loop over every teacher becomes a loop over the two or three who are in the room.
+    fn evaluate_involving(
+        &self,
+        problem: &Problem,
+        occupancy: &Occupancy<'_>,
+        constraint: &CompiledConstraint,
+        activity: ActivityIx,
+        out: &mut ViolationSink,
+    ) {
+        let Some(section) = occupancy.section_of(activity) else {
+            return;
+        };
+        for teacher in &section.teachers {
+            for other in occupancy.overlapping_with(activity, occupancy.taught_by(*teacher)) {
+                let (a, b) = ordered(activity, other);
+                teacher_violation(problem, occupancy, constraint, *teacher, a, b, out);
             }
         }
     }
@@ -166,39 +187,33 @@ impl ConstraintEvaluator for StudentClash {
     ) {
         let all: Vec<ActivityIx> = occupancy.all().map(|placed| placed.activity).collect();
         for (a, b) in occupancy.overlapping_pairs(&all) {
-            let (Some(left), Some(right)) = (occupancy.section_of(a), occupancy.section_of(b))
-            else {
-                continue;
-            };
-            // Two occurrences of one section are the same people in one room; a section does
-            // not clash with itself.
-            if left.id == right.id {
-                continue;
-            }
-            if !left.clash_mask.intersects(&right.audience_mask) {
-                continue;
-            }
+            student_violation(problem, occupancy, constraint, a, b, out);
+        }
+    }
 
-            let shared = proved_shared(problem, left, right);
-            let span = occupancy.at(a).map(|p| p.span.clone());
-            out.push(Violation {
-                constraint_type: ConstraintType::StudentClash,
-                level: constraint.level,
-                constraint_id: constraint.id,
-                penalty: constraint.weight,
-                activities: vec![a, b],
-                subject: EntityRef::new(EntityKind::ClassSection, left.id, left.name.clone()),
-                related: std::iter::once(EntityRef::new(
-                    EntityKind::ClassSection,
-                    right.id,
-                    right.name.clone(),
-                ))
-                .chain(shared)
-                .collect(),
-                cycle_day: span.as_ref().map(|s| s.cycle_day),
-                span: span.as_ref().map(|s| s.interval),
-                detail: when(problem, occupancy, a),
-            });
+    /// Narrowed to this occurrence's own cycle position.
+    ///
+    /// Sound because a span never crosses a cycle position and the interval test requires the
+    /// days to be equal, so nothing off this day can clash — see
+    /// [`Occupancy::on_day`](crate::Occupancy). The audience test that follows is unchanged and
+    /// is applied in the same `(lower, higher)` order the sweep uses, because `clash_mask` and
+    /// `audience_mask` are two different masks and the pair order decides which is read from
+    /// which side.
+    fn evaluate_involving(
+        &self,
+        problem: &Problem,
+        occupancy: &Occupancy<'_>,
+        constraint: &CompiledConstraint,
+        activity: ActivityIx,
+        out: &mut ViolationSink,
+    ) {
+        let Some(placed) = occupancy.at(activity) else {
+            return;
+        };
+        let same_day = occupancy.on_day(placed.span.cycle_day).to_vec();
+        for other in occupancy.overlapping_with(activity, &same_day) {
+            let (a, b) = ordered(activity, other);
+            student_violation(problem, occupancy, constraint, a, b, out);
         }
     }
 
@@ -286,27 +301,36 @@ impl ConstraintEvaluator for RoomClash {
         constraint: &CompiledConstraint,
         out: &mut ViolationSink,
     ) {
-        for (at, room) in problem.rooms.iter().enumerate() {
-            let ix = evara_core::scheduling::RoomIx::new(u32::try_from(at).unwrap_or(u32::MAX));
-            let booked = occupancy.booked_into(ix);
+        for at in 0..problem.rooms.len() {
+            let room = RoomIx::new(u32::try_from(at).unwrap_or(u32::MAX));
+            let booked = occupancy.booked_into(room);
             if booked.len() < 2 {
                 continue;
             }
-            for (a, b) in occupancy.overlapping_pairs(&booked) {
-                let span = occupancy.at(a).map(|p| p.span.clone());
-                out.push(Violation {
-                    constraint_type: ConstraintType::RoomClash,
-                    level: constraint.level,
-                    constraint_id: constraint.id,
-                    penalty: constraint.weight,
-                    activities: vec![a, b],
-                    subject: EntityRef::new(EntityKind::Room, room.id, room.name.clone()),
-                    related: sections_of(problem, occupancy, a, b),
-                    cycle_day: span.as_ref().map(|s| s.cycle_day),
-                    span: span.as_ref().map(|s| s.interval),
-                    detail: when(problem, occupancy, a),
-                });
+            for (a, b) in occupancy.overlapping_pairs(booked) {
+                room_violation(problem, occupancy, constraint, room, a, b, out);
             }
+        }
+    }
+
+    /// Narrowed to the one room this occurrence is booked into, or nothing where it has none.
+    ///
+    /// A roomless lesson occupies no room, so it can neither cause nor suffer a room clash —
+    /// which is the same reason `evaluate` skips it.
+    fn evaluate_involving(
+        &self,
+        problem: &Problem,
+        occupancy: &Occupancy<'_>,
+        constraint: &CompiledConstraint,
+        activity: ActivityIx,
+        out: &mut ViolationSink,
+    ) {
+        let Some(room) = occupancy.at(activity).and_then(|placed| placed.span.room) else {
+            return;
+        };
+        for other in occupancy.overlapping_with(activity, occupancy.booked_into(room)) {
+            let (a, b) = ordered(activity, other);
+            room_violation(problem, occupancy, constraint, room, a, b, out);
         }
     }
 
@@ -351,14 +375,123 @@ impl ConstraintEvaluator for RoomClash {
     }
 }
 
-/// The two sections involved in a clash, as related references.
-fn sections_of(
+/// The pair, lower activity index first.
+///
+/// Both drivers of every clash rule order the pair here, so the violation they build — and the
+/// [`ViolationKey`](evara_core::scheduling::ViolationKey) it deduplicates on — is the same
+/// whichever side the question was asked from.
+const fn ordered(a: ActivityIx, b: ActivityIx) -> (ActivityIx, ActivityIx) {
+    if a.raw() <= b.raw() { (a, b) } else { (b, a) }
+}
+
+/// One teacher double-booked, as a violation.
+///
+/// Shared by both drivers. `a` is the lower activity index, which is where the reported span
+/// and day come from — so the message is the same whichever occurrence moved.
+fn teacher_violation(
     problem: &Problem,
     occupancy: &Occupancy<'_>,
+    constraint: &CompiledConstraint,
+    teacher: TeacherIx,
     a: ActivityIx,
     b: ActivityIx,
-) -> Vec<EntityRef> {
-    let _ = problem;
+    out: &mut ViolationSink,
+) {
+    let Some(fact) = problem.teachers.get(teacher.get()) else {
+        return;
+    };
+    let span = occupancy.at(a).map(|p| p.span.clone());
+    out.push(Violation {
+        constraint_type: ConstraintType::TeacherClash,
+        level: constraint.level,
+        constraint_id: constraint.id,
+        penalty: -constraint.weight,
+        activities: vec![a, b],
+        subject: EntityRef::new(EntityKind::Teacher, fact.id, fact.name.clone()),
+        related: sections_of(occupancy, a, b),
+        cycle_day: span.as_ref().map(|s| s.cycle_day),
+        span: span.as_ref().map(|s| s.interval),
+        detail: when(problem, occupancy, a),
+    });
+}
+
+/// One room double-booked, as a violation.
+fn room_violation(
+    problem: &Problem,
+    occupancy: &Occupancy<'_>,
+    constraint: &CompiledConstraint,
+    room: RoomIx,
+    a: ActivityIx,
+    b: ActivityIx,
+    out: &mut ViolationSink,
+) {
+    let Some(fact) = problem.rooms.get(room.get()) else {
+        return;
+    };
+    let span = occupancy.at(a).map(|p| p.span.clone());
+    out.push(Violation {
+        constraint_type: ConstraintType::RoomClash,
+        level: constraint.level,
+        constraint_id: constraint.id,
+        penalty: -constraint.weight,
+        activities: vec![a, b],
+        subject: EntityRef::new(EntityKind::Room, fact.id, fact.name.clone()),
+        related: sections_of(occupancy, a, b),
+        cycle_day: span.as_ref().map(|s| s.cycle_day),
+        span: span.as_ref().map(|s| s.interval),
+        detail: when(problem, occupancy, a),
+    });
+}
+
+/// Two overlapping occurrences whose audiences are proved to share students, as a violation.
+///
+/// Applies ADR 0035 §5's test and the two exclusions — a section does not clash with itself,
+/// and an undecided pair is not a violation because `clash_mask` admits only `Overlaps`. Does
+/// nothing where the test does not hold, so both drivers can offer it any overlapping pair.
+fn student_violation(
+    problem: &Problem,
+    occupancy: &Occupancy<'_>,
+    constraint: &CompiledConstraint,
+    a: ActivityIx,
+    b: ActivityIx,
+    out: &mut ViolationSink,
+) {
+    let (Some(left), Some(right)) = (occupancy.section_of(a), occupancy.section_of(b)) else {
+        return;
+    };
+    // Two occurrences of one section are the same people in one room; a section does not
+    // clash with itself.
+    if left.id == right.id {
+        return;
+    }
+    if !left.clash_mask.intersects(&right.audience_mask) {
+        return;
+    }
+
+    let shared = proved_shared(problem, left, right);
+    let span = occupancy.at(a).map(|p| p.span.clone());
+    out.push(Violation {
+        constraint_type: ConstraintType::StudentClash,
+        level: constraint.level,
+        constraint_id: constraint.id,
+        penalty: -constraint.weight,
+        activities: vec![a, b],
+        subject: EntityRef::new(EntityKind::ClassSection, left.id, left.name.clone()),
+        related: std::iter::once(EntityRef::new(
+            EntityKind::ClassSection,
+            right.id,
+            right.name.clone(),
+        ))
+        .chain(shared)
+        .collect(),
+        cycle_day: span.as_ref().map(|s| s.cycle_day),
+        span: span.as_ref().map(|s| s.interval),
+        detail: when(problem, occupancy, a),
+    });
+}
+
+/// The two sections involved in a clash, as related references.
+fn sections_of(occupancy: &Occupancy<'_>, a: ActivityIx, b: ActivityIx) -> Vec<EntityRef> {
     [a, b]
         .iter()
         .filter_map(|at| occupancy.section_of(*at))
@@ -370,11 +503,7 @@ fn sections_of(
 ///
 /// Carried so `explain` can say *which* students cannot be in both rooms rather than only
 /// that some can't. Reads the compiled relation; derives nothing.
-fn proved_shared(
-    problem: &Problem,
-    left: &evara_core::scheduling::SectionFact,
-    right: &evara_core::scheduling::SectionFact,
-) -> Vec<EntityRef> {
+fn proved_shared(problem: &Problem, left: &SectionFact, right: &SectionFact) -> Vec<EntityRef> {
     let mut found = Vec::new();
     for theirs in &right.audience {
         if left.clash_mask.contains(*theirs)

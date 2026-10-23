@@ -63,7 +63,7 @@
 
 pub mod builder;
 pub mod catalogue;
-pub mod rng;
+pub mod ids;
 
 use serde::Serialize;
 use uuid::Uuid;

@@ -959,7 +959,8 @@ dependencies = [
  "evara-constraints",
  "evara-core",
  "serde",
- "thiserror 2.0.21",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]

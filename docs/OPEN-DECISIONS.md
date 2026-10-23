@@ -792,13 +792,48 @@ above only works if the thing a delta is checked against exists first, so M6 inh
 `IncrementalScorer` **and** the property test in the same milestone. Neither half may land
 without the other.
 
-### R2 — Solver quality is open-ended work
+**✅ Discharged in M6. Both halves landed, and the risk changed shape rather than being
+accepted.** [adr/0041](adr/0041-the-incremental-scorer-lives-with-the-evaluators.md).
+
+The mitigation above is in place: `evara-constraints`' `differential` module asserts the running
+score against the reference score **after every single operation** of seeded random sequences, over
+five fixtures at three seeds each, plus the per-type counts, plus a probe against the commit that
+follows it. It runs in CI and gates every new constraint.
+
+What reduces the residual risk further is that **there is no hand-written delta to be wrong**. The
+shape this risk is about — per-rule arithmetic predicting a score change — does not exist. Every
+violation the eight rules produce names at most two occurrences, so
+`score(after) − score(before) = involving(after, a) − involving(before, a)` is an identity, and the
+scorer computes it by applying a tentative placement, asking each rule what it now finds about that
+occurrence, and putting the previous state back. The rules answer against a real arrangement.
+
+**What remains open**, and it is smaller than the original risk:
+
+- The identity depends on the two-occurrence property. A future constraint type whose violation
+  named three occurrences would break it **silently**. A test asserts the property over the whole
+  catalogue, so the breakage is a red test rather than a wrong timetable — but the assumption is
+  now load-bearing and is named here so it is not rediscovered.
+- `evaluate_involving` is a sixth artefact every new constraint type owes, and a rule that
+  narrowed too far would under-report. The union property test is what catches it, per rule.
+
+### R2 — Solver quality is open-ended work — *measured in M6, baselines still owed*
 
 "Generate a timetable" is binary; "generate a timetable a timetabler accepts" is years of
 refinement, and incumbents have had decades. **Mitigation:** benchmark fixtures with
 committed score baselines from Phase 6, so progress and regressions are measurable rather
 than argued about. Set expectations that M1 produces a *feasible* timetable, not a
 competitive one.
+
+**M6 met the expectation and not yet the mitigation.** A feasible timetable exists: `medium`'s 500
+occurrences are placed completely in 57 ms and the 2 000-occurrence upper end reaches 99.7%, with
+no hard violation at any scale — [TIMETABLE-CONSTRUCTION-SOLVER.md](TIMETABLE-CONSTRUCTION-SOLVER.md)
+§14. Nothing is *competitive*: there is no local search and no soft constraint, so the engine has
+no opinion about whether a legal timetable is a good one.
+
+**Still owed:** `evara bench` and the committed per-fixture score baselines. M6's figures are
+recorded in prose, which makes them checkable by a reader and not by CI. Until the baselines exist,
+a quality regression is argued about rather than measured — which is exactly what this risk
+predicts.
 
 ### R3 — Constraint count is the real scope
 
@@ -819,12 +854,26 @@ Every schema change touches a migration, a repository, a DTO, generated types, a
 wrapper and a form. **Mitigation:** generated types, generic CRUD conventions established
 in Phase 2, and batching schema changes per phase rather than per field.
 
-### R5 — Performance at scale, unknown until measured
+### R5 — Performance at scale — *measured in M6*
 
 A 2,000-activity secondary school with electives is the realistic upper end. Nothing in
 the design should break, but load time, solve time and grid rendering are all unmeasured.
 **Mitigation:** generate a large synthetic fixture in Phase 3 — *before* the solver — and
 treat its numbers as a budget.
+
+**Solve time is now measured, and the budget is comfortable.** 500 occurrences placed completely in
+57 ms; 2 000 occurrences at 99.7% in about 900 ms; 5.0 MiB peak working set for the 500 case, the
+whole command included. No run terminates on a limit, and the shipped caps are about two orders of
+magnitude above what the upper end uses.
+[TIMETABLE-CONSTRUCTION-SOLVER.md](TIMETABLE-CONSTRUCTION-SOLVER.md) §14.
+
+Two of the three figures this risk names are **still unmeasured**: load time (M4's loader is 28
+statements per load independent of school size, which is a strong argument and not a measurement)
+and grid rendering, which has no grid to render until Phase 7.
+
+One note on the fixture half of the mitigation: the upper-end school is built in the test that
+measures it rather than added to M2's catalogue, whose largest fixture is `medium` at 500.
+[SCHEDULING-FIXTURES.md](SCHEDULING-FIXTURES.md) records why and what would change that.
 
 ### R6 — Timeslot rematerialisation — *mitigation shipped in Phase 1D*
 

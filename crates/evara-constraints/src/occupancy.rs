@@ -28,10 +28,23 @@
 //! active list of spans whose interval has not yet ended, so it compares only spans that
 //! genuinely coexist. Teacher and room clash narrow the subset first — by teacher, by room —
 //! which is what the brief means by grouping before sweeping.
+//!
+//! # Mutable since M6, and why that is the same resolver
+//!
+//! [`Occupancy::of`] builds the whole thing from an assignment; [`Occupancy::place`] and
+//! [`Occupancy::withdraw`] move one occurrence without rebuilding the rest. The second pair
+//! exists because a construction solver asks *"what would this placement break?"* thousands of
+//! times per solve and [`Occupancy::of`] is linear in the timetable.
+//!
+//! Both routes call the same [`resolve`] and maintain the same indexes, so an occupancy reached
+//! by a thousand placements is **equal** to one built from the resulting assignment — asserted
+//! by a test over random operation sequences, because that equality is what lets
+//! [`crate::IncrementalScorer`] be trusted. The indexes are what make the narrowing cheap:
+//! `taught_by` and `booked_into` were scans of the whole timetable and are now lookups.
 
 use evara_core::scheduling::{
     ActivityIx, Assignment, CycleDayIx, Placement, PlacementSpan, Problem, RoomIx, SectionFact,
-    SectionIx, TimeInterval, TimeslotIx,
+    SectionIx, TeacherIx, TimeInterval, TimeslotIx,
 };
 
 /// Why an occurrence's span is not what its duration asked for.
@@ -71,6 +84,20 @@ pub(crate) struct Placed {
     pub(crate) defect: SpanDefect,
 }
 
+/// Which way a placement could not be read against the problem.
+///
+/// Two cases and they are not the same remedy: an activity index past the end of the table
+/// means the assignment describes a different problem, while a dangling timeslot means this
+/// problem's grid does not hold the slot named. Both are reported as sentences by
+/// [`Occupancy::invalid_references`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Unreadable {
+    /// The problem holds no activity at that index.
+    UnknownActivity,
+    /// The grid holds no timeslot at the placement's start.
+    DanglingTimeslot,
+}
+
 /// A candidate timetable, resolved into the minutes it occupies.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Occupancy<'p> {
@@ -81,6 +108,18 @@ pub struct Occupancy<'p> {
     unknown: Vec<usize>,
     /// Activities whose placement names a timeslot the problem does not hold.
     dangling: Vec<ActivityIx>,
+    /// Placed occurrences per teacher, per room and per cycle day, each sorted by activity
+    /// index.
+    ///
+    /// Maintained rather than derived, because this is exactly how the three clash rules
+    /// narrow — `teacher-clash` by the teacher, `room-clash` by the room, and `student-clash`
+    /// by the day, since two occurrences on different days cannot clash whatever their
+    /// audiences — and a solver asks them thousands of times. Sorted so every caller sees the
+    /// same order a scan in index order would have produced; `SOLVER.md` §5's determinism
+    /// requirement reaches the order violations come out in.
+    by_teacher: Vec<Vec<ActivityIx>>,
+    by_room: Vec<Vec<ActivityIx>>,
+    by_day: Vec<Vec<ActivityIx>>,
 }
 
 impl<'p> Occupancy<'p> {
@@ -95,24 +134,13 @@ impl<'p> Occupancy<'p> {
     /// evaluation rather than scoring a timetable it could not read.
     #[must_use]
     pub fn of(problem: &'p Problem, assignment: &Assignment) -> Self {
-        let mut placed: Vec<Option<Placed>> = vec![None; problem.activities.len()];
-        let mut unknown = Vec::new();
-        let mut dangling = Vec::new();
+        let mut occupancy = Self::empty(problem);
 
         for (activity, placement) in assignment.iter() {
-            let Some(fact) = problem.activities.get(activity.get()) else {
-                unknown.push(activity.get());
-                continue;
-            };
-            match resolve(
-                problem,
-                activity,
-                fact.section,
-                fact.duration.as_usize(),
-                placement,
-            ) {
-                Some(found) => placed[activity.get()] = Some(found),
-                None => dangling.push(activity),
+            match occupancy.readable(activity, placement) {
+                Ok(found) => occupancy.file(found),
+                Err(Unreadable::UnknownActivity) => occupancy.unknown.push(activity.get()),
+                Err(Unreadable::DanglingTimeslot) => occupancy.dangling.push(activity),
             }
         }
 
@@ -122,18 +150,120 @@ impl<'p> Occupancy<'p> {
                 .placement(ActivityIx::new(u32::try_from(extra).unwrap_or(u32::MAX)))
                 .is_some()
             {
-                unknown.push(extra);
+                occupancy.unknown.push(extra);
             }
         }
-        unknown.sort_unstable();
-        unknown.dedup();
-        dangling.sort_unstable();
+        occupancy.unknown.sort_unstable();
+        occupancy.unknown.dedup();
+        occupancy.dangling.sort_unstable();
 
+        occupancy
+    }
+
+    /// An occupancy of `problem` in which nothing is placed.
+    ///
+    /// The starting point a construction solver builds from, and what [`Occupancy::of`] fills
+    /// in. Carries no invalid reference, because nothing has been read.
+    #[must_use]
+    pub fn empty(problem: &'p Problem) -> Self {
         Self {
             problem,
-            placed,
-            unknown,
-            dangling,
+            placed: vec![None; problem.activities.len()],
+            unknown: Vec::new(),
+            dangling: Vec::new(),
+            by_teacher: vec![Vec::new(); problem.teachers.len()],
+            by_room: vec![Vec::new(); problem.rooms.len()],
+            by_day: vec![Vec::new(); problem.context.cycle_days.len()],
+        }
+    }
+
+    /// Places one occurrence, replacing where it was.
+    ///
+    /// Returns `false` when the placement cannot be read against this problem — an unknown
+    /// activity, or a timeslot the grid does not hold — and then **nothing changed**, not even
+    /// the previous placement. An unreadable placement is a caller bug here rather than a data
+    /// state: a solver offers only candidates it generated from this problem, and the route
+    /// that has to tolerate one from outside is [`Occupancy::of`], which records it as an
+    /// invalid reference instead.
+    pub fn place(&mut self, activity: ActivityIx, placement: Placement) -> bool {
+        let Ok(found) = self.readable(activity, placement) else {
+            return false;
+        };
+        self.withdraw(activity);
+        self.file(found);
+        true
+    }
+
+    /// Unschedules one occurrence, returning what it had occupied.
+    pub fn withdraw(&mut self, activity: ActivityIx) -> Option<Placement> {
+        let gone = self.placed.get_mut(activity.get())?.take()?;
+        let placement = gone.span.placement();
+        if let Some(section) = self.problem.sections.get(gone.section.get()) {
+            for teacher in &section.teachers {
+                Self::forget(&mut self.by_teacher, teacher.get(), activity);
+            }
+        }
+        if let Some(room) = placement.room {
+            Self::forget(&mut self.by_room, room.get(), activity);
+        }
+        Self::forget(&mut self.by_day, gone.span.cycle_day.get(), activity);
+        Some(placement)
+    }
+
+    /// Resolves one placement, or says which way it could not be read.
+    ///
+    /// Pure: it changes nothing, so a caller can decide between recording the failure and
+    /// refusing the write. The one call site of [`resolve`].
+    fn readable(&self, activity: ActivityIx, placement: Placement) -> Result<Placed, Unreadable> {
+        let fact = self
+            .problem
+            .activities
+            .get(activity.get())
+            .ok_or(Unreadable::UnknownActivity)?;
+        resolve(
+            self.problem,
+            activity,
+            fact.section,
+            fact.duration.as_usize(),
+            placement,
+        )
+        .ok_or(Unreadable::DanglingTimeslot)
+    }
+
+    /// Records a resolved occurrence and files it in every index.
+    ///
+    /// The one place an index is widened, so [`Occupancy::of`] and [`Occupancy::place`] cannot
+    /// come to maintain different bookkeeping — which is the equality the incremental scorer
+    /// rests on.
+    fn file(&mut self, found: Placed) {
+        let activity = found.activity;
+        if let Some(section) = self.problem.sections.get(found.section.get()) {
+            for teacher in &section.teachers {
+                Self::remember(&mut self.by_teacher, teacher.get(), activity);
+            }
+        }
+        if let Some(room) = found.span.room {
+            Self::remember(&mut self.by_room, room.get(), activity);
+        }
+        Self::remember(&mut self.by_day, found.span.cycle_day.get(), activity);
+        self.placed[activity.get()] = Some(found);
+    }
+
+    /// Adds `activity` to one bucket, keeping it sorted and free of repeats.
+    fn remember(table: &mut [Vec<ActivityIx>], at: usize, activity: ActivityIx) {
+        if let Some(bucket) = table.get_mut(at)
+            && let Err(insert_at) = bucket.binary_search(&activity)
+        {
+            bucket.insert(insert_at, activity);
+        }
+    }
+
+    /// Removes `activity` from one bucket.
+    fn forget(table: &mut [Vec<ActivityIx>], at: usize, activity: ActivityIx) {
+        if let Some(bucket) = table.get_mut(at)
+            && let Ok(found) = bucket.binary_search(&activity)
+        {
+            bucket.remove(found);
         }
     }
 
@@ -196,11 +326,18 @@ impl<'p> Occupancy<'p> {
         self.placed_count() == self.problem.activities.len()
     }
 
-    /// The section one occurrence belongs to.
+    /// The assignment this occupancy is of.
+    ///
+    /// The inverse of [`Occupancy::of`] for everything it could read, which is what lets a
+    /// solver keep one mutable occupancy and hand out an [`Assignment`] at the end rather than
+    /// maintaining both and risking disagreement.
     #[must_use]
-    pub(crate) fn section_of(&self, activity: ActivityIx) -> Option<&'p SectionFact> {
-        let section = self.problem.activities.get(activity.get())?.section;
-        self.problem.sections.get(section.get())
+    pub fn assignment(&self) -> Assignment {
+        let mut assignment = Assignment::empty(self.problem.activities.len());
+        for placed in self.all() {
+            assignment.place(placed.activity, placed.span.placement());
+        }
+        assignment
     }
 
     /// Every pair among `among` that occupies overlapping real time on one cycle day.
@@ -259,27 +396,75 @@ impl<'p> Occupancy<'p> {
         pairs
     }
 
-    /// The placed occurrences whose section names `teacher`.
+    /// The members of `among` whose span overlaps `activity`'s, excluding itself.
+    ///
+    /// The half of [`Occupancy::overlapping_pairs`] a per-occurrence question needs: *which
+    /// already-placed occurrences does **this** one collide with?* Same overlap test, same
+    /// sorted output, and a linear scan rather than a sweep because `among` is already narrowed
+    /// to one teacher, one room or one group and the answer is a handful of spans.
+    ///
+    /// Returns nothing when `activity` is unplaced, which is correct: an unplaced occurrence
+    /// occupies no minutes and cannot clash with anything.
     #[must_use]
-    pub(crate) fn taught_by(&self, teacher: evara_core::scheduling::TeacherIx) -> Vec<ActivityIx> {
-        self.all()
-            .filter(|placed| {
-                self.problem
-                    .sections
-                    .get(placed.section.get())
-                    .is_some_and(|section| section.teachers.contains(&teacher))
+    pub(crate) fn overlapping_with(
+        &self,
+        activity: ActivityIx,
+        among: &[ActivityIx],
+    ) -> Vec<ActivityIx> {
+        let Some(mine) = self.at(activity) else {
+            return Vec::new();
+        };
+        let mut found: Vec<ActivityIx> = among
+            .iter()
+            .copied()
+            .filter(|other| *other != activity)
+            .filter(|other| {
+                self.at(*other)
+                    .is_some_and(|theirs| theirs.span.clashes_in_time_with(&mine.span))
             })
-            .map(|placed| placed.activity)
-            .collect()
+            .collect();
+        found.sort_unstable();
+        found.dedup();
+        found
+    }
+
+    /// The section one occurrence belongs to.
+    #[must_use]
+    pub(crate) fn section_of(&self, activity: ActivityIx) -> Option<&'p SectionFact> {
+        let section = self.problem.activities.get(activity.get())?.section;
+        self.problem.sections.get(section.get())
+    }
+
+    /// The placed occurrences whose section names `teacher`.
+    ///
+    /// An index lookup rather than a scan of the timetable. The bucket is maintained by
+    /// [`Occupancy::place`] and [`Occupancy::withdraw`] and is sorted by activity index, so the
+    /// order matches what a scan would have produced.
+    #[must_use]
+    pub(crate) fn taught_by(&self, teacher: TeacherIx) -> &[ActivityIx] {
+        self.by_teacher
+            .get(teacher.get())
+            .map_or(&[], Vec::as_slice)
     }
 
     /// The placed occurrences booked into `room`.
     #[must_use]
-    pub(crate) fn booked_into(&self, room: RoomIx) -> Vec<ActivityIx> {
-        self.all()
-            .filter(|placed| placed.span.room == Some(room))
-            .map(|placed| placed.activity)
-            .collect()
+    pub(crate) fn booked_into(&self, room: RoomIx) -> &[ActivityIx] {
+        self.by_room.get(room.get()).map_or(&[], Vec::as_slice)
+    }
+
+    /// The placed occurrences running on one cycle position.
+    ///
+    /// What makes `student-clash`'s per-occurrence question cheap, and the narrowing is sound
+    /// for a reason worth stating: a span never crosses a cycle position
+    /// ([`PlacementSpan::cycle_day`]), and
+    /// [`PlacementSpan::clashes_in_time_with`] requires the days to be equal. So every
+    /// occurrence that could clash with one on this day is in this bucket, and nothing outside
+    /// it needs testing. The audience test is still ADR 0035 §5's and is applied by the rule,
+    /// not here.
+    #[must_use]
+    pub(crate) fn on_day(&self, day: CycleDayIx) -> &[ActivityIx] {
+        self.by_day.get(day.get()).map_or(&[], Vec::as_slice)
     }
 }
 
@@ -288,7 +473,7 @@ impl<'p> Occupancy<'p> {
 /// Returns `None` only when the starting timeslot is not in the problem at all, which is an
 /// invalid reference. Everything else — a short run, a break in the middle, the wrong
 /// schedule — produces a span with a [`SpanDefect`] for a rule to report.
-fn resolve(
+pub(crate) fn resolve(
     problem: &Problem,
     activity: ActivityIx,
     section: SectionIx,

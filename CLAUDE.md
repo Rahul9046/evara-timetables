@@ -253,25 +253,58 @@ disagree about whether a placement is legal, the product is broken.
   span. An evaluator never restates a predicate that exists: `RoomFact::is_candidate_for`,
   `runs_on`, `Overlap::clashes` and `SlotAvailability::permits_placement` are each the one
   implementation of their question.
-- **Solving is deterministic.** Seeded RNG, recorded on the run. No `Instant::now()` or
-  unseeded randomness inside the solver's decisions. The same rule binds the fixture
-  generator: it reads no clock and depends on no RNG crate, so a fixture's bytes cannot
-  change under a dependency bump and invalidate a committed baseline.
-- **Scores are integers.** Three levels, compared lexicographically. Weights become
-  integer penalties at compile time, not at scoring time.
+- **Solving is deterministic, and every execution limit is a count.** One seeded RNG —
+  `evara_core::scheduling::rng` — shared by the fixture generator and the solver, reading no clock
+  and depending on no RNG crate, so neither a fixture's bytes nor a timetable can change under a
+  dependency bump. No `Instant::now()` or unseeded randomness inside the solver's decisions, and
+  **no time limit**: candidate evaluations, construction steps and retry passes are counts, so the
+  same seed stops in the same place on every machine. A wall clock reaches the engine only as the
+  caller's `Cancel`, which is why `Termination::Cancelled` is the one result this workspace
+  documents as not reproducible. Determinism is asserted as whole-outcome equality, which is why
+  `SolveStatistics` carries counters and no elapsed time.
+- **The solver searches; the registry decides what is legal.** `evara-solver` chooses what to try,
+  in what order and when to stop. Every candidate goes through `IncrementalScorer::probe` and the
+  finished arrangement is re-checked by the reference `evaluate` — a disagreement between the two
+  is a **defect in Evara**, reported as one, never a timetable returned as a success. Candidate
+  generation may pre-filter a rule only by *calling* the function that owns it (`runs_on`,
+  `RoomFact::is_candidate_for`, `SlotAvailability::permits_placement`); a second copy of a
+  predicate is §2's most important rule broken where a solver usually breaks it. The incremental
+  scorer therefore lives with the evaluators, not with the search, and has no hand-written
+  per-rule delta — [adr/0041](docs/adr/0041-the-incremental-scorer-lives-with-the-evaluators.md),
+  [TIMETABLE-CONSTRUCTION-SOLVER.md](docs/TIMETABLE-CONSTRUCTION-SOLVER.md).
+- **Never report that a demand cannot be scheduled.** The mirror of `evara_core::lessons`' rule,
+  and it binds the solver: a greedy construction that leaves a lesson unplaced has discovered that
+  *its* arrangement had no room, not that no timetable exists. `UnplacedCause::is_impossible` is
+  the one place the difference is decided, and only a property of the **problem** — no run long
+  enough, no candidate room, no resolved bell schedule, availability emptying the range — may be
+  phrased as impossibility. A generated timetable is described as having **no confirmed clash
+  within the school solved**, with the unverified counts beside it; never as conflict-free.
+- **Scores are integers, and penalties are negative-going.** Three levels, compared
+  lexicographically. A weight is a non-negative magnitude; an evaluator negates it **once**, when
+  it builds a `Violation`, so `Score::PERFECT` is the top of the order and `Ord` is the comparison
+  a search can use with no wrapper (`SOLVER.md` §3). Weights become integer penalties at compile
+  time, not at scoring time.
 
 ## 4. Definition of done for a constraint
 
-A constraint type is not "supported" until all five exist:
+A constraint type is not "supported" until all six exist:
 
 1. a stable `type_key` and a registry entry in `crates/evara-constraints/`
 2. a JSON Schema for its parameters, next to the evaluator
 3. documented semantics in [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md)
 4. an isolated unit test, plus a synthetic fixture exercising it
 5. an `explain()` implementation producing a human-readable reason
+6. an `evaluate_involving()` — the rule's own narrowed query, **sharing one body** with its
+   full sweep rather than restating the check. Since M6 this is a trait member rather than a
+   convention, so a type without one cannot be registered; it is what lets the incremental
+   scorer ask about a single occurrence, and the union property test is what proves it complete.
 
 The reference-vs-incremental scorer property test must stay green. It is the gate that
 keeps incremental scoring honest, and a wrong delta silently produces a wrong timetable.
+`crates/evara-constraints/src/differential.rs` is that gate, and one of its assertions is a
+**precondition of the whole design**: every violation names at most two occurrences. A rule whose
+violation named three would break the incremental identity silently, so the test is what turns
+that into a red build rather than a wrong timetable.
 
 ## 5. Process
 
@@ -300,5 +333,7 @@ keeps incremental scoring honest, and a wrong delta silently produces a wrong ti
 | `cargo run -p evara-cli -- fixture tiny` | Write one as JSON — synthetic test data, **not** a timetable |
 | `cargo run -p evara-cli -- validate tiny` | Pre-solve validation of a fixture's inputs; exits 1 on a blocking finding |
 | `cargo run -p evara-cli -- evaluate tiny` | Score an arrangement against the constraint rules; exits 1 on a hard violation |
+| `cargo run -p evara-cli -- generate tiny --seed 42` | **Construct** a timetable over a fixture; exits 1 if partial, 3 if refused |
+| `cargo run -p evara-cli -- generate --project <path> --school <id> --cycle <id>` | Construct a timetable for a **real project**, read-only — migrates nothing, writes nothing, persists no timetable |
 | `cargo run -p evara-cli -- validate --project <path> --list` | What schools, cycles and terms a `.evaraproj` holds, with their identifiers |
 | `cargo run -p evara-cli -- validate --project <path> --school <id> --cycle <id>` | Pre-solve validation of a **real project**, read-only — migrates nothing, writes nothing |
