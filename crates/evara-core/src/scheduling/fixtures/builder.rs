@@ -29,7 +29,7 @@
 
 use uuid::Uuid;
 
-use super::rng::{IdGenerator, Rng};
+use super::ids::IdGenerator;
 use crate::scheduling::availability::{
     AvailabilityEntity, AvailabilityStatus, UnavailabilityIndex,
 };
@@ -50,6 +50,7 @@ use crate::scheduling::problem::{
     ActivityFact, GroupFact, GroupKind, OtherSchool, Problem, RoomFact, RoomTypeFact, SectionFact,
     TeacherFact, TimeslotFact,
 };
+use crate::scheduling::rng::Rng;
 
 /// One period of a bell schedule, as a fixture states it.
 #[derive(Debug, Clone)]

@@ -144,7 +144,7 @@ mod layering_tests {
     fn the_fixtures_feature_adds_no_dependency() {
         // The generator is twenty lines of SplitMix64 and a UUID builder, deliberately: a
         // fixture whose bytes changed under a dependency bump would invalidate every solver
-        // baseline committed against it. See `scheduling::fixtures::rng`.
+        // baseline committed against it. See `scheduling::rng`.
         assert!(
             MANIFEST.contains("fixtures = []"),
             "the fixtures feature must enable no optional dependency"

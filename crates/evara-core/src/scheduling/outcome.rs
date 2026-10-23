@@ -1,14 +1,17 @@
 //! What a solve returns: a score, an outcome, and the counts that keep a timetable honest
 //! about what was checked.
 //!
-//! # No solver exists
+//! # Declared in M2, produced since M6
 //!
-//! Nothing in this module solves anything, and nothing in this milestone does. There is no
-//! `solve` function here, no engine, and no stub that returns a fabricated timetable — the
-//! `SolverEngine` trait and its implementations are M6's, and `evara-solver` is still a
-//! documentation-only crate. These are the **shapes** a future engine returns, declared now
-//! so that M3's diagnostics, M7's persistence and M9's review are written against one
-//! contract rather than three.
+//! Nothing in this module solves anything and nothing here reads a clock. These are the
+//! **shapes** an engine returns; `evara_solver::ConstructionSolver` is what returns them, and
+//! M2 declared them before it existed so that M3's diagnostics, M7's persistence and M9's
+//! review would be written against one contract rather than three.
+//!
+//! M6 added three things to the shape and changed none of it: a [`Termination`] beside the
+//! status, a [`SolveStatistics`] of deterministic counters, and an [`UnplacedCause`] on each
+//! unplaced occurrence. The five statuses are untouched — see [`Termination`] for why "the
+//! limit was reached" is not a sixth.
 //!
 //! # Why there is no `success: bool`
 //!
@@ -199,6 +202,14 @@ pub struct UnscheduledActivity {
     pub activity: ActivityIx,
     /// Its stored identity, so a report need not hold the problem to name it.
     pub id: Uuid,
+    /// What the section is called, so a report can name the lesson rather than a number.
+    pub section: String,
+    /// Why, as a cause a screen can group and act on.
+    ///
+    /// The structured half of the answer. [`UnplacedCause::is_impossible`] is what separates
+    /// *"no timetable can place this"* from *"this arrangement did not"*, and a report that
+    /// read only [`UnscheduledActivity::reason`] could not tell them apart.
+    pub cause: UnplacedCause,
     /// Why, in prose the engine authored.
     pub reason: String,
     /// The pre-solve finding that already explained it, where there is one.
@@ -266,6 +277,18 @@ pub struct UnverifiedCounts {
     ///
     /// Each was announced before the solve and none was compared across the boundary.
     pub shared_entities: u32,
+    /// Stored availability restrictions this engine does not enforce.
+    ///
+    /// `evara_db::Completeness::RestrictionsNotEnforced`'s count, carried onto the result. A
+    /// `RESOURCE` or `SUBJECT` availability rule is recorded by the school and read by no
+    /// evaluator, so a timetable generated over it has been checked against **less** than the
+    /// school entered.
+    ///
+    /// The fourth hole, and it belongs beside the other three for the same reason they are
+    /// here: a timetable described as clean when a stored rule was never applied is the
+    /// failure `V11`'s store-only-exceptions design exists to prevent. `evara-core` cannot
+    /// name the database type, so the figure crosses as a count.
+    pub unenforced_restrictions: u32,
 }
 
 impl UnverifiedCounts {
@@ -274,6 +297,7 @@ impl UnverifiedCounts {
         indeterminate_student_pairs: 0,
         unchecked_capacities: 0,
         shared_entities: 0,
+        unenforced_restrictions: 0,
     };
 
     /// Whether the timetable has anything to disclose.
@@ -285,16 +309,17 @@ impl UnverifiedCounts {
         self.indeterminate_student_pairs > 0
             || self.unchecked_capacities > 0
             || self.shared_entities > 0
+            || self.unenforced_restrictions > 0
     }
 }
 
 /// Everything one run produced.
 ///
-/// # Not produced by anything yet
+/// # The shape M2 declared, filled in by M6
 ///
-/// No function in this workspace returns one. It is the declared result shape for M6's
-/// engine, and declaring it now is what lets M7's persistence and M9's review be designed
-/// against the real thing instead of against a guess.
+/// `evara_solver::generate` returns one. Every field M2 declared is still here and means what
+/// it meant; M6 added [`SolveOutcome::termination`] and [`SolveOutcome::statistics`], which are
+/// about the **run** rather than about the timetable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SolveOutcome {
@@ -302,8 +327,14 @@ pub struct SolveOutcome {
     pub problem: ProblemIdentity,
     /// The seed the run's randomness came from, so it can be reproduced exactly.
     pub seed: Seed,
-    /// How it ended.
+    /// How it ended: what came back.
     pub status: SolveStatus,
+    /// How it ended: why the engine stopped looking.
+    ///
+    /// Beside the status rather than inside it. A `Partial` result that was exhausted and one
+    /// that hit a budget are the same timetable and two different things to tell a user — see
+    /// [`Termination`].
+    pub termination: Termination,
     /// What was placed where.
     ///
     /// Carried for every status, including [`SolveStatus::Cancelled`] and
@@ -325,6 +356,8 @@ pub struct SolveOutcome {
     /// So a timetable's provenance can state the limits it was generated under, rather than
     /// a user having to remember a warning they saw on a previous screen.
     pub preflight: DiagnosticReport,
+    /// What the run did, counted. Deterministic — see [`SolveStatistics`].
+    pub statistics: SolveStatistics,
 }
 
 impl SolveOutcome {
@@ -334,9 +367,36 @@ impl SolveOutcome {
     /// score must be feasible. They can disagree — an infeasible status with a feasible
     /// score would be a bug — and asking for both is how that bug surfaces rather than
     /// being papered over.
+    ///
+    /// A **partial** result can be adoptable, and that is the point of `MEDIUM`: a school may
+    /// adopt eleven of twelve lessons and place the twelfth by hand. Completeness is
+    /// [`SolveOutcome::is_complete`], asked separately.
     #[must_use]
     pub fn is_adoptable(&self) -> bool {
         self.status.is_usable() && self.score.is_feasible()
+    }
+
+    /// Whether every occurrence was placed.
+    #[must_use]
+    pub fn is_complete(&self) -> bool {
+        self.unscheduled.is_empty() && self.assignment.is_complete()
+    }
+
+    /// How many occurrences were placed.
+    #[must_use]
+    pub fn placed_count(&self) -> usize {
+        self.assignment.scheduled_count()
+    }
+
+    /// The unplaced occurrences this run proved no timetable can place.
+    ///
+    /// A subset of [`SolveOutcome::unscheduled`], and usually empty: the gate refuses the
+    /// inputs that make it non-empty before a placement is attempted. Separated because the
+    /// remedy differs — one is a setup change, the other is "try again differently" — and
+    /// because reporting the second as the first is the overclaim
+    /// `evara_core::lessons`' rule forbids.
+    pub fn impossible(&self) -> impl Iterator<Item = &UnscheduledActivity> + '_ {
+        self.unscheduled.iter().filter(|u| u.cause.is_impossible())
     }
 }
 
@@ -359,9 +419,236 @@ pub struct ProblemIdentity {
     pub term: Option<Uuid>,
 }
 
+/// Why a run stopped, beside *what it ended up with*.
+///
+/// # Not a sixth [`SolveStatus`]
+///
+/// The two answer different questions and a school needs both. `SolveStatus` says **what you
+/// have** — a complete timetable, a partial one, an infeasible one. This says **why the engine
+/// stopped looking**, and the pairing is what makes a partial result actionable: a `Partial`
+/// run that stopped at [`Termination::Exhausted`] has been told every remaining occurrence was
+/// tried and refused, while one that stopped at [`Termination::CandidateLimitReached`] has been
+/// told nothing of the kind and should be run again with a larger budget.
+///
+/// Collapsing the two would force exactly the wrong report. `SolveStatus`'s own header is
+/// explicit that *"a user told only that generation failed cannot tell which happened"*, and
+/// adding `LimitReached` to that enum would make a timetable's completeness and the engine's
+/// budget the same field.
+///
+/// # Every reason here is deterministic except one
+///
+/// A limit is a **count** — candidate evaluations, construction steps, retry passes — so the
+/// same problem, seed and limits stop at the same place on every machine.
+/// [`Termination::Cancelled`] is the exception and is the only reason a caller's clock can
+/// produce, because cancellation is the caller's to decide: `evara-solver` reads no clock
+/// (`CLAUDE.md`), and a wall-clock budget reaches it as a cancellation it cannot tell from a
+/// user pressing stop. A run that ended this way is **not reproducible**, and that is a
+/// property of the request rather than of the engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Termination {
+    /// Every occurrence is placed, so there was nothing left to do.
+    Complete,
+    /// Every unplaced occurrence was tried against every candidate and refused.
+    ///
+    /// The engine ran out of **moves**, not of budget. Still not a proof that no complete
+    /// timetable exists: a greedy construction that painted itself into a corner reports
+    /// exactly this, and `SOLVER.md` §8's counting diagnostics are the only thing in Evara
+    /// that can prove impossibility.
+    Exhausted,
+    /// The cap on candidate evaluations was reached.
+    CandidateLimitReached,
+    /// The cap on construction steps was reached.
+    StepLimitReached,
+    /// The cap on retry passes was reached while a pass was still placing things.
+    PassLimitReached,
+    /// The caller stopped it — a user, or a wall-clock budget the caller was enforcing.
+    Cancelled,
+    /// Pre-solve validation refused the inputs, so no placement was attempted.
+    ///
+    /// Distinct from [`Termination::Exhausted`]: nothing was tried. The remedy is in
+    /// [`SolveOutcome::preflight`] and is a field the user can fill in.
+    InputRejected,
+    /// The engine's own final check found a hard violation in what it had accepted.
+    ///
+    /// A defect in Evara rather than a property of the school's data. The result is returned
+    /// rather than discarded so the violation can be reported, and the status is
+    /// [`SolveStatus::Failed`].
+    InternalCheckFailed,
+}
+
+impl Termination {
+    /// Whether a larger budget could plausibly place more.
+    ///
+    /// `true` for the three limits and for a cancellation. Used to phrase a partial result
+    /// honestly: *"the constructor stopped at its budget"* rather than *"these lessons cannot
+    /// be placed"*.
+    #[must_use]
+    pub const fn was_cut_short(self) -> bool {
+        matches!(
+            self,
+            Self::CandidateLimitReached
+                | Self::StepLimitReached
+                | Self::PassLimitReached
+                | Self::Cancelled
+        )
+    }
+
+    /// Whether the same problem, configuration and seed reproduce this run exactly.
+    ///
+    /// `false` only for [`Termination::Cancelled`] — see this type's header.
+    #[must_use]
+    pub const fn is_reproducible(self) -> bool {
+        !matches!(self, Self::Cancelled)
+    }
+
+    /// The stable key, for a structured report.
+    #[must_use]
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Complete => "complete",
+            Self::Exhausted => "exhausted",
+            Self::CandidateLimitReached => "candidate-limit-reached",
+            Self::StepLimitReached => "step-limit-reached",
+            Self::PassLimitReached => "pass-limit-reached",
+            Self::Cancelled => "cancelled",
+            Self::InputRejected => "input-rejected",
+            Self::InternalCheckFailed => "internal-check-failed",
+        }
+    }
+}
+
+/// What a run did, counted.
+///
+/// # Counters, and deliberately no elapsed time
+///
+/// Every figure here is a count of decisions, so two runs of the same problem at the same seed
+/// produce **identical** statistics and a baseline can be committed against them. There is no
+/// `elapsed` field, and its absence is the decision: `CLAUDE.md` forbids `Instant::now()`
+/// inside the solver, a duration recorded on the outcome would make [`SolveOutcome`]'s
+/// [`PartialEq`] machine-dependent, and the determinism tests compare whole outcomes.
+///
+/// A caller that wants wall-clock time measures it around the call and reports it beside the
+/// outcome, which is what `evara generate` does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SolveStatistics {
+    /// Candidate placements whose legality was tested.
+    ///
+    /// The engine's unit of work, and what [`Termination::CandidateLimitReached`] counts.
+    pub candidate_evaluations: u64,
+    /// Candidates that were tested and refused for breaking a hard rule.
+    pub candidates_rejected: u64,
+    /// Placements committed to the working assignment.
+    ///
+    /// Greater than the number of placed occurrences when a later pass replaced an earlier
+    /// placement.
+    pub placements_committed: u64,
+    /// Occurrences taken off the working assignment again.
+    pub placements_withdrawn: u64,
+    /// Occurrences the constructor attempted to place, counting retries.
+    pub construction_steps: u64,
+    /// Sweeps over the unplaced occurrences, including the first.
+    pub passes: u32,
+}
+
+/// Why one occurrence was not placed, as a cause rather than a sentence.
+///
+/// # Structured, because a sentence cannot be acted on
+///
+/// `SOLVER.md` §6's rule for an [`Explanation`](super::Explanation) — *"structured, not a
+/// string"* — applies here for the same reason: a Generate screen has to group unplaced
+/// lessons by remedy, and the remedy for "no room of the required type exists" is not the
+/// remedy for "a teacher is already busy in every slot that would fit".
+///
+/// # The two halves of the list, and why they must not be confused
+///
+/// The first four causes are properties of the **problem** and hold whatever else was placed:
+/// the occurrence had no legal candidate at all. The next two are properties of this **run**:
+/// the occurrence had candidates and every one of them clashed with something already placed,
+/// or the engine stopped before reaching it.
+///
+/// That distinction is `evara_core::lessons`' rule applied to a solver result. *"Never report
+/// that a demand can be scheduled"* has a mirror — never report that one cannot — and
+/// [`UnplacedCause::is_impossible`] is where the difference is stated once. A greedy
+/// constructor leaving a lesson unplaced is **not** a proof that no complete timetable exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UnplacedCause {
+    /// Its section resolves to no single bell schedule, so it has no value range.
+    ///
+    /// A hard pre-flight error under ADR 0033 §3; a run reaching this means the gate was
+    /// bypassed, which only a caller that ignored [`SolveOutcome::preflight`] can do.
+    NoResolvedBellSchedule,
+    /// No run of that many consecutive teaching periods exists in its schedule.
+    ///
+    /// Arithmetic, and the one cause that proves impossibility from the problem alone — ADR
+    /// 0033 §5. M3's `duration-exceeds-longest-run` says it before a solve.
+    NoContiguousRun,
+    /// Its section requires a kind of room and no room is a candidate.
+    ///
+    /// M3's `no-room-of-required-type`, met again at placement time.
+    NoCandidateRoom,
+    /// Every slot that would fit is one a stored rule marks `UNAVAILABLE`.
+    ///
+    /// For the teachers, the audience, or every candidate room — the occurrence has a value
+    /// range and availability empties it.
+    AllCandidatesUnavailable,
+    /// Every remaining candidate clashes with an occurrence already placed.
+    ///
+    /// A property of this arrangement. A different order, a different seed or a later repair
+    /// pass may well place it, and nothing here says a complete timetable is impossible.
+    BlockedByPlacements,
+    /// The engine stopped at a limit before this occurrence was placed.
+    ///
+    /// Nothing is claimed about it at all. [`Termination`] says which limit.
+    NotReached,
+    /// Generation was refused before it began, because the inputs carry a blocking finding.
+    ///
+    /// Also nothing claimed about this occurrence in particular — the refusal is about the
+    /// school's setup. Distinct from [`UnplacedCause::NotReached`] because the remedies are
+    /// opposites: that one says *run again with a larger budget*, and this one says *correct
+    /// the input first*, and offering the first for the second sends a user to retry something
+    /// that cannot work yet.
+    InputRejected,
+}
+
+impl UnplacedCause {
+    /// Whether this cause proves no timetable can place the occurrence.
+    ///
+    /// `true` only for a property of the problem that holds whatever else is placed. A cause
+    /// about *this run* is never impossibility — see this type's header.
+    #[must_use]
+    pub const fn is_impossible(self) -> bool {
+        matches!(
+            self,
+            Self::NoResolvedBellSchedule
+                | Self::NoContiguousRun
+                | Self::NoCandidateRoom
+                | Self::AllCandidatesUnavailable
+        )
+    }
+
+    /// The stable key, for a structured report and a test that pins the vocabulary.
+    #[must_use]
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::NoResolvedBellSchedule => "no-resolved-bell-schedule",
+            Self::NoContiguousRun => "no-contiguous-run",
+            Self::NoCandidateRoom => "no-candidate-room",
+            Self::AllCandidatesUnavailable => "all-candidates-unavailable",
+            Self::BlockedByPlacements => "blocked-by-placements",
+            Self::NotReached => "not-reached",
+            Self::InputRejected => "input-rejected",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Score, Seed, SolveStatus, UnverifiedCounts};
+    use super::{
+        Score, Seed, SolveStatistics, SolveStatus, Termination, UnplacedCause, UnverifiedCounts,
+    };
 
     #[test]
     fn only_a_zero_hard_score_is_feasible() {
@@ -438,7 +725,7 @@ mod tests {
     #[test]
     fn nothing_unverified_still_is_not_a_claim_of_being_conflict_free() {
         // The type cannot enforce the wording, so this test pins the data: all zeroes means
-        // there is nothing to disclose, and the three holes remain separately countable.
+        // there is nothing to disclose, and the four holes remain separately countable.
         assert!(!UnverifiedCounts::NONE.has_anything_to_disclose());
         assert_eq!(UnverifiedCounts::default(), UnverifiedCounts::NONE);
 
@@ -455,9 +742,162 @@ mod tests {
                 shared_entities: 1,
                 ..UnverifiedCounts::NONE
             },
+            UnverifiedCounts {
+                unenforced_restrictions: 1,
+                ..UnverifiedCounts::NONE
+            },
         ] {
             assert!(counts.has_anything_to_disclose());
         }
+    }
+
+    // ------------------------------------------------------- what M6 added to the shape
+
+    #[test]
+    fn a_termination_is_not_a_status_and_the_two_cross_freely() {
+        // The pairing is the point: the same timetable with two different reasons for
+        // stopping is two different things to tell a school.
+        for termination in [Termination::Exhausted, Termination::CandidateLimitReached] {
+            assert!(SolveStatus::Partial.is_usable());
+            assert_ne!(termination.key(), "", "every termination has a key");
+        }
+        assert_ne!(
+            Termination::Exhausted.was_cut_short(),
+            Termination::CandidateLimitReached.was_cut_short(),
+            "a budget and a dead end must not read the same"
+        );
+    }
+
+    #[test]
+    fn every_limit_says_a_bigger_budget_might_help_and_a_dead_end_does_not() {
+        for cut_short in [
+            Termination::CandidateLimitReached,
+            Termination::StepLimitReached,
+            Termination::PassLimitReached,
+            Termination::Cancelled,
+        ] {
+            assert!(cut_short.was_cut_short(), "{cut_short:?}");
+        }
+        for finished in [
+            Termination::Complete,
+            Termination::Exhausted,
+            Termination::InputRejected,
+            Termination::InternalCheckFailed,
+        ] {
+            assert!(!finished.was_cut_short(), "{finished:?}");
+        }
+    }
+
+    #[test]
+    fn only_a_cancelled_run_is_not_reproducible() {
+        // The one reason a caller's clock can produce. Everything else is a count, so the
+        // same seed stops in the same place on every machine.
+        assert!(!Termination::Cancelled.is_reproducible());
+        for deterministic in [
+            Termination::Complete,
+            Termination::Exhausted,
+            Termination::CandidateLimitReached,
+            Termination::StepLimitReached,
+            Termination::PassLimitReached,
+            Termination::InputRejected,
+            Termination::InternalCheckFailed,
+        ] {
+            assert!(deterministic.is_reproducible(), "{deterministic:?}");
+        }
+    }
+
+    #[test]
+    fn termination_keys_are_distinct_kebab_case() {
+        let all = [
+            Termination::Complete,
+            Termination::Exhausted,
+            Termination::CandidateLimitReached,
+            Termination::StepLimitReached,
+            Termination::PassLimitReached,
+            Termination::Cancelled,
+            Termination::InputRejected,
+            Termination::InternalCheckFailed,
+        ];
+        let mut keys: Vec<&str> = all.iter().map(|t| t.key()).collect();
+        let before = keys.len();
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(keys.len(), before, "two terminations share a key");
+        for key in keys {
+            assert!(
+                key.chars().all(|c| c.is_ascii_lowercase() || c == '-'),
+                "{key} is not kebab-case"
+            );
+        }
+    }
+
+    #[test]
+    fn an_impossible_cause_is_about_the_problem_and_the_others_are_about_the_run() {
+        // The distinction `evara_core::lessons`' rule turns into a mirror: never report that
+        // a demand cannot be scheduled when all you know is that this arrangement did not.
+        for proven in [
+            UnplacedCause::NoResolvedBellSchedule,
+            UnplacedCause::NoContiguousRun,
+            UnplacedCause::NoCandidateRoom,
+            UnplacedCause::AllCandidatesUnavailable,
+        ] {
+            assert!(proven.is_impossible(), "{proven:?}");
+        }
+        for merely_this_run in [
+            UnplacedCause::BlockedByPlacements,
+            UnplacedCause::NotReached,
+            UnplacedCause::InputRejected,
+        ] {
+            assert!(
+                !merely_this_run.is_impossible(),
+                "{merely_this_run:?} is a property of one arrangement, not of the problem"
+            );
+        }
+    }
+
+    #[test]
+    fn unplaced_cause_keys_are_distinct() {
+        let all = [
+            UnplacedCause::NoResolvedBellSchedule,
+            UnplacedCause::NoContiguousRun,
+            UnplacedCause::NoCandidateRoom,
+            UnplacedCause::AllCandidatesUnavailable,
+            UnplacedCause::BlockedByPlacements,
+            UnplacedCause::NotReached,
+            UnplacedCause::InputRejected,
+        ];
+        let mut keys: Vec<&str> = all.iter().map(|c| c.key()).collect();
+        let before = keys.len();
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(keys.len(), before);
+    }
+
+    #[test]
+    fn statistics_start_at_zero_and_carry_no_clock() {
+        // Counters only. A duration here would make a whole-outcome equality assertion —
+        // which is how the determinism tests are written — machine-dependent.
+        let fresh = SolveStatistics::default();
+        assert_eq!(fresh.candidate_evaluations, 0);
+        assert_eq!(fresh.placements_committed, 0);
+        assert_eq!(fresh.passes, 0);
+        let serialised = serde_json::to_string(&fresh).expect("deterministic statistics serialise");
+        assert!(
+            !serialised.contains("elapsed") && !serialised.contains("millis"),
+            "{serialised} must carry no time"
+        );
+    }
+
+    #[test]
+    fn the_new_vocabulary_serialises_in_the_wire_casing() {
+        assert_eq!(
+            serde_json::to_string(&Termination::CandidateLimitReached).expect("serialises"),
+            r#""candidateLimitReached""#
+        );
+        assert_eq!(
+            serde_json::to_string(&UnplacedCause::BlockedByPlacements).expect("serialises"),
+            r#""blockedByPlacements""#
+        );
     }
 
     #[test]
