@@ -124,9 +124,17 @@ Rules:
 - `change_log` is **not** exported. It is installation-local history, it would dominate
   file size, and it is meaningless on another machine. `site_id` in the manifest records
   where the export came from.
-- Derived data is not exported where it is cheap to recompute. `violation` rows are
-  rebuilt on first score; `timeslot` *is* exported because locked entries reference its
-  IDs.
+- Derived data is not exported where it is cheap to recompute. `violation` and
+  `violation_ref` rows are rebuilt on first score; `timeslot` *is* exported because locked
+  entries reference its IDs.
+- **`solve_run_unscheduled` IS exported**, and the distinction is worth stating because it looks
+  derived and is not. An unplaced cause is **historical generation information**: once the inputs
+  move, nothing can reconstruct which lessons a past run failed on or why. A violation can be
+  recomputed from the timetable and the rules; *"this run gave up on 7B Mathematics because every
+  slot clashed"* cannot be recomputed from anything.
+- So the scheduling group exports `timetable`, `timetable_entry`, `solve_run`,
+  `solve_run_unscheduled` and `timetable_evaluation`, and rebuilds `violation` and
+  `violation_ref`. [TIMETABLE-PERSISTENCE.md](TIMETABLE-PERSISTENCE.md) §7.
 
 ---
 

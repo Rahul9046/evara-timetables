@@ -493,7 +493,9 @@ Every commitment above is behind the `SolverEngine` trait and a JSON-serialisabl
 
 - `evara generate <fixture>` runs the engine headless for CI, benchmarking and regression
   baselines — shipped in M6. The command is spelled `generate`, with `solve` kept as an accepted
-  alias so the spelling this file used still works; TIMETABLE-CONSTRUCTION-SOLVER.md §16.
+  alias so the spelling this file used still works; TIMETABLE-CONSTRUCTION-SOLVER.md §16. Since
+  M7, `evara save` is the one that writes a timetable into a project, and `generate` still writes
+  nothing — [TIMETABLE-PERSISTENCE.md](TIMETABLE-PERSISTENCE.md) §10.
 - A different engine — including CP-SAT as an optional exact mode for a hard
   sub-problem such as elective-line construction, or Timefold if it ever becomes the
   right call — can be added without touching the database, the UI or the constraint

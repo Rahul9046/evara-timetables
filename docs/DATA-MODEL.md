@@ -225,7 +225,7 @@ extraction; references run downward in this table only.
 | **People** | teacher, teacher_school, teacher_campus, year_level, student, student_school_enrolment, student_group, student_group_member | Structure |
 | **Curriculum** | department, subject, teacher_qualification, teacher_department, course, class_section, class_teacher, class_group, class_enrolment, course_request | Structure, People |
 | **Activities** | activity, activity_teacher, activity_group, activity_room_candidate, activity_resource, line, line_member, activity_link, activity_link_member, availability | Structure, People, Curriculum |
-| **Scheduling** | timetable, timetable_entry, constraint_instance, constraint_ref, solve_run, violation | all of the above |
+| **Scheduling** | timetable, timetable_entry, timetable_evaluation, constraint_instance, constraint_ref, solve_run, solve_run_unscheduled, violation, violation_ref | all of the above |
 | **Operations** | absence, coverage | Scheduling |
 
 ---
@@ -303,7 +303,7 @@ including the nullable ones:
 | `timeslot.term_id` | `term_id` is part of the logical identity, so nulling it would silently rewrite **which slot a row is** — and could collide with an existing slot |
 | `calendar_day.cycle_day_id` | `NULL` means "no lessons that day", so `SET NULL` would quietly reinterpret mapped teaching dates as non-teaching ones. A change of meaning, not a detached reference |
 
-A timeslot is never cascade-deleted, by design. When `timetable_entry` arrives its
+A timeslot is never cascade-deleted, by design. Since `timetable_entry` arrived in `V17` its
 reference to `timeslot` will be `RESTRICT` too, so a deletion is refused rather than
 silently taking placements with it.
 
@@ -1012,21 +1012,35 @@ readable by the solver; the grid reports how many such rules exist rather than h
 
 ## 7. Scheduling
 
-```sql
-timetable (id, school_id, name, cycle_id, term_id NULL,
-           status TEXT CHECK (status IN ('DRAFT','PUBLISHED','ARCHIVED')),
-           based_on_timetable_id -> timetable NULL,  -- scenario / what-if lineage
-           score_hard INTEGER, score_medium INTEGER, score_soft INTEGER,
-           generated_at, solver_seed, solver_version,
+-- Built in V17. SIX details differ from the sketch this comment replaces, each recorded
+-- in adr/0042 and in the migration's own header: one row per OCCURRENCE rather than per
+-- occupied slot, no `school_id` (the cycle carries one), every child edge RESTRICT with the
+-- repository clearing it, `penalty` INTEGER, no `status` / `based_on_timetable_id` / score
+-- columns, and violations hanging off a `timetable_evaluation` so a revalidation cannot
+-- overwrite how a timetable was generated.
+--
+-- `timetable_entry_teacher` is NOT built: per-occurrence staffing overrides are a later
+-- phase (ADR 0029 §5), and a section's staffing is fixed input until then.
+timetable (id, cycle_id -> cycle ON DELETE RESTRICT,   -- the school is cycle.school_id
+           term_id -> term NULL ON DELETE RESTRICT,
+           name, generated_at,
+           indeterminate_student_pairs, unchecked_capacities,
+           shared_entities, unenforced_restrictions,   -- ADR 0032 rule 4, never omitted
            created_at, updated_at, rev)
+-- Two timetables for one scope may not share a name. A UNIQUE INDEX, because SQLite allows
+-- an expression only in an index, and COALESCE because a NULL term is the common case.
+CREATE UNIQUE INDEX idx_timetable_scope_name
+    ON timetable (cycle_id, COALESCE(term_id, ''), name);
 
-timetable_entry (id, timetable_id -> timetable ON DELETE CASCADE,
-                 activity_id -> activity, timeslot_id -> timeslot,
-                 room_id -> room NULL,
-                 is_locked BOOLEAN DEFAULT 0,       -- solver must preserve
-                 is_manual BOOLEAN DEFAULT 0,       -- placed by a human
-                 UNIQUE(timetable_id, activity_id, timeslot_id))
-timetable_entry_teacher (timetable_entry_id, teacher_id)  -- overrides activity_teacher
+timetable_entry (id, timetable_id -> timetable ON DELETE RESTRICT,
+                 activity_id -> activity ON DELETE RESTRICT,
+                 timeslot_id -> timeslot ON DELETE RESTRICT,   -- the START slot
+                 room_id -> room NULL ON DELETE RESTRICT,
+                 is_locked BOOLEAN DEFAULT 0,       -- solver must preserve. Phase 8's
+                 is_manual BOOLEAN DEFAULT 0,       -- placed by a human. Phase 8's
+                 created_at, updated_at, rev,
+                 UNIQUE(timetable_id, activity_id, timeslot_id),
+                 UNIQUE(timetable_id, activity_id))  -- one placement per occurrence
 
 -- Built in V16. Three details differ from the sketch this comment replaces, each
 -- recorded in adr/0040: `constraint_ref` is an entity with audit columns and change-log
@@ -1048,17 +1062,55 @@ constraint_ref (id, constraint_id -> constraint_instance ON DELETE RESTRICT,
                 created_at, updated_at, rev,
                 UNIQUE(constraint_id, role, entity_id))
 
-solve_run (id, timetable_id, status, engine, seed, settings TEXT,
-           started_at, finished_at,
-           best_hard, best_medium, best_soft, steps, log)
-violation (id, timetable_id, solve_run_id NULL, constraint_id NULL,
-           constraint_type, level, penalty REAL, message)
-violation_ref (violation_id, entity_kind, entity_id, role)
+-- Built in V17. `best_*` and `log` are not: a score belongs to the EVALUATION that
+-- produced it (one on `timetable` goes stale on the first manual edit), and nothing writes
+-- a log. `inputs_watermark` is new -- the change-log sequence number the problem was
+-- compiled at, which is what makes a stale save refusable.
+solve_run (id, timetable_id -> timetable ON DELETE RESTRICT,
+           engine, seed, status, termination, settings TEXT, inputs_watermark,
+           candidate_evaluations, candidates_rejected, placements_committed,
+           placements_withdrawn, construction_steps, passes,
+           started_at, finished_at, app_version,
+           created_at, updated_at, rev)
+solve_run_unscheduled (id, solve_run_id -> solve_run ON DELETE RESTRICT,
+                       activity_id -> activity, cause, diagnostic_code NULL,
+                       UNIQUE(solve_run_id, activity_id))
+-- One scoring. GENERATION is immutable provenance and belongs to a run; REVALIDATION is the
+-- replaceable current one. Two partial unique indexes enforce at most one of each.
+timetable_evaluation (id, timetable_id -> timetable ON DELETE RESTRICT,
+                      kind TEXT CHECK (kind IN ('GENERATION','REVALIDATION')),
+                      solve_run_id -> solve_run NULL, evaluated_at, inputs_watermark,
+                      score_hard, score_medium, score_soft,   -- negative-going
+                      placed_count, required_count,
+                      created_at, updated_at, rev)
+violation (id, evaluation_id -> timetable_evaluation ON DELETE RESTRICT,
+           constraint_type, level, constraint_id NULL, penalty INTEGER,
+           cycle_day_id NULL, starts_at NULL, ends_at NULL, detail)
+violation_ref (id, violation_id -> violation ON DELETE RESTRICT,
+               role, entity_kind, entity_id, ordinal)
 ```
 
-`UNIQUE(timetable_id, activity_id, timeslot_id)` rather than
-`(timetable_id, activity_id)` because a multi-period activity occupies several slots; the
-entry rows for one activity are written and moved as a unit.
+`UNIQUE(timetable_id, activity_id, timeslot_id)` is kept verbatim, and `V17` adds
+`UNIQUE(timetable_id, activity_id)` beside it. **The sketch's reason for the first key did not
+survive**: it said the key was wider *"because a multi-period activity occupies several slots"*,
+and `V17` stores **one row per occurrence** carrying the start slot, with the run derived by
+`evara_core::scheduling::span`. Rows 2…`d` are derived, and storing derived data makes a corrupt
+timetable representable — three rows for a two-period lesson — and makes a *partial* multi-period
+move representable in Phase 8, which is the state this sketch itself called impossible.
+[adr/0042](adr/0042-a-stored-timetable-is-a-version-and-a-save-refuses-stale-inputs.md) D1, and
+[TIMETABLE-PERSISTENCE.md](TIMETABLE-PERSISTENCE.md) §2.
+
+Three more things these tables do that the DDL cannot say:
+
+- **A save refuses inputs that moved.** Between generating a timetable and saving it, an
+  availability rule or a room's bookability may change — and **nothing referential breaks**, so
+  nothing else would catch it. `solve_run.inputs_watermark` is the change-log sequence number the
+  problem was compiled at, compared against the feed inside the writing transaction.
+- **A regeneration never overwrites.** Several timetables coexist for one `(cycle, term)`, and
+  that is the versioning. There is no `status`, because the published/archived lifecycle is not in
+  the MVP.
+- **A revalidation replaces only the current scoring.** The `GENERATION` evaluation is immutable
+  for the life of the timetable, so re-scoring cannot misrepresent how it was generated.
 
 ### Why constraints store parameters as JSON
 
@@ -1109,10 +1161,14 @@ separable, which is what substitution reporting and yard-duty rosters need.
 belongs to a table no migration defines, so none of it exists at `V15`.
 
 ```sql
--- PLANNED, with timetable_entry itself (§7). Not in any migration.
+-- BUILT in V17, as planned here.
 CREATE INDEX idx_entry_timetable_slot ON timetable_entry(timetable_id, timeslot_id);
 CREATE INDEX idx_entry_timetable_act  ON timetable_entry(timetable_id, activity_id);
 CREATE INDEX idx_entry_room           ON timetable_entry(timetable_id, room_id, timeslot_id);
+-- BUILT in V17, beside them.
+CREATE INDEX idx_timetable_cycle      ON timetable(cycle_id, term_id);
+CREATE INDEX idx_solve_run_timetable  ON solve_run(timetable_id);
+CREATE INDEX idx_violation_evaluation ON violation(evaluation_id, level);
 -- BUILT. V15's, for the RESTRICT scans and for the "what does this teacher teach?" and
 -- "which classes is this group in?" reads the People screens ask per row.
 CREATE INDEX idx_class_teacher_teacher ON class_teacher(teacher_id);
