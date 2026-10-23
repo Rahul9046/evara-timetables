@@ -506,5 +506,5 @@ Named assertions worth knowing:
 | **Opening a timetable compiles a problem every time** | the alternative is a cache whose lifetime nothing else in the crate has; a load is cheap | §6 |
 | **A scope switch re-projects** | same reason. 3.8 ms at the upper end | §9 |
 | **`Scheduling::load` wall-clock time is unmeasured** | M4's statement-count argument stands and is not a measurement | OPEN-DECISIONS R5 |
-| **No day-at-a-time default above ten days** | `DayStrip` exists and the threshold is defined; the grid renders the whole cycle, which is correct up to the sizes the schema permits | a display preference, not a rule |
+| **The day strip appears only above ten days** | below it the whole cycle fits, and a filter nobody needs is a control in the way | a display preference, not a rule |
 | **A generation session does not survive a restart** | it holds a compiled problem in memory, and the project's own state is what persists | by design |
