@@ -48,6 +48,7 @@ import {
   type RecentProject,
 } from "../ipc/project";
 import { SchoolSetup } from "./setup/SchoolSetup";
+import { TimetableArea } from "./timetables/TimetableArea";
 import { LogoMark, evaraBrand, resolveLogo, useSchoolLogo } from "./branding";
 import { Banner } from "./ui/Shell";
 
@@ -150,12 +151,72 @@ export function App() {
         onClose={() => run(closeProject)}
         onDismissError={() => setError(null)}
       />
-      {/* Keyed by project so switching projects resets every section's state rather
+      {/* Keyed by project so switching projects resets every area's state rather
           than showing the previous project's selections against the new one. */}
-      <main className="appMain">
-        <SchoolSetup key={project.projectId} />
-      </main>
+      <Workspace key={project.projectId} />
     </div>
+  );
+}
+
+/** The two areas an open campus file has, and which one is showing. */
+type Area = "setup" | "timetables";
+
+/**
+ * The open campus file's workspace: a rail of areas, and the selected school they share.
+ *
+ * ## Why the school lives here
+ *
+ * Both areas are about **one** school, and they have to be about the same one. A rail that
+ * switched area while quietly changing which school was in view would be worse than no rail:
+ * ADR 0023 scopes the interface to one school, and the whole value of that is that the answer
+ * is unambiguous. So the selection is held once, here, and handed to both.
+ *
+ * `SchoolSetup` keeps its own selection when mounted without one, which is what its own
+ * tests do and what Stages A–D were written against.
+ *
+ * ## Switching school remounts the areas
+ *
+ * `key={activeSchoolId}` on each area is the same stale-state guarantee `SchoolSetup`'s
+ * sections already had, extended to the second area: an open edit form, a pending delete, a
+ * generation session and an opened timetable are all *about* a school, and re-rendering with
+ * a new one would leave every piece of it standing.
+ */
+function Workspace() {
+  const [area, setArea] = useState<Area>("setup");
+  const [schoolId, setSchoolId] = useState<string | null>(null);
+
+  return (
+    <>
+      <nav className="workspaceRail" aria-label="Areas">
+        <button
+          type="button"
+          className={`railTab${area === "setup" ? " railTab--on" : ""}`}
+          aria-current={area === "setup" ? "page" : undefined}
+          onClick={() => setArea("setup")}
+        >
+          School Setup
+        </button>
+        <button
+          type="button"
+          className={`railTab${area === "timetables" ? " railTab--on" : ""}`}
+          aria-current={area === "timetables" ? "page" : undefined}
+          onClick={() => setArea("timetables")}
+        >
+          Timetables
+        </button>
+      </nav>
+      <main className="appMain">
+        {area === "setup" ? (
+          <SchoolSetup
+            key={`setup-${schoolId ?? "none"}`}
+            schoolId={schoolId}
+            onSchoolChange={setSchoolId}
+          />
+        ) : (
+          <TimetableArea key={`tt-${schoolId ?? "none"}`} schoolId={schoolId} />
+        )}
+      </main>
+    </>
   );
 }
 

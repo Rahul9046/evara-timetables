@@ -343,13 +343,40 @@ function SchoolPicker(props: {
   );
 }
 
-export function SchoolSetup() {
+export function SchoolSetup(props: {
+  /**
+   * The selected school, when the shell owns the selection.
+   *
+   * Since M8 there is a second area — Timetables — and both have to be about the *same*
+   * school: a rail that switched area while quietly changing which school was in view would
+   * be worse than no rail at all. So the shell may hoist the selection and hand it down,
+   * and this component then holds none of its own.
+   *
+   * Omitted, it keeps its own, which is what the Stage A–D tests exercise and what a
+   * stand-alone mount needs.
+   */
+  schoolId?: string | null;
+  /** Told when the user picks a different school, when the shell owns the selection. */
+  onSchoolChange?: (schoolId: string | null) => void;
+} = {}) {
   const load = useCallback(() => listSchools(), []);
   const { value: schools, error, reload } = useValue<School[]>(load);
   const [activeId, setActiveId] = useState<string>("schools");
-  // Which school every section below is about. Held here rather than in each section so
-  // there is exactly one answer at any moment.
-  const [activeSchoolId, setActiveSchoolId] = useState<string | null>(null);
+  // Which school every section below is about. One answer at any moment — held by the shell
+  // when it offers one, so the Timetables area cannot be about a different school.
+  const [ownSchoolId, setOwnSchoolId] = useState<string | null>(null);
+  const hoisted = props.schoolId !== undefined;
+  const activeSchoolId = hoisted ? (props.schoolId ?? null) : ownSchoolId;
+  const setActiveSchoolId = useCallback(
+    (next: string | null) => {
+      if (hoisted) props.onSchoolChange?.(next);
+      else setOwnSchoolId(next);
+    },
+    // `props.onSchoolChange` is read through `props` so a parent passing a fresh closure
+    // each render does not re-create this on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [hoisted],
+  );
 
   // The active school follows the project: it settles on the only school when there is
   // one, and survives a reload as long as that school still exists. A school that has
