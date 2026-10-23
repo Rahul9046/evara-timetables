@@ -63,6 +63,7 @@ use rusqlite::Connection;
 use uuid::Uuid;
 
 use crate::Database;
+use crate::change_log::{self, Watermark};
 use crate::error::{DbError, Result};
 
 pub use findings::PRODUCED as LOADER_DIAGNOSTICS;
@@ -196,6 +197,25 @@ pub struct Assembly {
     pub completeness: Completeness,
     /// What was worth counting.
     pub stats: AssemblyStats,
+    /// Where the project's history stood when this problem was compiled.
+    ///
+    /// # The freshness guarantee a save depends on
+    ///
+    /// A `SolveOutcome` is produced from this snapshot and saved some time later. Between the
+    /// two, anything in the project may have moved — an availability rule, a room's
+    /// bookability, a lesson's duration — and **none of it breaks a foreign key**, so nothing
+    /// else would refuse the save. The result would be a plausible, wrong timetable.
+    ///
+    /// So the writer compares this against the feed **inside the transaction that writes** and
+    /// refuses [`DbError::InputsChanged`](crate::DbError) if anything has moved. That is ADR
+    /// 0030's shape — the fingerprint is rebuilt where it is acted on — and it is not
+    /// check-then-act, because the comparison is the predicate for the write rather than a
+    /// question asked beforehand.
+    ///
+    /// Carried on the `Assembly` rather than on the `Problem`, for ADR 0037 §2's reason: a
+    /// `Problem` is *"everything a solve needs, and nothing else"*, and a solve needs no
+    /// watermark. The stages either side of it do.
+    pub watermark: Watermark,
 }
 
 impl Assembly {
@@ -367,6 +387,10 @@ fn assemble(conn: &Connection, selection: &SchedulingSelection) -> Result<Assemb
         rules: compiled.rules,
         findings,
         completeness,
+        // Read last, so it covers every row this load read. A change committed after this
+        // point is one the save must refuse, and a change committed before it is one the
+        // compiled problem already reflects.
+        watermark: change_log::watermark(conn)?,
     })
 }
 
@@ -437,3 +461,9 @@ fn corrupt(column: &'static str, value: String) -> DbError {
 
 #[cfg(test)]
 mod tests;
+
+// The database-backed school builder M4 wrote for its loader tests. M7's persistence tests
+// need the same thing -- a real project with a grid, lessons and a solvable problem -- and a
+// second builder would be a second place for a fixture to drift from the schema.
+#[cfg(test)]
+pub(crate) use tests::seed;

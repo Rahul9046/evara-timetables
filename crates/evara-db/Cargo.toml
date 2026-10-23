@@ -31,6 +31,17 @@ ts-rs = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# M7's persistence tests need a *real* `SolveOutcome` to save, and the only honest way to get
+# one is to run the engine that produces them. Hand-building one would be a fixture that could
+# drift from what the solver actually returns, which is the drift every test in this crate is
+# written to avoid.
+#
+# A *library* dependency this way round is not allowed -- `evara-db` is the only crate that
+# knows SQL and depends on `evara-core` alone (ARCHITECTURE.md Sect. 3 rule 4) -- but a test may
+# run the other crate rather than imitate it. That is exactly the argument the `evara-import`
+# dev-dependency below records, and neither crate depends on this one, so there is no cycle.
+evara-constraints = { workspace = true }
+evara-solver = { workspace = true }
 # For one test only: `tests_import::every_required_field_matches_the_template` reads the
 # template's own field list so the copy in `import::evara_import_fields` cannot drift from
 # it. A *library* dependency this way round is not allowed -- `evara-import` is the parser

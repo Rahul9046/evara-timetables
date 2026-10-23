@@ -63,6 +63,7 @@ pub mod people;
 pub(crate) mod row;
 pub mod structure;
 pub mod time_model;
+pub mod timetables;
 
 /// Identity and audit values for a row.
 #[derive(Debug, Clone, PartialEq, Eq)]

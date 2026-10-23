@@ -279,6 +279,20 @@ disagree about whether a placement is legal, the product is broken.
   enough, no candidate room, no resolved bell schedule, availability emptying the range — may be
   phrased as impossibility. A generated timetable is described as having **no confirmed clash
   within the school solved**, with the unverified counts beside it; never as conflict-free.
+- **A stored timetable is a version, and a save refuses inputs that moved.** Saving always
+  **inserts**: several timetables coexist for one `(cycle, term)` and that is the versioning, so a
+  regeneration never overwrites and replacement is a save followed by an explicit delete. One
+  `timetable_entry` row is **one occurrence**, carrying the *start* slot — rows 2…`d` are derived
+  by `evara_core::scheduling::span`, and storing them would make a corrupt timetable and a partial
+  multi-period move representable. A save is refused when any scheduling input moved since the
+  problem was compiled, compared **inside the writing transaction** against the change-log
+  watermark: nothing referential breaks when an availability rule changes, so nothing else would
+  catch it, and the result would be a plausible wrong timetable. Never compare a watermark in the
+  interface — ADR 0030's rule holds here too. A `GENERATION` scoring is **immutable**; a
+  revalidation replaces only the current one, so re-scoring can never misrepresent how a timetable
+  was generated. `evara generate` writes nothing and `evara save` is the command that writes.
+  [adr/0042](docs/adr/0042-a-stored-timetable-is-a-version-and-a-save-refuses-stale-inputs.md),
+  [TIMETABLE-PERSISTENCE.md](docs/TIMETABLE-PERSISTENCE.md).
 - **Scores are integers, and penalties are negative-going.** Three levels, compared
   lexicographically. A weight is a non-negative magnitude; an evaluator negates it **once**, when
   it builds a `Violation`, so `Score::PERFECT` is the top of the order and `Ord` is the comparison
@@ -335,5 +349,8 @@ that into a red build rather than a wrong timetable.
 | `cargo run -p evara-cli -- evaluate tiny` | Score an arrangement against the constraint rules; exits 1 on a hard violation |
 | `cargo run -p evara-cli -- generate tiny --seed 42` | **Construct** a timetable over a fixture; exits 1 if partial, 3 if refused |
 | `cargo run -p evara-cli -- generate --project <path> --school <id> --cycle <id>` | Construct a timetable for a **real project**, read-only — migrates nothing, writes nothing, persists no timetable |
+| `cargo run -p evara-cli -- save --project <path> --school <id> --cycle <id>` | Generate **and save** a timetable. The one command that writes one; never overwrites an existing timetable |
+| `cargo run -p evara-cli -- save --project <path> --revalidate <id>` | Re-score a stored timetable and replace its current findings, leaving the generation record alone |
+| `cargo run -p evara-cli -- evaluate --project <path> --timetable <id>` | Score a **stored** timetable against the inputs as they now stand; writes nothing |
 | `cargo run -p evara-cli -- validate --project <path> --list` | What schools, cycles and terms a `.evaraproj` holds, with their identifiers |
 | `cargo run -p evara-cli -- validate --project <path> --school <id> --cycle <id>` | Pre-solve validation of a **real project**, read-only — migrates nothing, writes nothing |

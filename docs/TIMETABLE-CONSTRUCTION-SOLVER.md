@@ -52,7 +52,9 @@ So this engine **constructs** a timetable and does not improve one. That distinc
 in the result rather than implied: a `Termination` says why the constructor stopped, and an
 exhausted construction is never reported as a proof that no better timetable exists.
 
-Nothing is persisted. `timetable` and `timetable_entry` arrive in M7 — §16.
+Nothing in **this crate** is persisted, and `evara generate` still writes nothing at all. M7
+added the persistence beside it: `evara save` is the command that writes, and
+[TIMETABLE-PERSISTENCE.md](TIMETABLE-PERSISTENCE.md) is what it stores.
 
 ---
 
@@ -672,6 +674,7 @@ is still planned and is where they will live.
 | **No progress events, no background thread** | The traits exist (`ProgressSink`, `Cancel`) and nothing in M6 drives them from a UI | `SOLVER.md` §5; the orchestration milestone |
 | **No committed score baselines** | `evara bench` is still planned | R2 |
 | **The upper-end measurement is not a catalogue fixture** | Widening a documented 24-fixture catalogue is M2's surface. It is built in the test that measures it | §14 |
+| ~~**Nothing is persisted**~~ | ✅ **Resolved in M7.** `evara save` writes a timetable, its run and its findings; `evara generate` is unchanged and still writes nothing | [TIMETABLE-PERSISTENCE.md](TIMETABLE-PERSISTENCE.md) |
 
 ---
 
@@ -746,6 +749,10 @@ Four signature changes, each because a type now exists or a decision has been ma
 
 ## 17. The M7 persistence integration contract
 
+> **Discharged.** M7 is built; [TIMETABLE-PERSISTENCE.md](TIMETABLE-PERSISTENCE.md) is what it
+> does and [ADR 0042](adr/0042-a-stored-timetable-is-a-version-and-a-save-refuses-stale-inputs.md)
+> is why. Each item below records what landed, and item 1 records a mistake this file made.
+
 What M7 may rely on, and what it must supply.
 
 **Supplied by M6.**
@@ -770,22 +777,41 @@ What M7 may rely on, and what it must supply.
 **Owed by M7.**
 
 1. **The solution writer.** `Assignment` → `timetable_entry`, transactionally, in one write.
-   `timetable_entry` is unique on `(timetable_id, activity_id, timeslot_id)` and a multi-period
-   occurrence occupies several slots, so a writer decides whether it writes one row per
-   occurrence or one per slot — a decision this milestone deliberately does not make.
-2. **`solve_run`**, with `seed`, the statistics, the termination and the status. The vocabulary is
-   already `evara-core`'s; what is missing is the migration.
+   ✅ **Built in M7**, as `evara_db::Timetables::save_generated`.
+
+   > **This item was wrong, and the correction is worth keeping.** It said the per-occurrence
+   > versus per-slot choice was *"a decision this milestone deliberately does not make"*. Two
+   > records had already asserted an answer — `DATA-MODEL.md` §7 and ADR 0029 §2 both explain
+   > the key as existing *"because a multi-period activity occupies several slots"* — so the
+   > decision had been made and M6 simply had not looked. M7's review found it.
+   >
+   > The answer went the **other way** after all: **one row per occurrence**, carrying the start
+   > slot, because rows 2…`d` are derived and storing them makes a corrupt timetable
+   > representable. [ADR 0042](adr/0042-a-stored-timetable-is-a-version-and-a-save-refuses-stale-inputs.md)
+   > D1 is the record, and it keeps the key verbatim while declining its stated reason.
+2. **`solve_run`**, with `seed`, the statistics, the termination and the status. ✅ **Built in
+   M7** — `V17`, with the change-log watermark beside them so a stored run records which snapshot
+   of the inputs it was built from.
 3. **Persisted violations**, so a stored timetable's hard-violation report survives a restart
-   without re-evaluating. `Violation` is already structured and serialisable.
-4. **The unverified counts on the stored timetable**, per ADR 0032 rule 4. A timetable row that
-   dropped them would let a later screen describe a timetable as clean when four holes were
-   disclosed at generation.
-5. **Whatever `UnscheduledActivity` becomes when it is stored.** It carries a structured cause and
-   an engine-authored sentence; a stored form should keep the cause and may well re-render the
-   sentence, because a cause survives a wording change and a string does not.
-6. **A decision about re-generation.** Generation is read-only in M6 and M7 makes it a write. The
-   revision discipline (`CLAUDE.md`, ADR 0027) applies to replacing a stored timetable, and
-   whether a second generation overwrites, versions or refuses is M7's to decide and record.
+   without re-evaluating. ✅ **Built in M7**, with one thing this item did not anticipate: they
+   hang off a `timetable_evaluation` rather than off the timetable, so *what the generator found*
+   and *what is wrong now* are different rows and a revalidation cannot overwrite the first.
+   [ADR 0042](adr/0042-a-stored-timetable-is-a-version-and-a-save-refuses-stale-inputs.md) C3.
+4. **The unverified counts on the stored timetable**, per ADR 0032 rule 4. ✅ **Built in M7** —
+   four `INTEGER NOT NULL` columns, named exactly as `UnverifiedCounts`' fields.
+5. **Whatever `UnscheduledActivity` becomes when it is stored.** ✅ **Built in M7**, and the
+   recommendation was followed: `solve_run_unscheduled` stores the **cause** and the pre-solve
+   diagnostic code, and **not** the sentence. M7 added one thing this item did not: those rows are
+   *historical and not derived*, so Phase 9 exports them — nothing can reconstruct which lessons a
+   past run failed on once the inputs move.
+6. **A decision about re-generation.** ✅ **Decided in M7: it versions.** A save always inserts,
+   several timetables coexist for one `(cycle, term)`, and replacement is a save followed by an
+   explicit delete. `evara generate` **stays read-only** — writing lives in `evara save`, so the
+   guarantee is one word the user typed rather than a flag they have to notice.
+
+   M7 also added a protection this item did not foresee: a save is **refused** if any scheduling
+   input moved since the problem was compiled. Nothing referential breaks when that happens, so
+   nothing else would catch it. [TIMETABLE-PERSISTENCE.md](TIMETABLE-PERSISTENCE.md) §4.
 
 Unchanged by M6 and not to be relitigated: generation is scoped to one `(school, cycle, term)`;
 a clash is overlapping minutes and never a `timeslot_id`; `activity-scheduled` is MEDIUM; the

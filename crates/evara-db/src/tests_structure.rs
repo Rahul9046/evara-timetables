@@ -24,7 +24,29 @@ use crate::{Database, DbError, PROJECT_EXTENSION, change_log};
 const APP_VERSION: &str = "0.1.0-test";
 
 /// Tables that are infrastructure rather than school data, and so carry no change log.
-const NON_ENTITY_TABLES: &[&str] = &["app_meta", "change_log", "refinery_schema_history"];
+/// Tables that genuinely hold no school data, so the two coverage tests below skip them.
+///
+/// The first three are infrastructure. The last three are `V17`'s derived findings:
+///
+/// - `violation` and `violation_ref` are what an evaluation *found*. `PROJECT-FORMAT.md` §3
+///   already calls them "derived data … rebuilt on first score", and re-running `evaluate`
+///   reproduces them exactly, so there is no history for a change feed to carry.
+/// - `solve_run_unscheduled` is immutable with its run: it is written once, never updated, and
+///   removed only with the run itself. It is **not** derived — Phase 9 exports it, because
+///   nothing can reconstruct which lessons a past run failed on once the inputs move — but it
+///   has no independent lifecycle for the feed to track, and it carries no `rev` for a
+///   concurrent writer to race on.
+///
+/// Adding a table here is a decision, not a shortcut: the alternative is `TRACKED_TABLES`, and
+/// the test's own failure message offers this list only "if it genuinely holds no school data".
+const NON_ENTITY_TABLES: &[&str] = &[
+    "app_meta",
+    "change_log",
+    "refinery_schema_history",
+    "violation",
+    "violation_ref",
+    "solve_run_unscheduled",
+];
 
 /// An open project in its own temporary directory.
 struct Project {

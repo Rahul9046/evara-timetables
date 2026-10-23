@@ -24,7 +24,7 @@
 //! a gap in the fixture: until M5 exists, Evara does not know whether any two of a school's
 //! groups share a student, and M3's aggregate warning is where it says so.
 
-mod seed;
+pub(crate) mod seed;
 
 use evara_core::scheduling::{
     BellScheduleResolution, DiagnosticCode, ExpectedAttendance, NoBellScheduleCause, Severity,

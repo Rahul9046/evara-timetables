@@ -21,6 +21,18 @@
 //! `[first period's start, last period's end)` — and this module calls it rather than
 //! computing a hull of its own.
 //!
+//! # The resolver moved down in M7, and this module calls it
+//!
+//! `Occupancy::resolve` used to live here. M7 promoted it to
+//! [`evara_core::scheduling::span`], because two new callers need the same answer and neither
+//! can reach this crate: `evara-db`'s reader, turning stored `timetable_entry` rows back into an
+//! arrangement, and `evara-report`'s grid, which renders a multi-period lesson as a span. Both
+//! depend on `evara-core` only.
+//!
+//! So [`Placed`] is now [`ResolvedSpan`] and [`resolve_activity_span`] is the one
+//! implementation. Nothing about the answer changed — the move is asserted by the evaluators'
+//! own tests, which were written against the behaviour and did not need editing.
+//!
 //! # Why the pair sweep is not a nested loop over everything
 //!
 //! A school with 500 occurrences has 124 750 unordered pairs, and almost none of them share a
@@ -43,46 +55,16 @@
 //! `taught_by` and `booked_into` were scans of the whole timetable and are now lookups.
 
 use evara_core::scheduling::{
-    ActivityIx, Assignment, CycleDayIx, Placement, PlacementSpan, Problem, RoomIx, SectionFact,
-    SectionIx, TeacherIx, TimeInterval, TimeslotIx,
+    ActivityIx, Assignment, CycleDayIx, Placement, Problem, ResolvedSpan, RoomIx, SectionFact,
+    TeacherIx, resolve_activity_span,
 };
 
-/// Why an occurrence's span is not what its duration asked for.
-///
-/// Carried rather than acted on: the span is still built, and the rule that cares reports it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) struct SpanDefect {
-    /// How many slots the occurrence wanted.
-    pub(crate) wanted: usize,
-    /// How many ordinal-consecutive slots were available from where it was placed.
-    pub(crate) got: usize,
-    /// Whether a non-teaching period falls inside the run, break included.
-    pub(crate) crosses_non_teaching: bool,
-    /// Whether the starting slot itself is not a teaching period.
-    pub(crate) starts_outside_teaching: bool,
-    /// Whether the starting slot belongs to a schedule the section did not resolve to.
-    pub(crate) wrong_bell_schedule: bool,
-}
-
-impl SpanDefect {
-    /// Whether the run is as long as the duration asked for.
-    pub(crate) const fn is_complete(self) -> bool {
-        self.got >= self.wanted
-    }
-}
-
 /// One placed occurrence, resolved.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Placed {
-    /// Which occurrence.
-    pub(crate) activity: ActivityIx,
-    /// The section it belongs to.
-    pub(crate) section: SectionIx,
-    /// What it occupies.
-    pub(crate) span: PlacementSpan,
-    /// What is wrong with the run, if anything.
-    pub(crate) defect: SpanDefect,
-}
+///
+/// [`ResolvedSpan`] under its original name. The alias is kept because eight evaluators and
+/// their tests name it, and because *"what this crate calls a placed occurrence"* is a useful
+/// thing for this crate to be able to say.
+pub(crate) type Placed = ResolvedSpan;
 
 /// Which way a placement could not be read against the problem.
 ///
@@ -215,19 +197,13 @@ impl<'p> Occupancy<'p> {
     /// Pure: it changes nothing, so a caller can decide between recording the failure and
     /// refusing the write. The one call site of [`resolve`].
     fn readable(&self, activity: ActivityIx, placement: Placement) -> Result<Placed, Unreadable> {
-        let fact = self
-            .problem
-            .activities
-            .get(activity.get())
-            .ok_or(Unreadable::UnknownActivity)?;
-        resolve(
-            self.problem,
-            activity,
-            fact.section,
-            fact.duration.as_usize(),
-            placement,
-        )
-        .ok_or(Unreadable::DanglingTimeslot)
+        // The activity has to exist *before* the resolver is asked, because the two failures
+        // are different remedies: an unknown activity means the assignment describes another
+        // problem, and a dangling timeslot means this grid does not hold the slot named.
+        if self.problem.activities.get(activity.get()).is_none() {
+            return Err(Unreadable::UnknownActivity);
+        }
+        resolve_activity_span(self.problem, activity, placement).ok_or(Unreadable::DanglingTimeslot)
     }
 
     /// Records a resolved occurrence and files it in every index.
@@ -466,66 +442,6 @@ impl<'p> Occupancy<'p> {
     pub(crate) fn on_day(&self, day: CycleDayIx) -> &[ActivityIx] {
         self.by_day.get(day.get()).map_or(&[], Vec::as_slice)
     }
-}
-
-/// Resolves one placement into the span it occupies.
-///
-/// Returns `None` only when the starting timeslot is not in the problem at all, which is an
-/// invalid reference. Everything else — a short run, a break in the middle, the wrong
-/// schedule — produces a span with a [`SpanDefect`] for a rule to report.
-pub(crate) fn resolve(
-    problem: &Problem,
-    activity: ActivityIx,
-    section: SectionIx,
-    wanted: usize,
-    placement: Placement,
-) -> Option<Placed> {
-    let start = problem.timeslots.get(placement.timeslot.get())?;
-    let day = start.cycle_day;
-
-    // The run is taken from the schedule the *slot* belongs to, not the one the section
-    // resolved to. Those can differ, and when they do that is the defect — resolving against
-    // the section's schedule instead would silently relocate the lesson.
-    let ordered: Vec<TimeslotIx> = problem.slots_of(start.bell_schedule, day);
-    let from = ordered
-        .iter()
-        .position(|slot| *slot == placement.timeslot)
-        .unwrap_or(0);
-
-    let run: Vec<TimeslotIx> = ordered.into_iter().skip(from).take(wanted).collect();
-    let intervals: Vec<TimeInterval> = run
-        .iter()
-        .filter_map(|slot| problem.timeslots.get(slot.get()).map(|s| s.interval))
-        .collect();
-
-    let span = PlacementSpan::over(day, run.clone(), &intervals, placement.room)?;
-
-    let section_schedule = problem
-        .sections
-        .get(section.get())
-        .and_then(|s| s.bell_schedule.schedule());
-    let defect = SpanDefect {
-        wanted,
-        got: run.len(),
-        // A non-teaching period *inside* the run, which is what breaks a contiguous run.
-        // ADR 0033 §5: "a run is broken by any non-teaching period between two teaching ones".
-        crosses_non_teaching: run.iter().skip(1).any(|slot| {
-            problem
-                .timeslots
-                .get(slot.get())
-                .is_some_and(|s| !s.is_teaching)
-        }),
-        starts_outside_teaching: !start.is_teaching,
-        wrong_bell_schedule: section_schedule
-            .is_some_and(|resolved| resolved != start.bell_schedule),
-    };
-
-    Some(Placed {
-        activity,
-        section,
-        span,
-        defect,
-    })
 }
 
 /// The cycle day a span runs on, for a message that has to name it.

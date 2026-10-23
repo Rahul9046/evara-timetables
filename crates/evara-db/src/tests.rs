@@ -156,8 +156,9 @@ fn migration_is_idempotent_across_reopens() {
 ///
 /// Phase 1C added the static half of the Structure group, Phase 1D the time half, and
 /// Phase 2 the People group, availability, shared identities, the curriculum prerequisites
-/// in Stage B and the lessons that reference them in Stage C. Everything past it —
-/// constraints, timetables, operations — belongs to a later phase and must not arrive by
+/// in Stage B and the lessons that reference them in Stage C. M5 added the constraint
+/// tables and M7 the timetable ones. Everything past them — `absence`, `coverage`, the
+/// per-occurrence overrides, `line` — belongs to a later phase and must not arrive by
 /// accident alongside something else.
 #[test]
 fn the_schema_contains_exactly_the_phases_shipped_so_far() {
@@ -220,6 +221,9 @@ fn the_schema_contains_exactly_the_phases_shipped_so_far() {
             "school".to_owned(),
             // V8 — the school's own logo.
             "school_logo".to_owned(),
+            // V17 — how a timetable came to be, and what it could not place.
+            "solve_run".to_owned(),
+            "solve_run_unscheduled".to_owned(),
             // V10 — the People group.
             "student".to_owned(),
             "student_group".to_owned(),
@@ -236,6 +240,13 @@ fn the_schema_contains_exactly_the_phases_shipped_so_far() {
             "teacher_school".to_owned(),
             "term".to_owned(),
             "timeslot".to_owned(),
+            // V17 — timetable persistence: a generated timetable, how it came to be, and
+            // what an evaluation of it found.
+            "timetable".to_owned(),
+            "timetable_entry".to_owned(),
+            "timetable_evaluation".to_owned(),
+            "violation".to_owned(),
+            "violation_ref".to_owned(),
             "year_level".to_owned(),
         ],
         "the schema has drifted from the phases actually shipped"
@@ -265,10 +276,9 @@ fn the_schema_contains_exactly_the_phases_shipped_so_far() {
         // Phase 5 onwards — scheduling and operations. `constraint_instance` and
         // `constraint_ref` left this list in `V16`: M5 lands them with the registry, so the
         // `type_key`s and JSON Schemas they store are real ones rather than a promise.
-        "timetable",
-        "timetable_entry",
-        "solve_run",
-        "violation",
+        // `DATA-MODEL.md` §8's daily-operations group. The published timetable stays
+        // immutable and day-to-day reality is a layer of dated overrides on top of it, which
+        // is a later phase's work — M7 built the timetable, not the overrides.
         "absence",
         "coverage",
     ] {

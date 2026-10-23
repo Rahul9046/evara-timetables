@@ -25,6 +25,7 @@
 mod evaluate;
 mod fixture;
 mod generate;
+mod save;
 mod validate;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -61,6 +62,10 @@ const IMPLEMENTED: &[(&str, &str)] = &[
     (
         "generate",
         "construct a timetable and report what it could not place (writes nothing)",
+    ),
+    (
+        "save",
+        "generate a timetable and SAVE it into a project, or re-score a stored one",
     ),
 ];
 
@@ -119,6 +124,18 @@ fn main() -> std::process::ExitCode {
             Ok(generate::Outcome::Refused) => std::process::ExitCode::from(3),
             Err(message) => {
                 eprintln!("evara generate: {message}");
+                std::process::ExitCode::from(2)
+            }
+        },
+        // The one command that writes a timetable. Four codes, and the middle one matters: a
+        // partial timetable is saved and is not a failure, while "nothing to save" is the
+        // command working and there being no timetable to store.
+        Some("save") => match save::run(&args[1..]) {
+            Ok(save::Outcome::Saved) => std::process::ExitCode::SUCCESS,
+            Ok(save::Outcome::SavedPartial) => std::process::ExitCode::from(1),
+            Ok(save::Outcome::NothingToSave) => std::process::ExitCode::from(3),
+            Err(message) => {
+                eprintln!("evara save: {message}");
                 std::process::ExitCode::from(2)
             }
         },

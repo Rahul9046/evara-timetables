@@ -648,18 +648,21 @@ tiny` scores an arrangement and explains every violation, still with no solver i
   `.evaraproj`, through a genuinely read-only open that migrates nothing. Twelve
   database-backed fixtures, 29 statements per load independent of school size, no migration.
   See [SCHEDULING-PROBLEM-ASSEMBLY.md](SCHEDULING-PROBLEM-ASSEMBLY.md).
-- Solution writer: `Assignment` → `timetable_entry`, transactionally. **Not built** — it is
-  M7's. A solver now exists, so what it needs is a migration;
-  [TIMETABLE-CONSTRUCTION-SOLVER.md](TIMETABLE-CONSTRUCTION-SOLVER.md) §17 is the contract.
+- ✅ Solution writer: `Assignment` → `timetable_entry`, transactionally. **Done in M7**, as
+  `evara_db::Timetables::save_generated` — `V17`, one transaction, and a save that refuses inputs
+  which moved since the problem was compiled.
+  [TIMETABLE-PERSISTENCE.md](TIMETABLE-PERSISTENCE.md).
 - ✅ Construction heuristic (most-constrained-first, locks placed first): **done in M6**.
 - Late Acceptance Hill Climbing with the move set from [SOLVER.md](SOLVER.md) §5, seeded
   RNG, termination config, cancel token. **Partly done:** the seeded RNG, the termination
   configuration and the cancel token are M6's and are what the construction already runs on; the
   local search itself is **not built**, because `SCHEDULING-ARCHITECTURE-DECISIONS.md` §6 keeps it
   out of the MVP.
-- Background thread, `solver://progress` events, `solve_run` persistence. **Not built.** The two
-  traits the events need (`ProgressSink`, `Cancel`) exist and the construction drives them;
-  nothing runs a solve off the main thread and nothing persists a run.
+- Background thread, `solver://progress` events, `solve_run` persistence. **Partly done:**
+  `solve_run` persistence is M7's and exists, with the seed, the six counters, the termination and
+  the input watermark. The two traits the events need (`ProgressSink`, `Cancel`) exist and the
+  construction drives them; nothing runs a solve off the main thread, which is the orchestration
+  milestone's.
 - ✅ `evara-cli solve`: **done in M6**, as `evara generate`, with `solve` kept as an accepted
   alias. `bench` and the committed per-fixture score baselines are **still to do** — M6's figures
   are in prose, which a reader can check and CI cannot (R2).
@@ -667,6 +670,29 @@ tiny` scores an arrangement and explains every violation, still with no solver i
   report on infeasibility. **Not built**, and nothing in the interface calls the solver.
 
 **Closes M1-9.**
+
+**✅ Timetable persistence is done (M7).** `V17` adds seven tables; `evara save` writes a
+timetable, its run and its findings; `evara evaluate --project --timetable <id>` scores a stored
+one read-only. Four things worth knowing, and
+[TIMETABLE-PERSISTENCE.md](TIMETABLE-PERSISTENCE.md) is the detail:
+
+- **A regeneration never overwrites.** Several timetables coexist for one `(cycle, term)` and that
+  is the versioning; there is no `status`, because §6's published/archived lifecycle is not in the
+  MVP.
+- **A save refuses stale inputs.** Nothing referential breaks when an availability rule moves
+  after generation, so nothing else would catch it; the change-log watermark is compared inside
+  the writing transaction.
+- **History is not overwritten.** A `GENERATION` scoring is immutable; a revalidation replaces
+  only the current one.
+- **`evara generate` is still read-only**, with its byte-comparison test unchanged. Writing lives
+  in `evara save`.
+
+`DATA-MODEL.md` §7's sketch is corrected in six places, each recorded in
+[adr/0042](adr/0042-a-stored-timetable-is-a-version-and-a-save-refuses-stale-inputs.md) and in the
+migration's own header.
+
+**Still to do in this phase:** `evara bench` with committed score baselines, the background thread
+and `solver://progress`, and the Generate screen.
 
 **✅ The construction solver is done (M6).** `evara-solver` holds `SolverEngine`,
 `ConstructionSolver` and the `generate` orchestration; `evara generate <fixture>` and

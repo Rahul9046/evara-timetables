@@ -380,10 +380,19 @@ is the sharpest check in the suite: M2 built those arrangements against ADRs 003
 verified them independently, so the eight evaluators finding nothing hard in them is two
 readings of the same records agreeing.
 
-A project has no stored timetable to score — `timetable` arrives in M7 — so the empty
-arrangement is evaluated and the useful half of the report is above the findings: the rules
-this school will be judged by, its own rows compiled on top of the mandatory eight. The file is
-opened read-only, by the same route `evara validate --project` takes.
+A project **can** be scored against a stored timetable since M7:
+`evara evaluate --project <p> --timetable <id>` reads the entries back into an arrangement and
+runs the eight rules over it, which is how a school finds out whether a timetable generated last
+week is still usable — an availability rule added over a placed slot breaks nothing referential
+and shows up nowhere else.
+
+With `--school` and `--cycle` and no `--timetable`, the **empty** arrangement is evaluated and the
+useful half of the report is above the findings: the rules this school will be judged by, its own
+rows compiled on top of the mandatory eight.
+
+Either way the file is opened read-only, by the same route `evara validate --project` takes.
+Storing the scoring is `evara save --revalidate`, which is the command named for writing —
+[TIMETABLE-PERSISTENCE.md](TIMETABLE-PERSISTENCE.md) §6.
 
 Exit codes: `0` nothing hard broken, `1` a hard rule broken, `2` the command failed or the
 configuration could not be compiled. A medium violation leaves it at `0`, because an unplaced
@@ -402,7 +411,7 @@ apart would undo §2's distinction at the last step.
 | `resource-clash`, `same-period`, the workload ceilings | CONSTRAINTS.md §3's `M1` set beyond the first nine |
 | ~~`IncrementalScorer` and the property test between the two scorers~~ | ✅ **Done in M6** — §4b, and [ADR 0041](adr/0041-the-incremental-scorer-lives-with-the-evaluators.md) |
 | a configuration screen | Phase 4's UI half. The repository and the schemas exist; nothing in the interface writes a row yet |
-| persisted violations | M7, with `timetable` and `violation` |
+| ~~persisted violations~~ | ✅ **Done in M7.** `violation` and `violation_ref` hang off a `timetable_evaluation`, so what the generator found and what is wrong now are different rows — [ADR 0042](adr/0042-a-stored-timetable-is-a-version-and-a-save-refuses-stale-inputs.md) C3 |
 
 A clean report from this engine means: *of the eight rules implemented, none is broken by the
 arrangement you gave me* — or, when `evara-solver` built the arrangement, *none is broken by the
