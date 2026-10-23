@@ -3,6 +3,12 @@
 How timetable generation, scoring, validation and repair work in a local-only desktop
 application.
 
+> **This file is the design. The shipped engine is
+> [TIMETABLE-CONSTRUCTION-SOLVER.md](TIMETABLE-CONSTRUCTION-SOLVER.md).** M6 built §5's Phase A
+> and §4's incremental scorer; §5's Phases B and C, §6's `validate_move` and §7's repair are not
+> built. Where this file and that one disagree about a detail, that one is the record of what the
+> code does, and its §16 lists every departure with its reason.
+
 ---
 
 ## 1. The question the desktop requirement forces
@@ -237,13 +243,31 @@ asserts `IncrementalScorer == ReferenceScorer` after every single one. The incre
 path is only trusted because the cheap path keeps proving it right. This test runs in CI
 and is the gate on any new constraint.
 
-> **M5 shipped the reference half and not the incremental one.** `evaluate` is
-> `ReferenceScorer`; `evaluate_placement` runs only the rules whose `affected()` set contains
-> the occurrence that moved and then evaluates each **in full**, holding no cache and no
-> index. That is incremental-*friendly*, not incremental, and the stopping point is
-> deliberate: the thing a delta is checked against has to exist first. `IncrementalScorer`
-> and the property test between them are M6's, and this paragraph is the gate they will be
-> held to.
+> **M5 shipped the reference half; M6 shipped the other.** `evaluate` is `ReferenceScorer`;
+> `evaluate_placement` runs only the rules whose `affected()` set contains the occurrence that
+> moved and then evaluates each **in full**, holding no cache and no index — incremental-*friendly*,
+> not incremental.
+>
+> **`IncrementalScorer` and the property test both landed in M6**, which is the gate this
+> paragraph set and `OPEN-DECISIONS.md` R1 stated as a shipping rule. Two things about it differ
+> from the sketch above, and both are
+> [ADR 0041](adr/0041-the-incremental-scorer-lives-with-the-evaluators.md):
+>
+> - **It lives in `evara-constraints`**, beside the evaluators it must agree with, not in
+>   `evara-solver`. It needs `Occupancy`'s span resolver and each rule's own narrowed query, and
+>   reaching those from another crate would mean either a second copy of the predicates — the
+>   failure `CLAUDE.md` §2 exists to prevent — or a public API wide enough to make that copy easy
+>   for somebody else to write later.
+> - **There is no hand-written delta**, which is what makes the warning above not apply to it.
+>   Every violation the eight rules produce names at most two occurrences, so
+>   `score(after) − score(before) = involving(after, a) − involving(before, a)` is an identity;
+>   the scorer applies a tentative placement, asks each rule what it now finds about that
+>   occurrence, and puts the previous state back. `evaluate_involving` is a sixth trait member and
+>   shares its body with each rule's full sweep, so no predicate is stated twice.
+>
+> The property test is `evara-constraints`' `differential` module: the narrowed query against the
+> full sweep per rule and per fixture, a mutated occupancy against a rebuilt one, and the running
+> score against the reference score **after every single operation** of seeded random sequences.
 
 ---
 
@@ -251,14 +275,35 @@ and is the gate on any new constraint.
 
 Phased, in the usual construct-then-improve shape.
 
-**Phase A — Construction.** Greedy insertion, hardest first. Activities are ordered by
-descending *constrainedness*: pinned, then long duration, then few feasible
+**Phase A — Construction.** ✅ **Built in M6.** Greedy insertion, hardest first. Activities are
+ordered by descending *constrainedness*: pinned, then long duration, then few feasible
 (timeslot, room) pairs, then high conflict degree (shares teachers/groups with many
 others). Each is placed in its cheapest feasible slot. Locked activities are placed
 first and never moved. Fast, deterministic, and produces a feasible or near-feasible
 starting point for most schools.
 
-**Phase B — Local search.** Late Acceptance Hill Climbing. Chosen over simulated
+Three notes on what shipped, and
+[TIMETABLE-CONSTRUCTION-SOLVER.md](TIMETABLE-CONSTRUCTION-SOLVER.md) §3 is the detail.
+
+The order is computed **once**, from the empty timetable, and the occurrences that fail are
+retried in later passes until a pass places nothing. A dynamic re-rank — always take the
+occurrence with the fewest *currently* feasible placements — is a better heuristic and costs
+`O(occurrences × candidates)` per step, which is hundreds of millions of constraint queries for a
+500-occurrence school. The retry pass recovers most of it; in practice the first pass places
+almost everything, which is the evidence.
+
+*"Its cheapest feasible slot"* degenerates while no soft constraint exists: every feasible
+candidate for one occurrence has an identical delta, so the first in a **seeded candidate order**
+wins and the order is where the spreading comes from. The minimisation arrives with the first
+soft rule and needs no change to the walk.
+
+Locks are honoured and nothing populates them: there is no `activity.is_locked` column at `V16`,
+so the pinned branch is unreachable today and is written because a pin honoured by accident later
+is a pin not honoured.
+
+**Phase B — Local search.** **Not built.**
+`SCHEDULING-ARCHITECTURE-DECISIONS.md` §6 keeps local search out of the MVP, so M6 constructs and
+does not improve. Late Acceptance Hill Climbing. Chosen over simulated
 annealing because it has effectively one parameter (the late-acceptance list length)
 instead of a cooling schedule that needs tuning per school size, and over plain hill
 climbing because it escapes local optima. Tabu search can be added behind the same
@@ -280,8 +325,9 @@ Moves that break a *structural* invariant (a pinned activity, a non-candidate ro
 hard unavailability) are never generated — filtering is cheaper than scoring and
 rejecting.
 
-**Phase C — Polish.** Soft-only hill climb with hard constraints frozen, so the final
-run cannot trade feasibility for preference.
+**Phase C — Polish.** **Not built, and could not be:** no soft constraint is implemented, so
+there is nothing to polish against. Soft-only hill climb with hard constraints frozen, so the
+final run cannot trade feasibility for preference.
 
 ### Termination and determinism
 
@@ -289,6 +335,17 @@ Termination on any of: time limit, unimproved-step limit, score target, or user 
 The RNG is explicitly seeded and stored on `solve_run.seed`; the same seed, problem and
 config must reproduce the same timetable byte-for-byte. This is non-negotiable — it is
 what makes solver regressions debuggable and benchmark baselines meaningful.
+
+> **M6 implements this with one change: every limit is a count, never a duration.** Candidate
+> evaluations, construction steps and retry passes. A time limit reads a clock and stops in a
+> different place on a different machine, so the same seed would produce different timetables and
+> a committed baseline would be meaningless.
+>
+> A wall clock is still supported and it is the **caller's**: the engine asks a `Cancel` trait
+> between steps and the caller decides what the answer depends on. That is also why
+> `Termination::Cancelled` is the one termination this workspace documents as not reproducible.
+> Determinism is asserted as whole-outcome equality, which is possible only because
+> `SolveStatistics` carries counters and deliberately no elapsed time.
 
 ### Threading
 
@@ -410,7 +467,16 @@ every incomplete input into one of four outcomes.
 
 **Layer 2 — Post-solve hard-violation report.** When the best solution is infeasible,
 return the hard violations with full entity references and let the user click through to
-the exact clash. **Not implemented** — it needs a solver, so it arrives with M6.
+the exact clash. **The shape arrived with M6** — `SolveOutcome::hard_violations` and the
+structured `Violation` behind it — and the condition it reports is **unreachable from M6's
+engine**: a construction that refuses every illegal placement never ends with a hard violation,
+so it leaves an occurrence unplaced instead. The list is non-empty only when the reference
+scorer disagrees with the engine, which is a defect and is reported as one. Phase B's local
+search is what will reach the condition honestly.
+
+M6 adds the half a greedy constructor does need, which Layer 2 did not cover: a **per-occurrence
+cause** for every lesson it could not place, separating *"no timetable can place this"* from
+*"this arrangement did not"*. TIMETABLE-CONSTRUCTION-SOLVER.md §11.
 
 **Layer 3 — Relaxation search (later).** Iteratively soften one constraint group at a
 time, re-solve with a short budget, and report which relaxations restore feasibility:
@@ -425,8 +491,9 @@ first, so it is explicitly post-M1.
 Every commitment above is behind the `SolverEngine` trait and a JSON-serialisable
 `Problem`/`Assignment` pair. Consequences:
 
-- `evara-cli solve fixtures/<name>` runs the engine headless for CI, benchmarking and
-  regression baselines.
+- `evara generate <fixture>` runs the engine headless for CI, benchmarking and regression
+  baselines — shipped in M6. The command is spelled `generate`, with `solve` kept as an accepted
+  alias so the spelling this file used still works; TIMETABLE-CONSTRUCTION-SOLVER.md §16.
 - A different engine — including CP-SAT as an optional exact mode for a hard
   sub-problem such as elective-line construction, or Timefold if it ever becomes the
   right call — can be added without touching the database, the UI or the constraint

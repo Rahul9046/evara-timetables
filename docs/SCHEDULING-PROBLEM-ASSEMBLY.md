@@ -736,3 +736,45 @@ Unchanged by M5, and not to be relitigated: the loader owns the three stored-row
 | 5 | `group-overlap-contradiction`, from `OverlapOutcome::contradictions`. The evaluator returns them because rule 3 is where a member row meets a declaration that denies it, and the recursive CTE this crate used to count members with is gone — the evaluator's subtree union supplies `effective_members` as well |
 | 6 | `Hierarchy::of` is the one walk, read by the loader, by the evaluator, and by M3's `unanswered_declarations` |
 | 7 | `ValidationSummary::resolvable_by_declaration`, computed by `overlap::resolvable_by_declaration` — beside rule 6, sharing rule 6's path matching, so the prediction cannot disagree with what answering actually does |
+
+---
+
+## 21. The M6 integration contract
+
+What M6 relied on, and what it reported back.
+
+**Supplied by M4, and all of it used.**
+
+- A `Problem` whose `integrity()` is empty, with dense indices and resolution already computed by
+  the shared resolver. The construction reads `SectionFact::bell_schedule` directly and refuses an
+  occurrence whose resolution is not `Resolved` — it never re-resolves one.
+- `SectionFact::room_candidates`, from the one candidate predicate. Candidate generation draws its
+  room choices from that list and from nothing else, which is what makes *"the generator never
+  offers a room `room-type-required` would refuse"* a property of one function.
+- `UnavailabilityIndex`, read through `SlotAvailability::permits_placement` for every slot of every
+  candidate run — not only the first, because a teacher free for the first half of a double and
+  busy for the second cannot teach the double.
+- `AssemblyReport::may_solve`, which is the **gate**. `evara generate --project` passes it
+  straight through to the solver and the solver does not re-derive it: it is the one place a
+  blocking finding and a non-empty integrity result are both known.
+- `Completeness::RestrictionsNotEnforced { rules }`, carried onto the result as the fourth
+  `UnverifiedCounts` figure. `evara-core` cannot name the database type, so the figure crosses as
+  a count.
+- `ProblemIndex`, which M7's solution writer needs and M6 did not: an index-keyed `Assignment`
+  becomes `timetable_entry` rows through those maps.
+
+**Owed to M4 by M6: nothing.** No change was needed in the loader, and none was made.
+
+**Reported back — two things worth recording.**
+
+1. **`Problem::pinned` is still empty and is now read.** The construction places a pinned
+   occurrence first and never moves it. The branch is unreachable at `V16` because there is no
+   `activity.is_locked` column, so this is a hook that is now exercised by nothing rather than a
+   hook nothing touches. When locks land, the loader filling this field is all that is needed.
+2. **`OverlapRelation` being fully compiled is what made `student-clash` enforceable at
+   generation time.** M4 deliberately compiled no overlap answers and M5 supplied them; a
+   generator over M4's `unknown()` relation would have placed every pair of sections together and
+   reported nothing, which is the failure ADR 0035 §6 describes from the other direction.
+
+The loader's own figures are unchanged by M6: 28 statements per load, 30 with a term, independent
+of school size.

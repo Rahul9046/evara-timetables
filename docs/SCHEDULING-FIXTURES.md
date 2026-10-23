@@ -449,7 +449,7 @@ introducing a property-testing dependency for them.
 | **M3** pre-solve diagnostics | ✅ **Done.** `Expectations::diagnostics` proved to be the right oracle, read as a **lower bound**: a fixture records findings validation must produce, not the complete set it may. Both impossible fixtures produce their recorded cause with no solver involved. [PRE-SOLVE-VALIDATION.md](PRE-SOLVE-VALIDATION.md) §13 lists what every fixture produces |
 | **M4** `Problem` loader | Build a `Problem` from SQLite and **call** `evara_core::scheduling::resolve` rather than reimplementing ADR 0033 §3 — [ADR 0036](adr/0036-one-bell-schedule-resolver-shared-by-validation-and-loading.md). Assert `Problem::integrity()` is empty on real projects. Also owns three stored-row diagnostics ([ADR 0037](adr/0037-stored-row-diagnostics-belong-to-the-loader.md)). Seeding a project from a fixture description gives the database-backed fixtures this milestone does not provide |
 | **M5** registry + evaluators | ✅ **Done.** ADR 0035 §3's seven rules live in `evara_core::scheduling::overlap`; `V16` carries the `children_are_disjoint` column; `room-type-required` calls `RoomFact::is_candidate_for` rather than restating the predicate. The fixtures turned out to be the right oracle twice over: the overlap tests are the truth table row by row, and `evara evaluate <fixture>` scores each fixture's **own known-feasible arrangement** and finds nothing hard in any of them — two independent readings of the same records agreeing. [CONSTRAINT-ENGINE.md](CONSTRAINT-ENGINE.md) |
-| **M6** construction solver | Search over `Problem`, return `SolveOutcome`. The tiny fixture's attached arrangement is a lower bound on what a solver must achieve |
+| **M6** construction solver | ✅ **Done.** `evara generate <fixture>` constructs a timetable over each one and `evara-solver`'s tests sweep the **whole catalogue at three seeds each**, re-evaluating every result with M5's reference scorer: no fixture, at any seed, is generated with a hard violation in it. `tiny`'s attached arrangement turned out to be the right lower bound — the constructor reaches a complete feasible timetable for it at every seed tried, without being shown that arrangement. [TIMETABLE-CONSTRUCTION-SOLVER.md](TIMETABLE-CONSTRUCTION-SOLVER.md) |
 | **M7** persistence | Write an `Assignment` back against the `Uuid` each fact carries |
 | **M9** review | Render `UnverifiedCounts`; never describe a timetable as conflict-free |
 | Benchmarks | `evara fixture medium --out …`, or call the generator; score baselines arrive with Phase 6 |
@@ -534,6 +534,36 @@ neither is:
 - **Identifiers differ between runs.** The repositories mint UUIDv7s, so no assertion names a
   particular identifier. The contract is about order, counts, resolved facts and diagnostic
   codes — which is what the loader actually guarantees.
+
+## What M6 asked of this catalogue, and the one thing it did not get
+
+Three things the fixtures were built for turned out to be exactly what a solver needed, and one
+was missing.
+
+**What worked.** `tiny`'s known-feasible arrangement is a *lower bound* and not an oracle: the
+constructor is never shown it and must reach some complete feasible timetable, which it does at
+every seed tried. The two conclusively impossible fixtures are what prove the gate refuses rather
+than searches. `two-campuses-different-bells` is the case where interval comparison and timeslot
+equality disagree, and it is why *"a generated timetable never double-books a shared hall"* is a
+test rather than a hope. `unknown-group-overlap` is what proves a school that has answered nothing
+about its groups still gets a timetable — ADR 0006's property, which an enforcing solver would
+have destroyed.
+
+**What was missing.** The largest fixture is `medium` at **500** occurrences, and
+`OPEN-DECISIONS.md` R5 names *"a 2,000-activity secondary school with electives"* as the realistic
+upper end whose numbers are to be treated as a budget. M6 measured that upper end by building a
+synthetic school **in the test that measures it** rather than adding a 25th fixture: widening a
+documented catalogue is this file's surface, and the figures are in
+[TIMETABLE-CONSTRUCTION-SOLVER.md](TIMETABLE-CONSTRUCTION-SOLVER.md) §14. A later milestone that
+wants committed score baselines per workload — R2, and `evara bench` — is the right moment to
+decide whether that school becomes `large`.
+
+**No fixture is asserted to be fully schedulable except `tiny`.** Only `tiny` claims an
+arrangement, so only `tiny` is held to completeness. A test that demanded a complete timetable
+from `infeasible-duration` would assert a falsehood, and one that demanded it from the rest would
+assert something no record claims.
+
+---
 
 This file's fixtures remain the ones M5's evaluators are tested against, because they carry the
 declared `Expectations` an evaluator is compared to. The database-backed set tests the loader.

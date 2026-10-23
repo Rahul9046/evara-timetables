@@ -84,6 +84,24 @@ Status: `M1` = Milestone 1, `M2+` = later, `R` = schema reserved only.
 > `duration-contiguous`, `no-teaching-in-period` and `activity-scheduled`; each is marked
 > **✅ M5** in the tables. Every other row is still a plan.
 >
+> **M6 added no constraint type and changed no rule's semantics.** What it changed is who asks:
+> the eight are now read by a *generator* as well as by a scorer, every one of them through the
+> same evaluator. Three things follow, and none of them is a new rule:
+>
+> - Four of the seven hard types are **pre-filtered** by candidate generation —
+>   `duration-contiguous`, `no-teaching-in-period`, `room-type-required` and
+>   `entity-unavailable` — by *calling* the function that owns each question rather than
+>   restating it, so the generator cannot offer a placement the editor would refuse. The three
+>   clash types cannot be pre-filtered, because they are about other placements.
+> - Each evaluator gained a second driver, `evaluate_involving`, sharing one body with its full
+>   sweep. [CONSTRAINT-ENGINE.md](CONSTRAINT-ENGINE.md) §4a.
+> - A **new constraint type now owes a sixth artefact** beside `CLAUDE.md` §4's five: that second
+>   driver. It is a trait member rather than a convention, so a type without one cannot be
+>   registered.
+>
+> [TIMETABLE-CONSTRUCTION-SOLVER.md](TIMETABLE-CONSTRUCTION-SOLVER.md) is what the generator
+> does with them.
+>
 > `activity-fixed` is the ninth type of the first set and is **deferred**: there is no
 > `activity.is_locked` column at `V16`, locks arrive with Phase 8's manual editing, and a
 > registered rule that cannot fire tells the user something is being checked when it is not.
@@ -153,7 +171,7 @@ Status: `M1` = Milestone 1, `M2+` = later, `R` = schema reserved only.
 
 | Key | Default | Semantics | Status |
 | --- | --- | --- | --- |
-| `activity-scheduled` | MEDIUM | Every activity in scope must be placed somewhere. One violation per unplaced occurrence, because each is a separate thing to place. | ✅ M5 |
+| `activity-scheduled` | MEDIUM | Every activity in scope must be placed somewhere. One violation per unplaced occurrence, because each is a separate thing to place. Since M6 this is also what makes a **partial** timetable returnable: the constructor leaves an occurrence unplaced rather than placing it illegally, and a school that raised the level to HARD gets its partial work *and* is told the result does not meet its requirement. | ✅ M5 |
 | `periods-per-cycle` | MEDIUM | A course's scheduled periods per cycle must equal its target. `CORE-008` | M1 |
 | `duration-contiguous` | HARD | A multi-period activity occupies consecutive periods on one day, not spanning a break unless permitted (`params: { allowBreakSpan }`). The measure is ADR 0033 §5's `runs_on`, so a wall-clock gap between consecutive bells does not break a run and a non-teaching period does. | ✅ M5 |
 | `spread-across-days` | SOFT | Repeated lessons of one course for one group should fall on different days. `CORE-009` | M1 |

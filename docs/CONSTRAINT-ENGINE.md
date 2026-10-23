@@ -8,9 +8,12 @@ support, with a status column that is a plan. This file is the **engine**: the e
 exist, and the machinery they run in. Where the two disagree about a semantic detail, this one
 is the record of what the code does.
 
-Shipped in M5. Nothing here generates, improves or searches for a timetable — there is no
-solver. The engine answers one question about an arrangement it is **given**: *what is wrong
-with this?*
+Shipped in M5, and extended in M6 with the incremental scorer
+([ADR 0041](adr/0041-the-incremental-scorer-lives-with-the-evaluators.md)). Nothing here
+generates, improves or searches for a timetable — that is `evara-solver`'s, and
+[TIMETABLE-CONSTRUCTION-SOLVER.md](TIMETABLE-CONSTRUCTION-SOLVER.md) is what it does. This engine
+answers two questions about an arrangement: *what is wrong with this?*, and — since M6 — *would
+putting this occurrence here break anything?*
 
 ---
 
@@ -21,9 +24,10 @@ evara-core          the vocabulary:  ConstraintType, ConstraintLevel, CompiledCo
                                      Violation, Explanation, AffectedSet, StoredConstraint
    ^
 evara-constraints   the engine:      Registry, ConstraintEvaluator, Occupancy,
-                                     eight evaluators, evaluate(), evaluate_placement()
+                                     eight evaluators, evaluate(), evaluate_placement(),
+                                     IncrementalScorer                       <- M6
    ^
-evara-solver        M6:              searches, using AffectedSet and Score
+evara-solver        the search:      candidate generation, construction, explanation
 ```
 
 `evara-db` depends on `evara-core` and **not** on `evara-constraints` (`ARCHITECTURE.md` §3),
@@ -42,6 +46,8 @@ evaluators also name.
 | `timing.rs` | `duration-contiguous`, `no-teaching-in-period` |
 | `completeness.rs` | `activity-scheduled` |
 | `evaluation.rs` | `evaluate`, `evaluate_placement`, `EvaluationReport` |
+| `incremental.rs` | `IncrementalScorer`, `PlacementVerdict` — M6 |
+| `differential.rs` | the gate: the incremental scorer against the reference one — M6 |
 
 ---
 
@@ -216,6 +222,65 @@ is the record.
 
 ---
 
+## 4a. Two drivers, one body — and why the solver has no copy of a rule
+
+Every evaluator answers its question twice, and shares one implementation between the two.
+
+| Driver | Asks | Used by |
+| --- | --- | --- |
+| `evaluate` | what is wrong with this whole arrangement? | scoring, `evara evaluate`, the final check on a generated timetable |
+| `evaluate_involving` | which of this rule's violations name **this** occurrence? | `IncrementalScorer`, so M6's search can afford to ask per candidate |
+
+`evaluate_involving` is a sixth trait member, added in M6. Each implementation narrows first —
+`teacher-clash` to the teachers of the occurrence's own section, `room-clash` to the one room it
+is booked into, `student-clash` to its own cycle day — and then builds its violation through the
+**same function** the full sweep uses. Neither driver owns a predicate the other does not.
+
+The property that keeps them honest is asserted over every fixture and every rule:
+
+> the union of `evaluate_involving` over every occurrence, deduplicated, is exactly what
+> `evaluate` produces.
+
+A rule that narrowed too far fails it by omission, and one that narrowed wrongly fails it by
+producing a violation `evaluate` does not. There is no third outcome, which is what makes it a
+gate rather than a smoke check.
+
+## 4b. `IncrementalScorer`: a running score a search can afford
+
+`SOLVER.md` §4's second scorer, and [ADR 0041](adr/0041-the-incremental-scorer-lives-with-the-evaluators.md)
+is the record. Two things to know.
+
+**It is here and not in `evara-solver`.** A scorer that must agree with these eight rules to the
+violation needs `Occupancy`'s span resolver and each rule's narrowed query, both `pub(crate)`.
+Reaching them from another crate means either a second copy of the predicates — `CLAUDE.md` §2's
+most important rule, broken where a solver usually breaks it — or a public API wide enough to make
+that copy easy later. `evara-solver` decides what to try and when to stop; deciding whether a
+placement is legal was never its job.
+
+**There is no hand-written delta.** Every violation the eight rules produce names at most two
+occurrences, so a violation that does not name `a` cannot change when `a` moves, and
+
+```text
+score(after) − score(before) = involving(after, a) − involving(before, a)
+```
+
+is an identity rather than an approximation. `probe` applies a tentative placement, asks each rule
+what it now finds about that occurrence, and puts the previous state back — so a probe cannot
+disagree with the commit that follows it, and the per-rule arithmetic `SOLVER.md` §4 calls *"the
+single most bug-prone part of any solver"* does not exist.
+
+Maintained: the occupancy, the running `Score`, a count per type. Recomputed on demand: the
+violation **list**, by `evaluate`. A search asks for the score thousands of times and for the list
+once, at the end, so a maintained list would be bug surface bought for nothing.
+
+`Occupancy` became mutable for this — `place` and `withdraw` beside `of`, with indexes per
+teacher, per room and per cycle day. The indexes speed up the **reference** scorer too:
+`taught_by` and `booked_into` were scans of the whole timetable and are now lookups.
+
+`PlacementVerdict` is `SOLVER.md` §6's `MoveVerdict` less the suggestions, so M11's
+`validate_move` has its implementation already — and it comes from the same scorer the generator
+used, which is what stops the editor and the generator from disagreeing about a drop target.
+
 ## 5. Occupancy: resolved once, read by every rule
 
 An `Assignment` says which timeslot each occurrence *starts* in. A clash is about the minutes
@@ -276,7 +341,7 @@ iterates a hash map. Same problem, same assignment, same configuration, identica
 
 ---
 
-## 7. Two entry points, one implementation
+## 7. Three entry points, one implementation
 
 `evaluate(problem, assignment, constraints)` runs everything. It is the reference
 implementation `SOLVER.md` §4 calls *"always correct, never fast"*.
@@ -288,11 +353,14 @@ example `room-type-required` is entirely local, so moving one lesson cannot chan
 about another; `activity-scheduled` depends on the whole timetable and is always selected.
 
 It is **incremental-friendly, not incremental**. It holds no cache and maintains no index, and
-it evaluates each selected rule in full rather than computing a delta. That is the deliberate
-stopping point: a hand-written delta is *"the single most bug-prone part of any solver"*, and
-`SOLVER.md` §4's mitigation is to build the reference first and gate the incremental one on a
-property test against it. M6 writes `IncrementalScorer`; M5 writes the thing it will be checked
-against.
+it evaluates each selected rule in full rather than computing a delta.
+
+`IncrementalScorer` (§4b) is the third entry point and the one a search actually uses. It is
+faster for a reason `evaluate_placement` cannot be: `activity-scheduled`'s `affected()` set is
+*everything*, so it is always selected and always sweeps every occurrence — for a 500-occurrence
+school, 500 occurrences × 14 249 probes. `evaluate_placement` keeps its place as the simplest
+correct narrowing, and as the thing a caller reaches for when it wants a whole-arrangement report
+for a subset of rules.
 
 ---
 
@@ -302,6 +370,10 @@ against.
 evara evaluate <fixture> [--seed N] [--json]
 evara evaluate --project <path.evaraproj> --school <id> --cycle <id> [--term <id>] [--json]
 ```
+
+Since M6 there is a second command, and the pair is worth keeping apart: `evara evaluate` scores
+an arrangement it is **given**, and `evara generate` **builds** one and then scores it with this
+same engine. TIMETABLE-CONSTRUCTION-SOLVER.md §12.
 
 A fixture is evaluated against its **own known-feasible arrangement** where it ships one. That
 is the sharpest check in the suite: M2 built those arrangements against ADRs 0032–0035 and
@@ -328,11 +400,12 @@ apart would undo §2's distinction at the last step.
 | `room-capacity` | ADR 0034 — with `class_section.expected_attendance` |
 | every soft type (`preferred-time`, `spread-across-days`, `teacher-min-gaps`, …) | After the MVP. Nothing in the engine optimises, and `ConstraintLevel::Soft` exists only because a level is stored per instance |
 | `resource-clash`, `same-period`, the workload ceilings | CONSTRAINTS.md §3's `M1` set beyond the first nine |
-| `IncrementalScorer` and the property test between the two scorers | M6. §7 |
+| ~~`IncrementalScorer` and the property test between the two scorers~~ | ✅ **Done in M6** — §4b, and [ADR 0041](adr/0041-the-incremental-scorer-lives-with-the-evaluators.md) |
 | a configuration screen | Phase 4's UI half. The repository and the schemas exist; nothing in the interface writes a row yet |
 | persisted violations | M7, with `timetable` and `violation` |
 
 A clean report from this engine means: *of the eight rules implemented, none is broken by the
-arrangement you gave me.* It does not mean the timetable is good, complete, or possible to
+arrangement you gave me* — or, when `evara-solver` built the arrangement, *none is broken by the
+one I produced.* It does not mean the timetable is good, complete, or possible to
 improve on — and where the engine cannot check something, M3's pre-solve validation says so
 out loud rather than leaving the silence to be read as approval.
