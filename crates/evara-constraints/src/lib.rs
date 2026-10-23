@@ -46,13 +46,27 @@
 //! be a registered rule that cannot fire.
 //!
 //! Nothing here searches, optimises or writes. `evaluate` is the reference implementation
-//! `SOLVER.md` §4 describes as *"always correct, never fast"*, and M6's incremental scorer will
-//! be kept honest against it.
+//! `SOLVER.md` §4 describes as *"always correct, never fast"*, and [`IncrementalScorer`] is the
+//! fast one it keeps honest.
+//!
+//! # Why the incremental scorer is here and not in `evara-solver`
+//!
+//! It is the one piece of M6 that lives in this crate, and
+//! [ADR 0041](../../../docs/adr/0041-the-incremental-scorer-lives-with-the-evaluators.md) is
+//! why. A scorer that must agree with these eight rules to the violation needs the span
+//! resolver they share ([`Occupancy`]) and each rule's own narrowed query; reaching those from
+//! another crate would mean either a second copy of the predicates — `CLAUDE.md` §2's most
+//! important rule, broken in the exact place a solver usually breaks it — or a public API wide
+//! enough to make the copy easy for somebody else to write later.
+//!
+//! `evara-solver` *searches*: it decides what to try, in what order, and when to stop.
+//! Deciding whether a placement is legal was never its job.
 
 mod availability;
 mod clash;
 mod completeness;
 mod facilities;
+mod incremental;
 mod occupancy;
 mod params;
 mod registry;
@@ -64,12 +78,15 @@ use evara_core::scheduling::{
 };
 
 pub use evaluation::{Completeness, EvaluationReport, evaluate, evaluate_placement};
+pub use incremental::{IncrementalScorer, PlacementVerdict};
 pub use occupancy::Occupancy;
 pub use params::schema_of;
 pub use registry::{Registry, evaluator_for};
 
 mod evaluation;
 
+#[cfg(test)]
+mod differential;
 #[cfg(test)]
 mod tests;
 
@@ -109,6 +126,48 @@ pub trait ConstraintEvaluator: Send + Sync {
         problem: &Problem,
         occupancy: &Occupancy<'_>,
         constraint: &CompiledConstraint,
+        out: &mut ViolationSink,
+    );
+
+    /// The violations of this rule that **name** one occurrence.
+    ///
+    /// # Why this is the whole of incremental scoring
+    ///
+    /// Every violation any implemented rule produces names at most two occurrences — two for a
+    /// clash, one for everything else — which is a property of the eight, not an accident: a
+    /// [`Violation`] carries an `activities` list and nothing in the MVP fills it with three.
+    /// So a violation that does not name `activity` cannot be changed by moving `activity`,
+    /// and
+    ///
+    /// ```text
+    /// score(after) - score(before)
+    ///     = involving(after, a) - involving(before, a)
+    /// ```
+    ///
+    /// is **exact** rather than an approximation. That identity is what
+    /// [`IncrementalScorer`](crate::IncrementalScorer) maintains a running score with, and it
+    /// is why there is no hand-written per-rule delta anywhere in this crate —
+    /// `SOLVER.md` §4 calls such a delta *"the single most bug-prone part of any solver"*.
+    ///
+    /// # Two drivers, one body
+    ///
+    /// Each implementation shares its violation-building code with [`ConstraintEvaluator::evaluate`]
+    /// rather than restating the check. `evaluate` sweeps everything and this narrows first;
+    /// neither owns a predicate the other does not. The property that keeps them honest is
+    /// asserted over every fixture and every rule:
+    ///
+    /// > the union of `evaluate_involving` over every occurrence, deduplicated, is exactly what
+    /// > `evaluate` produces.
+    ///
+    /// A rule that narrowed too far fails it by omission, and one that narrowed wrongly fails it
+    /// by producing a violation `evaluate` does not. There is no third outcome, which is what
+    /// makes the test a gate rather than a smoke check.
+    fn evaluate_involving(
+        &self,
+        problem: &Problem,
+        occupancy: &Occupancy<'_>,
+        constraint: &CompiledConstraint,
+        activity: ActivityIx,
         out: &mut ViolationSink,
     );
 
