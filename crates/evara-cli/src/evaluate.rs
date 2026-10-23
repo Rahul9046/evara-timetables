@@ -86,6 +86,11 @@ pub(crate) fn run(args: &[String]) -> Result<Outcome, String> {
             selection,
             json,
         } => evaluate_project(&project, &selection, json),
+        Request::StoredTimetable {
+            project,
+            timetable,
+            json,
+        } => evaluate_stored(&project, timetable, json),
     }
 }
 
@@ -198,6 +203,126 @@ fn evaluate_project(
             project_text(path, selection, &assembly.problem, &rules, &report)
         );
     }
+    Ok(if report.is_usable() {
+        Outcome::Usable
+    } else {
+        Outcome::Broken
+    })
+}
+
+/// Scores a **stored** timetable against the inputs as they now stand. Reads; never writes.
+///
+/// # What a changed input looks like here
+///
+/// A stored timetable references activities, timeslots and rooms that `RESTRICT` guarantees
+/// still exist — but their *facts* may have moved since it was generated. An availability rule
+/// added over a placed slot, a room made unbookable, a period's times changed: each shows up as
+/// a violation here and in nothing else, which is why re-scoring is the honest way to ask
+/// whether a stored timetable is still usable rather than a flag on the row.
+///
+/// Placements naming a lesson the problem no longer holds are **reported, not refused**: a
+/// timetable whose lessons were deleted is still worth opening, and a reader that refused would
+/// leave the user unable to see what to fix.
+fn evaluate_stored(path: &Path, timetable_id: Uuid, json: bool) -> Result<Outcome, String> {
+    let mut db = Database::open_for_inspection(path).map_err(|error| describe(path, &error))?;
+
+    let timetable = db
+        .timetables()
+        .get(timetable_id)
+        .map_err(|error| describe(path, &error))?;
+    // The school is the cycle's: a timetable carries no `school_id` (ADR 0042 D6).
+    let school_id = db
+        .time_model()
+        .cycle(timetable.cycle_id)
+        .map_err(|error| describe(path, &error))?
+        .map(|cycle| cycle.school_id)
+        .ok_or_else(|| {
+            format!(
+                "{} — this timetable names a cycle the project no longer holds",
+                file_name(path)
+            )
+        })?;
+    let selection = SchedulingSelection {
+        school_id,
+        cycle_id: timetable.cycle_id,
+        term_id: timetable.term_id,
+    };
+
+    let stored_rules = db
+        .constraints()
+        .stored_for(school_id)
+        .map_err(|error| describe(path, &error))?;
+    let rules = Registry::compile(&stored_rules, selection.term_id).map_err(|error| {
+        format!(
+            "{} — this school's constraint configuration cannot be read: {error}",
+            file_name(path)
+        )
+    })?;
+
+    let assembly = db
+        .scheduling()
+        .load(&selection)
+        .map_err(|error| describe(path, &error))?;
+    let arrangement = db
+        .timetables()
+        .arrangement(timetable_id, &assembly)
+        .map_err(|error| describe(path, &error))?;
+    let report = evaluate(&assembly.problem, &arrangement.assignment, &rules);
+
+    if json {
+        print!(
+            "{}",
+            render(&serde_json::json!({
+                "project": file_name(path),
+                "timetable": { "id": timetable_id, "name": timetable.name },
+                "arrangement": "the stored timetable",
+                "storedEntries": arrangement.entries,
+                "entriesNotInProblem": arrangement.not_in_problem,
+                "isReadable": report.is_readable(),
+                "isUsable": report.is_usable(),
+                "isAdoptable": report.is_adoptable(),
+                "score": report.score,
+                "completeness": report.completeness,
+                "unverified": timetable.unverified(),
+                "rules": rules,
+                "violations": report.violations,
+                "explanations": report.explanations(&assembly.problem),
+                "stored": false,
+            }))
+        );
+    } else {
+        let mut out = String::new();
+        let _ = writeln!(
+            out,
+            "{} — stored timetable \"{}\"",
+            file_name(path),
+            timetable.name
+        );
+        let _ = writeln!(
+            out,
+            "  {} stored entr{} read, scored against the inputs as they now stand",
+            arrangement.entries,
+            if arrangement.entries == 1 { "y" } else { "ies" }
+        );
+        if !arrangement.not_in_problem.is_empty() {
+            let _ = writeln!(
+                out,
+                "  {} stored placement(s) name a lesson this problem no longer holds, so they \
+                 were not scored",
+                arrangement.not_in_problem.len()
+            );
+        }
+        verdict(&rules, &report, &mut out);
+        findings(&assembly.problem, &report, &mut out);
+        let _ = writeln!(
+            out,
+            "\n  Nothing was written. `evara save --revalidate {timetable_id}` stores this \
+             scoring as the timetable's current findings."
+        );
+        out.push('\n');
+        print!("{out}");
+    }
+
     Ok(if report.is_usable() {
         Outcome::Usable
     } else {
@@ -474,6 +599,18 @@ enum Request {
         /// Whether to print the structured form.
         json: bool,
     },
+    /// Evaluate a **stored** timetable of a project.
+    ///
+    /// The selection is the timetable's own: a stored timetable knows its cycle and term, and
+    /// taking them from the command line would let the two disagree.
+    StoredTimetable {
+        /// The project file.
+        project: PathBuf,
+        /// Which timetable.
+        timetable: Uuid,
+        /// Whether to print the structured form.
+        json: bool,
+    },
 }
 
 impl Request {
@@ -493,6 +630,7 @@ impl Request {
         let mut school: Option<Uuid> = None;
         let mut cycle: Option<Uuid> = None;
         let mut term: Option<Uuid> = None;
+        let mut timetable: Option<Uuid> = None;
         let mut rest = args.iter();
 
         while let Some(arg) = rest.next() {
@@ -514,6 +652,7 @@ impl Request {
                     let value = rest.next().ok_or("--project needs a path")?;
                     project = Some(PathBuf::from(value));
                 }
+                "--timetable" => timetable = Some(identifier("--timetable", rest.next())?),
                 "--school" => school = Some(identifier("--school", rest.next())?),
                 "--cycle" => cycle = Some(identifier("--cycle", rest.next())?),
                 "--term" => term = Some(identifier("--term", rest.next())?),
@@ -536,6 +675,14 @@ impl Request {
                 return Err(String::from(
                     "a fixture and a project are two different things to evaluate; name one",
                 ));
+            }
+            if let Some(timetable) = timetable {
+                refuse_selection_beside_a_timetable(school, cycle, term)?;
+                return Ok(Self::StoredTimetable {
+                    project,
+                    timetable,
+                    json,
+                });
             }
             let (Some(school_id), Some(cycle_id)) = (school, cycle) else {
                 return Err(format!(
@@ -560,6 +707,7 @@ impl Request {
             ("--school", school.is_some()),
             ("--cycle", cycle.is_some()),
             ("--term", term.is_some()),
+            ("--timetable", timetable.is_some()),
         ] {
             if given {
                 return Err(format!("{flag} only means something with --project"));
@@ -576,6 +724,30 @@ impl Request {
             )),
         }
     }
+}
+
+/// Refuses a selection given beside `--timetable`.
+///
+/// Rather than ignoring it. A stored timetable knows its own cycle and term, so accepting a
+/// selection would let the two disagree about which grid is being scored -- and a user would
+/// have no way to tell which one won.
+fn refuse_selection_beside_a_timetable(
+    school: Option<Uuid>,
+    cycle: Option<Uuid>,
+    term: Option<Uuid>,
+) -> Result<(), String> {
+    for (flag, given) in [
+        ("--school", school.is_some()),
+        ("--cycle", cycle.is_some()),
+        ("--term", term.is_some()),
+    ] {
+        if given {
+            return Err(format!(
+                "{flag} means nothing with --timetable: a stored timetable already knows its                  school, cycle and term"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Reads one identifier argument.
@@ -637,18 +809,26 @@ Usage: evara evaluate <fixture> [--seed N] [--json]
        evara evaluate --list
        evara evaluate --project <path.evaraproj> --school <id> --cycle <id>
                       [--term <id>] [--json]
+       evara evaluate --project <path.evaraproj> --timetable <id> [--json]
 
 Evaluates an arrangement against the eight implemented constraint types and prints
 what they found: hard violations, which make an arrangement unusable, and medium
 ones, which make a timetable incomplete.
 
 A fixture is evaluated against its own known-feasible arrangement where it ships
-one, and against the empty arrangement otherwise. A project has no stored timetable
-to score until M7, so the empty arrangement is evaluated and the useful half of the
-report is the rule set: the mandatory eight, with this school's own configuration
-applied on top.
+one, and against the empty arrangement otherwise.
 
-It does NOT generate, improve or search for a timetable, and never writes to a project.
+With --timetable, a STORED timetable is scored against the school's inputs as they
+now stand -- which is how to find out whether a timetable generated last week is
+still usable, because an availability rule or a changed period breaks nothing
+referential and shows up nowhere else.
+
+With --school and --cycle and no --timetable, the empty arrangement is evaluated and
+the useful half of the report is the rule set: the mandatory eight, with this
+school's own configuration applied on top.
+
+It does NOT generate, improve or search for a timetable, and never writes to a project --
+not even the scoring of a stored one. `evara save --revalidate` is what stores that.
 A clean run means no hard rule is broken by what it was given.
 
 Options:
@@ -656,6 +836,8 @@ Options:
   --school ID    Which school. Required with --project; never defaulted.
   --cycle ID     Which cycle\'s grid. Required with --project.
   --term ID      Which term. Omit for a grid materialised for the whole year.
+  --timetable ID Score a stored timetable instead. It knows its own cycle and term,
+                 so --school, --cycle and --term mean nothing beside it.
   --seed N       Seed to generate a fixture from. Default 2026.
   --json         Print the structured form instead of prose.
   --list, -l     List the fixtures.
@@ -747,6 +929,60 @@ mod tests {
         let error = parse(&["--project", "school.evaraproj"]).expect_err("refused");
         assert!(error.contains("--school"), "{error}");
         assert!(error.contains("--cycle"), "{error}");
+    }
+
+    #[test]
+    fn a_stored_timetable_is_addressed_by_itself_and_nothing_else() {
+        // It knows its own cycle and term, so accepting a selection beside it would let the
+        // two disagree about which grid is being scored.
+        let timetable = an_id();
+        assert_eq!(
+            parse(&[
+                "--project",
+                "school.evaraproj",
+                "--timetable",
+                &timetable.to_string(),
+            ]),
+            Ok(Request::StoredTimetable {
+                project: PathBuf::from("school.evaraproj"),
+                timetable,
+                json: false,
+            })
+        );
+
+        for flag in ["--school", "--cycle", "--term"] {
+            let error = parse(&[
+                "--project",
+                "school.evaraproj",
+                "--timetable",
+                &timetable.to_string(),
+                flag,
+                &an_id().to_string(),
+            ])
+            .expect_err("refused");
+            assert!(error.contains(flag), "{error}");
+            assert!(error.contains("already knows"), "{error}");
+        }
+    }
+
+    #[test]
+    fn a_timetable_without_a_project_is_refused() {
+        let error = parse(&["tiny", "--timetable", &an_id().to_string()]).expect_err("refused");
+        assert!(error.contains("--timetable"), "{error}");
+        assert!(error.contains("--project"), "{error}");
+    }
+
+    #[test]
+    fn the_usage_text_no_longer_claims_there_is_nothing_stored_to_score() {
+        // The caveat M5 shipped -- "a project has no stored timetable to score until M7" -- is
+        // false now, and a help text that still said it would be the product understating what
+        // it can do.
+        assert!(!USAGE.contains("until M7"), "{USAGE}");
+        assert!(USAGE.contains("STORED timetable"), "{USAGE}");
+        assert!(
+            USAGE.contains("never writes to a project"),
+            "and it is still read-only: {USAGE}"
+        );
     }
 
     #[test]

@@ -31,6 +31,10 @@ serde_json = { workspace = true }
 # `evara validate --project` names a school, a cycle and a term by identifier, so the
 # command has to parse one. Already in the tree.
 uuid = { workspace = true }
+# `evara save` records when a run started and finished. The engine reads no clock, so the
+# caller does -- M6's decision -- and a stored timestamp has to be ISO-8601 UTC with
+# millisecond precision like every other one. Already in the tree.
+time = { workspace = true }
 
 [dev-dependencies]
 # `evara validate --project` is tested end to end against a real temporary project, which
