@@ -46,6 +46,7 @@ use super::problem::Problem;
 /// Carried rather than acted on: the span is still built, and the rule that cares reports it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct SpanDefect {
     /// How many slots the occurrence wanted.
     pub wanted: usize,

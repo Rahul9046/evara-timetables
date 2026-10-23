@@ -260,6 +260,7 @@ pub struct HardViolationCount {
 /// check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct UnverifiedCounts {
     /// Pairs of concurrently placed activities whose audiences could not be compared.
     ///
