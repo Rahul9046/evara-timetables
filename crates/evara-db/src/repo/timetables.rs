@@ -404,6 +404,35 @@ impl Timetables<'_> {
         })
     }
 
+    /// Every timetable over one `(cycle, term)`, newest first.
+    ///
+    /// The narrower read [`Timetables::for_school`] cannot express, and the one the Generate
+    /// screen needs: before generating, a user is told how many timetables this grid already
+    /// holds, because a save **always inserts** (ADR 0042 D3) and that is easier to accept
+    /// when the count is visible beforehand than when a fourth version appears in a list.
+    ///
+    /// `COALESCE` on the term for the reason ADR 0042 C1 gives: SQLite treats `NULL`s as
+    /// distinct, so `term_id = ?2` would silently match nothing for exactly the whole-year
+    /// timetables, which are the common case.
+    pub fn for_cycle(&self, cycle_id: Uuid, term_id: Option<Uuid>) -> Result<Vec<Timetable>> {
+        self.db.read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, cycle_id, term_id, name, generated_at,
+                        indeterminate_student_pairs, unchecked_capacities,
+                        shared_entities, unenforced_restrictions,
+                        created_at, updated_at, rev
+                 FROM timetable
+                 WHERE cycle_id = ?1 AND COALESCE(term_id, '') = COALESCE(?2, '')
+                 ORDER BY generated_at DESC, id",
+            )?;
+            let rows = stmt.query_map(
+                rusqlite::params![cycle_id.to_string(), term_id.map(|term| term.to_string())],
+                Timetable::from_row,
+            )?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+    }
+
     /// One timetable by identifier.
     ///
     /// # Errors

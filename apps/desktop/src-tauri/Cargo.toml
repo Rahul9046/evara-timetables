@@ -20,7 +20,7 @@ workspace = true
 # Enabled by `evara-typegen` so the IPC DTOs defined in this crate — the setup error
 # contract — are generated alongside the ones from `evara-db`. Off in a release build:
 # the application never needs the generator at runtime. See ADR 0012.
-ts = ["dep:ts-rs", "evara-db/ts", "evara-core/ts"]
+ts = ["dep:ts-rs", "evara-db/ts", "evara-core/ts", "evara-report/ts"]
 
 # The library holds the app; main.rs is a two-line shim. This is the Tauri 2 layout and
 # it keeps the application testable and buildable for mobile targets later.

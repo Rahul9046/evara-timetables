@@ -51,11 +51,13 @@ mod context;
 mod facilities;
 mod findings;
 pub(crate) mod index;
+mod labels;
 mod lessons;
 mod population;
 mod report;
 mod rules;
 
+use evara_core::scheduling::display::LabelSet;
 use evara_core::scheduling::{
     AvailabilityRule, Diagnostic, IntegrityError, MaterialisedGrid, Problem,
 };
@@ -287,6 +289,73 @@ impl Scheduling<'_> {
     /// As [`Scheduling::load`].
     pub fn validate(&self, selection: &SchedulingSelection) -> Result<AssemblyReport> {
         Ok(AssemblyReport::of(&self.load(selection)?))
+    }
+
+    /// The display names a grid needs, for one school's scope.
+    ///
+    /// # A second read, on purpose
+    ///
+    /// Not part of [`Assembly`] and not compiled into the [`Problem`]: a solve needs no
+    /// subject name, and `Problem` is *"everything a solve needs, and nothing else"*
+    /// ([ADR 0037](../../../docs/adr/0037-stored-row-diagnostics-belong-to-the-loader.md) §2,
+    /// whose argument about a diagnostic-only field applies unchanged to a report-only one).
+    /// So the viewing paths call this and the solver pays nothing.
+    ///
+    /// The students in the result are **exactly** those an explicit `class_enrolment` row
+    /// names. See [`labels`]'s header.
+    ///
+    /// # Errors
+    ///
+    /// [`DbError::CorruptIdentifier`] if a stored identifier cannot be read, and any SQLite
+    /// failure as [`DbError::Internal`].
+    pub fn labels(&self, selection: &SchedulingSelection) -> Result<LabelSet> {
+        self.db.read(|conn| labels::labels(conn, selection))
+    }
+
+    /// The stored `is_locked` / `is_manual` flags of one timetable's entries.
+    ///
+    /// Keyed by `activity_id`, which is what a projection joins on. Both are `0` for
+    /// everything the generator writes; Phase 8 is what writes them, and the grid renders
+    /// them already so that it tells the truth when it does.
+    ///
+    /// # Errors
+    ///
+    /// As [`Scheduling::labels`].
+    pub fn entry_flags(&self, timetable_id: Uuid) -> Result<Vec<(Uuid, bool, bool)>> {
+        self.db.read(|conn| labels::entry_flags(conn, timetable_id))
+    }
+}
+
+/// Asserts that a compiled problem can be moved to a worker thread.
+///
+/// # Why this is a test rather than a comment
+///
+/// `ARCHITECTURE.md` §3.3 says the solver *"receives a fully materialised problem in memory
+/// and returns a solution. It never opens a database."* M8's generation workflow depends on
+/// that literally: the command thread takes the workspace lock, compiles an [`Assembly`],
+/// releases the lock, and **moves** the assembly to a dedicated thread — because holding a
+/// `Mutex<Workspace>` for the ~900 ms a large solve takes would freeze every other command,
+/// and because `Scheduling` borrows `&Database` so the borrow cannot cross a thread anyway.
+///
+/// If any of these types ever acquired a non-`Send` member — an `Rc`, a cell, a driver handle
+/// — that design would stop compiling at the point of use, in the Tauri crate, long after the
+/// decision was made. Asserting it here makes it a failure in the crate that caused it.
+#[cfg(test)]
+mod send_assertions {
+    use evara_core::scheduling::{Assignment, CompiledConstraint, Problem};
+
+    use super::Assembly;
+
+    const fn assert_send<T: Send>() {}
+
+    #[test]
+    fn the_types_a_solve_is_handed_can_cross_a_thread() {
+        assert_send::<Assembly>();
+        assert_send::<Problem>();
+        assert_send::<Assignment>();
+        assert_send::<CompiledConstraint>();
+        assert_send::<evara_core::scheduling::display::LabelSet>();
+        assert_send::<evara_core::scheduling::SolveOutcome>();
     }
 }
 

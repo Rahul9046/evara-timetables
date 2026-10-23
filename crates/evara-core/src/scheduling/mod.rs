@@ -28,7 +28,7 @@
 //! | M5 | the constraint registry, the hard evaluators, and [`overlap`] | [`problem`], [`placement`], [`population`], [`hierarchy`] |
 //! | M6 | the construction solver | [`placement`], [`outcome`], [`resolve`], [`rng`] |
 //! | M7 | timetable persistence | [`span`], [`outcome`], [`placement`] |
-//! | M9 | timetable review | [`outcome`], [`diagnostics`] |
+//! | **M8** | timetable viewing and reporting | [`display`], [`span`], [`outcome`], [`diagnostics`] |
 //!
 //! # The four accepted decisions this vocabulary is shaped by
 //!
@@ -59,6 +59,7 @@ pub mod clock;
 pub mod constraints;
 pub mod context;
 pub mod diagnostics;
+pub mod display;
 pub mod hierarchy;
 pub mod index;
 pub mod outcome;
@@ -96,6 +97,7 @@ pub use context::{
 pub use diagnostics::{
     Diagnostic, DiagnosticCode, DiagnosticReport, EntityKind, EntityRef, Severity,
 };
+pub use display::{LabelSet, RoomLabel, SectionLabel, StudentLabel};
 pub use hierarchy::{Hierarchy, MAX_GROUP_DEPTH};
 pub use index::{
     ActivityIx, BellScheduleIx, CampusIx, CycleDayIx, GroupIx, PeriodIx, RoomIx, RoomTypeIx,

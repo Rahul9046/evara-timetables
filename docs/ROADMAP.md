@@ -691,8 +691,15 @@ one read-only. Four things worth knowing, and
 [adr/0042](adr/0042-a-stored-timetable-is-a-version-and-a-save-refuses-stale-inputs.md) and in the
 migration's own header.
 
-**Still to do in this phase:** `evara bench` with committed score baselines, the background thread
-and `solver://progress`, and the Generate screen.
+**✅ The background thread, `solver://progress` and the Generate screen are done (M8).** The
+command thread compiles the `Assembly` under the workspace lock, releases it, and moves it to a
+dedicated worker; progress is coalesced to one event per 50 ms; cancellation is an `AtomicBool`
+the engine reads between steps. The Generate screen runs pre-solve validation as a gate, shows
+progress, offers Stop, previews the result through the shared projection and saves on an explicit
+second action. [TIMETABLE-VIEWS.md](TIMETABLE-VIEWS.md) §7–§8.
+
+**Still to do in this phase:** `evara bench` with committed score baselines. That is now the whole
+of it.
 
 **✅ The construction solver is done (M6).** `evara-solver` holds `SolverEngine`,
 `ConstructionSolver` and the `generate` orchestration; `evara generate <fixture>` and
@@ -722,15 +729,45 @@ rather than dynamically re-ranked; and `IncrementalScorer` lives in `evara-const
 
 ---
 
-## Phase 7 — Timetable views
+## Phase 7 — Timetable views ✅ complete (M8)
 
-- `evara-report` projections: master, by teacher, by class/group, by room, by student.
-- Grid component driven by cycle days × periods, not weekdays. Multi-period activities
+- ✅ `evara-report` projections: master, by teacher, by class/group, by room, by student.
+- ✅ Grid component driven by cycle days × periods, not weekdays. Multi-period activities
   render as spans.
-- Score health panel: hard / medium / soft totals with a per-constraint breakdown,
-  clicking through to the offending entries.
+- ✅ Score health panel: hard / medium / soft totals, the two scorings side by side, the
+  findings with the rule's own explanation, and the four unverified counts.
 
 **Closes M1-10, M1-11, M1-12.**
+
+[TIMETABLE-VIEWS.md](TIMETABLE-VIEWS.md) is what shipped. Six things worth knowing:
+
+- **A cell holds a list, and `rowSpan` is decided in Rust.** Two occurrences in one cell and a
+  non-contiguous run both break a naive grid, and both are reachable without a bug. Every
+  `(day, period)` gets exactly one cell; a lesson earns a span only when it is alone and
+  contiguous; everything else is pinned at `rowSpan` 1 carrying **every** lesson involved.
+  `GridPanel::is_well_formed` asserts it over every fixture and scope.
+- **One axis per bell schedule.** A scope spanning two gets two panels and a sentence saying
+  they cannot be read as one week — ADR 0033, and ADR 0032 rule 2's reason.
+- **The by-student view is roster-derived and says so.** Exactly the sections
+  `class_enrolment` names, never a group's timetable in a child's place — ADR 0006, and
+  [adr/0044](adr/0044-the-display-vocabulary-sits-beside-the-problem.md) §4.
+- **One projection, two callers.** The preview and the saved view go through the same
+  `evara-report` call, so "what I previewed is what I saved" is structural.
+- **ADR 0032's acceptance test 12 is discharged**: a timetable's views carry the shared-entity
+  warnings, **named** where a problem was compiled and counted where one was not.
+- **Grid rendering is measured**: 2 000 occurrences projected in 3.8 ms, four scope grids laid
+  out in 417 µs. R5's remaining figure, paid.
+
+> **Two departures from the bullets above**, each recorded rather than carried out as written.
+> `evara-report` gained an `evara-constraints` dependency so a finding renders the **rule's own**
+> `explain()` rather than wording this crate composed
+> ([adr/0043](adr/0043-a-report-renders-a-rules-own-explanation.md)); and the score panel does
+> not yet offer a **per-constraint breakdown** with click-through to entries — the findings list
+> names the `type_key`, the level and the span of each, and grouping them by rule with a link
+> into the grid is additive over the same data.
+>
+> Not delivered, deliberately: print, PDF and CSV (Phase 10 owns the renderer trait, and a trait
+> with one implementation is a guess about the second), and anything editable — §Phase 8.
 
 ---
 

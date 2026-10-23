@@ -49,7 +49,7 @@ pub struct ProjectIdentity {
 ///
 /// The same format SQLite's `strftime('%Y-%m-%dT%H:%M:%fZ')` produces in the change-log
 /// triggers, so timestamps written by Rust and by SQL sort together.
-pub(crate) fn now_iso8601() -> String {
+pub fn now_iso8601() -> String {
     use time::format_description::well_known::Iso8601;
     use time::format_description::well_known::iso8601::{Config, EncodedConfig, TimePrecision};
 

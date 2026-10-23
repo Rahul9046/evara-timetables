@@ -36,6 +36,20 @@ pub struct AppState {
     /// the mapper must not be blocked behind a write somewhere else in the application.
     /// Cleared when the project closes — see [`project_close`].
     pub imports: crate::commands::import::ImportSessions,
+    /// Every generation this process has started.
+    ///
+    /// Its own lock, like `imports` and for the same reasons: a session holds a compiled
+    /// problem and **no** connection, it outlives the command that started it, and a poll of
+    /// its progress must not block behind a write somewhere else in the application.
+    ///
+    /// Cleared when the project closes — see [`project_close`].
+    pub generations: crate::commands::session::GenerationSessions,
+    /// Which project is open, as a monotonic counter.
+    ///
+    /// Bumped on every create, open and close. A generation session records the value it
+    /// started under and every later command compares, so a solve begun against one campus
+    /// file can never be saved into another — see `commands::solve`.
+    pub epoch: crate::commands::session::ProjectEpoch,
 }
 
 /// A lifecycle failure, in a form the interface can act on.
@@ -224,6 +238,11 @@ fn lock<'a>(state: &'a State<'_, AppState>) -> CommandResult<std::sync::MutexGua
 /// Creates a project at `path` and opens it.
 #[tauri::command]
 pub fn project_create(state: State<'_, AppState>, path: PathBuf) -> CommandResult<ProjectView> {
+    // A generation in flight belongs to whatever was open before. Discarded first, for the
+    // reason `project_close` clears the import session first: a failure to take the lock must
+    // not leave a session pointing at a project that is no longer the open one.
+    state.generations.clear();
+    state.epoch.bump();
     let mut workspace = lock(&state)?;
     Ok(workspace.create_project(&path)?.into())
 }
@@ -231,6 +250,8 @@ pub fn project_create(state: State<'_, AppState>, path: PathBuf) -> CommandResul
 /// Opens an existing project.
 #[tauri::command]
 pub fn project_open(state: State<'_, AppState>, path: PathBuf) -> CommandResult<ProjectView> {
+    state.generations.clear();
+    state.epoch.bump();
     let mut workspace = lock(&state)?;
     Ok(workspace.open_project(&path)?.into())
 }
@@ -244,6 +265,11 @@ pub fn project_close(state: State<'_, AppState>) -> CommandResult<bool> {
     // it. Cleared first: a failure to take the lock must not leave a session pointing at a
     // project that is already gone.
     state.imports.clear();
+    // A session holds an `Assembly` describing the database about to be shut, so it cannot
+    // survive the close. Discarding stops a worker mid-solve rather than leaving it computing
+    // an answer nothing can save.
+    state.generations.clear();
+    state.epoch.bump();
     let mut workspace = lock(&state)?;
     Ok(workspace.close_project())
 }

@@ -1,0 +1,636 @@
+/*
+ * Timetables — M8.
+ *
+ * The Phase 7 stylesheet `styles.css`'s header promised: *"The real lesson timetable is
+ * designed in Phase 7, against real data and real interaction requirements."* This is it,
+ * and it extends `styles.css`'s tokens rather than introducing a second palette.
+ *
+ * Its own file rather than another two hundred lines appended to a 2 200-line stylesheet:
+ * this is one area's chrome, it has one entry point, and keeping it separate means the
+ * setup screens and the timetable grid can be read apart.
+ *
+ * The grid is a real `<table>`, so almost everything here is about making a dense table
+ * readable rather than about building one out of boxes. Three rules are load-bearing rather
+ * than decorative:
+ *
+ *   - sticky period and day headers, because a timetable is scrolled and a cell with no
+ *     visible row or column heading is unreadable;
+ *   - `overflow-x: auto` on the grid's own container, so a wide cycle scrolls inside the
+ *     panel and the page body never scrolls sideways;
+ *   - a pattern as well as a tint on every pinned cell, because colour alone is not a
+ *     message — the clash case has to survive a monochrome display and a colour-blind
+ *     reader, and each one also renders an icon and a word.
+ */
+
+.workspaceRail {
+  display: flex;
+  gap: 4px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.railTab {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--text-muted);
+  padding: 12px 14px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.railTab--on {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.ttArea {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.ttAreaHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px 24px;
+  padding: 16px 24px 0;
+}
+
+.ttTabs {
+  display: flex;
+  gap: 4px;
+}
+
+.ttTab {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  padding: 7px 13px;
+  font-size: 13px;
+}
+
+.ttTab--on {
+  background: var(--text);
+  color: var(--surface);
+  border-color: var(--text);
+}
+
+.ttSelection {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.ttSelect,
+.ttScopeChoose {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ttScreen {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 18px 24px 48px;
+  min-width: 0;
+}
+
+.ttScreen > h2 {
+  margin: 0;
+}
+
+.ttPanel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 16px 18px;
+  min-width: 0;
+}
+
+.ttPanel > h3,
+.ttPanelHead h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.ttPanel h4 {
+  margin: 14px 0 6px;
+  font-size: 13px;
+}
+
+/*
+ * A refusal that is working correctly, or a timetable whose grid has moved underneath it.
+ * Deliberately *not* an error colour: the user did nothing wrong and the next step is an
+ * action rather than an apology.
+ */
+.ttPanel--moved {
+  border-color: var(--accent);
+}
+
+.ttPanel--disclose {
+  background: var(--bg);
+}
+
+.ttActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.ttEmpty,
+.ttDiscloseNone,
+.ttUnplacedNote,
+.ttRosterNote,
+.ttNote,
+.ttSaveNote,
+.ttDisabledWhy,
+.ttSharedUnnamed {
+  margin: 0;
+  max-width: 76ch;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.ttNote {
+  border-left: 2px solid var(--accent);
+  padding-left: 10px;
+}
+
+.ttDiscloseList,
+.ttUnplaced,
+.ttFindings,
+.ttShared ul,
+.ttBlocking ul,
+.ttAdvisory ul {
+  margin: 0;
+  padding-left: 20px;
+  max-width: 82ch;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.ttDiscloseList li,
+.ttUnplaced li {
+  margin-bottom: 6px;
+  color: var(--text-muted);
+}
+
+.ttDiscloseList strong,
+.ttUnplaced strong {
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------- the grid */
+
+.ttGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+/*
+ * The grid scrolls inside its own container, so the page body never scrolls sideways
+ * however wide the cycle is. A sixteen-day rotation is a scrollable panel, not a broken
+ * window.
+ */
+.ttScroll {
+  overflow-x: auto;
+  min-width: 0;
+}
+
+.ttTable {
+  border-collapse: collapse;
+  font-size: 12px;
+  min-width: 100%;
+}
+
+.ttTable th,
+.ttTable td {
+  border: 1px solid var(--border);
+  padding: 5px 7px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.ttTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.ttPeriodHead {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg);
+  white-space: nowrap;
+  min-width: 96px;
+}
+
+.ttTable thead .ttPeriodHead {
+  z-index: 3;
+}
+
+.ttPeriodLabel {
+  display: block;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.ttPeriodTime,
+.ttPeriodKind {
+  display: block;
+  font-size: 10px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * A break is a row, hatched rather than left blank: "nothing is scheduled here" and
+ * "nothing may be scheduled here" are different facts, and an empty cell says the first.
+ */
+.ttRow--break td {
+  background: repeating-linear-gradient(
+    45deg,
+    transparent 0 5px,
+    var(--border-subtle) 5px 10px
+  );
+}
+
+.ttCell {
+  min-width: 118px;
+}
+
+.ttCell--filled {
+  background: var(--surface);
+}
+
+.ttCell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/*
+ * Colour never carries the meaning alone. Each of these also renders an icon and a word in
+ * `.ttPinTag`, and the clash case adds a hatch a monochrome display still shows.
+ */
+.ttCell--conflict {
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(200, 60, 60, 0.12) 0 6px,
+    transparent 6px 12px
+  );
+  box-shadow: inset 2px 0 0 #c83c3c;
+}
+
+.ttCell--broken {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.ttCell--shared {
+  box-shadow: inset 2px 0 0 var(--text-faint);
+}
+
+.ttPinTag {
+  margin: 0 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.ttLessons {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ttLesson {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ttLessonName {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.ttLessonTeachers,
+.ttLessonRoom,
+.ttLessonTime {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.ttLessonTime {
+  font-variant-numeric: tabular-nums;
+}
+
+.ttLessonDefect {
+  font-size: 11px;
+  color: #c83c3c;
+}
+
+.ttLessonFlag {
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------- pickers */
+
+.ttScopePicker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 16px;
+  margin-bottom: 14px;
+}
+
+.ttScopeKinds,
+.ttDayStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ttScopeKind,
+.ttDay {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  padding: 5px 11px;
+  font-size: 12px;
+}
+
+.ttScopeKind--on,
+.ttDay--on {
+  background: var(--text);
+  color: var(--surface);
+  border-color: var(--text);
+}
+
+/* ---------------------------------------------------------------- findings and scores */
+
+.ttScoreTable,
+.ttListTable {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+
+.ttScoreTable th,
+.ttScoreTable td,
+.ttListTable th,
+.ttListTable td {
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 7px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.ttScoreTable thead th,
+.ttListTable thead th {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.ttNum {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ttScoreKindNote {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+.ttVerdict {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  max-width: 82ch;
+}
+
+.ttVerdict--hard {
+  color: #c83c3c;
+  font-weight: 600;
+}
+
+.ttVerdict--ok {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.ttVerdict--partial {
+  color: var(--text-muted);
+}
+
+.ttFindingCounts,
+.ttFindingWhen,
+.ttResultMeta,
+.ttOpenMeta,
+.ttInputsLine {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ttFinding {
+  margin-bottom: 10px;
+  list-style: none;
+}
+
+.ttFindingHead {
+  margin: 0;
+  font-size: 12px;
+}
+
+.ttFindingLevel {
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+}
+
+.ttFinding--hard .ttFindingLevel {
+  color: #c83c3c;
+}
+
+.ttFindingBody {
+  margin: 2px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  max-width: 82ch;
+}
+
+.ttFindingUnknown {
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------- generate */
+
+.ttProgress {
+  height: 7px;
+  border-radius: 4px;
+  background: var(--border-subtle);
+  overflow: hidden;
+}
+
+.ttProgressFill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 120ms linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ttProgressFill {
+    transition: none;
+  }
+}
+
+.ttProgressText {
+  margin: 7px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ttSaveRow,
+.ttRenameRow,
+.ttConfirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.ttSaveRow label,
+.ttRenameRow label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ttSaveRow input,
+.ttRenameRow input {
+  min-width: 240px;
+}
+
+.ttSaveNote,
+.ttConfirm > span:first-child {
+  flex-basis: 100%;
+}
+
+.ttNotSaveable,
+.ttBlocking {
+  margin-top: 12px;
+  border-left: 2px solid #c83c3c;
+  padding-left: 12px;
+}
+
+.ttNotSaveable h4,
+.ttBlocking h4 {
+  margin: 0 0 4px;
+  color: #c83c3c;
+}
+
+.ttRemedy {
+  color: var(--text);
+}
+
+.ttAdvisory {
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.ttAdvisory summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.ttSaved {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: var(--ok);
+}
+
+.ttResultMeta--cancelled {
+  color: var(--text-faint);
+}
+
+.ttOpenHead h2 {
+  margin: 10px 0 2px;
+}
+
+.ttRunFacts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 16px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.ttRunFacts dt {
+  color: var(--text-muted);
+}
+
+.ttRunFacts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.ttPanelCampus {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ttUnplacedCode,
+.ttUnplacedCause code {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/*
+ * A desktop window can be narrow. The selection and action rows wrap rather than
+ * overflowing, and the grid keeps its own horizontal scroll either way.
+ */
+@media (max-width: 860px) {
+  .ttScreen,
+  .ttAreaHead {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .ttSaveRow input,
+  .ttRenameRow input {
+    min-width: 0;
+    flex: 1 1 160px;
+  }
+}

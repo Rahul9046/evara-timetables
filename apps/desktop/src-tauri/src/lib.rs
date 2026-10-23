@@ -43,6 +43,8 @@ pub fn run() {
         .manage(AppState {
             workspace: Mutex::new(workspace),
             imports: commands::import::ImportSessions::default(),
+            generations: commands::session::GenerationSessions::default(),
+            epoch: commands::session::ProjectEpoch::default(),
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_info,
@@ -251,6 +253,23 @@ pub fn run() {
             commands::time_model::setup_calendar_non_working_days,
             commands::time_model::setup_calendar_day_update,
             commands::time_model::setup_calendar_day_delete,
+            // Timetable generation — M8 stage 8A. `timetable_save` is the only one that writes.
+            commands::solve::timetable_validate,
+            commands::solve::timetable_generate_start,
+            commands::solve::timetable_generate_status,
+            commands::solve::timetable_generate_result,
+            commands::solve::timetable_generate_cancel,
+            commands::solve::timetable_generate_discard,
+            commands::solve::timetable_generate_scope,
+            commands::solve::timetable_save,
+            // Saved timetables — M8 stage 8B. Rename, delete and revalidate write; the rest read.
+            commands::views::timetable_list,
+            commands::views::timetable_list_for_cycle,
+            commands::views::timetable_open,
+            commands::views::timetable_scope,
+            commands::views::timetable_rename,
+            commands::views::timetable_delete,
+            commands::views::timetable_revalidate,
             // Timetable grid — Phase 1E. `release_orphans` is the only destructive one.
             commands::grid::setup_grid_preview,
             commands::grid::setup_grid_rebuild,

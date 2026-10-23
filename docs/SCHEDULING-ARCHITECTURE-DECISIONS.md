@@ -313,13 +313,19 @@ M1  decisions  (this PR)              ── no code
  │                                     0035 §4 (one extra column in its migration)
  ├─► M6  construction solver
  ├─► M7  persistence
- ├─► M8  orchestration
- └─► M9  review                        renders §5 rule 4's counts
+ └─► M8  orchestration **and review**  renders §5 rule 4's counts
 ```
 
 M2 is the only unblocked milestone before M1 and was still shaped by it, which is the
 audit's §17 argument and the reason this PR exists. It has since been built —
 [SCHEDULING-FIXTURES.md](SCHEDULING-FIXTURES.md).
+
+> **The last two rows were planned as separate milestones and shipped as one.** This sequence
+> had *M8 orchestration* and *M9 review*, and M8 delivered both — as two stages on one branch,
+> orchestration first, because nothing in the interface could produce a timetable to review
+> until the Generate screen existed. Recorded here rather than left as a silent divergence;
+> [TIMETABLE-VIEWS.md](TIMETABLE-VIEWS.md) is what shipped, and §5 rule 4's counts are rendered
+> as its §10 describes.
 
 ---
 
