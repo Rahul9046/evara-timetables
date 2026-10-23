@@ -743,10 +743,12 @@ fn a_read_only_project_refuses_a_save_before_a_transaction_opens() {
     let school = a_solvable_school(&mut project);
     let selection = school.selection();
     let generated = generate_for(&project, &selection);
-    let path = project.path().to_path_buf();
-    drop(project);
 
-    let mut inspect = crate::Database::open_for_inspection(&path).expect("open read-only");
+    // The project stays alive deliberately. `seed::Project` owns the temporary directory and
+    // removes it on drop, so dropping it to "close the file" deletes the file — which on Unix
+    // makes this a test of a missing path rather than of a read-only connection. A second
+    // connection on the same path is what the inspection path does in production anyway.
+    let mut inspect = crate::Database::open_for_inspection(project.path()).expect("open read-only");
     let error = inspect
         .timetables()
         .save_generated(
