@@ -28,8 +28,11 @@ pub mod lessons;
 pub mod membership;
 pub mod people;
 pub mod project;
+pub mod session;
+pub mod solve;
 pub mod structure;
 pub mod time_model;
+pub mod views;
 
 use std::sync::MutexGuard;
 
@@ -75,7 +78,7 @@ pub fn app_info() -> Result<AppInfo, String> {
     Ok(AppInfo {
         version: env!("CARGO_PKG_VERSION"),
         debug: cfg!(debug_assertions),
-        phase: "2 — stage D, spreadsheet roster imports",
+        phase: "8 — timetable viewing and reporting",
     })
 }
 

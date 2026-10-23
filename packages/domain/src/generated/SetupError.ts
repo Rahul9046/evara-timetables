@@ -39,11 +39,11 @@ entity: string,
 /**
  * Revision this window was holding.
  */
-expected_rev: number, 
+expectedRev: number, 
 /**
  * Revision the record is actually at.
  */
-actual_rev: number, 
+actualRev: number, 
 /**
  * Message to show.
  */
@@ -68,6 +68,26 @@ message: string, } | { "kind": "reviewRequired",
  * Message to show.
  */
 message: string, } | { "kind": "corruptProject", 
+/**
+ * Message to show.
+ */
+message: string, } | { "kind": "inputsChanged", 
+/**
+ * Message to show.
+ */
+message: string, } | { "kind": "notSaveable", 
+/**
+ * Message to show.
+ */
+message: string, } | { "kind": "readOnlyProject", 
+/**
+ * Message to show.
+ */
+message: string, } | { "kind": "alreadySaved", 
+/**
+ * The timetable that was written.
+ */
+timetableId: string, 
 /**
  * Message to show.
  */

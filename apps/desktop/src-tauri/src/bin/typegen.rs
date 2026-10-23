@@ -142,9 +142,12 @@ fn main() -> ExitCode {
 /// `evara-db` rather than against nothing.
 fn write_all() -> (Vec<Generated>, Vec<String>) {
     let (mut files, mut errors, mut required) = entities();
-    for (more_files, more_errors, more_required) in
-        [lessons(), time_model_and_interface(), spreadsheet_import()]
-    {
+    for (more_files, more_errors, more_required) in [
+        lessons(),
+        time_model_and_interface(),
+        spreadsheet_import(),
+        timetables(),
+    ] {
         files.extend(more_files);
         errors.extend(more_errors);
         required.extend(more_required);
@@ -557,4 +560,92 @@ fn output_dir() -> PathBuf {
         .join("..")
         .join("..")
         .join(OUTPUT_DIR)
+}
+
+/// Generating, viewing and reporting a timetable: M8's surface.
+///
+/// # What is deliberately absent, and why
+///
+/// `Problem`, `Assignment`, `Placement` and every `*Ix` dense index. An index has meaning
+/// only inside the one problem that assigned it, so a TypeScript value holding one would
+/// invite arithmetic that is correct for one load and wrong for the next. Everything here is
+/// addressed by **stored identifier**, and every span is resolved in Rust before it crosses
+/// — which is also what keeps `CLAUDE.md` §2's "no scheduling rule in the view layer" true
+/// for a grid that has to render multi-period lessons.
+///
+/// `TimetableProjection` is the largest type here and is sent **once** per opened timetable;
+/// the scope grids address its `lessons` by index, so no occurrence is serialised twice
+/// however many grids it appears in.
+fn timetables() -> (Vec<Generated>, Vec<String>, BTreeSet<(PathBuf, String)>) {
+    use evara_core::scheduling::UnverifiedCounts;
+    use evara_core::scheduling::display::{LabelSet, RoomLabel, SectionLabel, StudentLabel};
+    use evara_core::scheduling::span::SpanDefect;
+    use evara_desktop_lib::commands::session::SessionPhase;
+    use evara_desktop_lib::commands::solve::{
+        FindingLine, FinishedEvent, GenerateResult, GenerateSettings, GenerateStarted,
+        GenerateStatus, ProgressEvent, SavedView, ValidationView,
+    };
+    use evara_desktop_lib::commands::views::{
+        DeletedView, OutcomeView, RunView, ScoringView, SharedEntity, TimetableSummary,
+        TimetableView, UnscheduledView,
+    };
+    use evara_report::findings::{FindingCounts, FindingEntity, FindingSource, FindingView};
+    use evara_report::projection::{
+        CellContent, GridConflict, GridPanel, LessonFlags, PinReason, ProjectedCellRef,
+        ProjectedDay, ProjectedLesson, ProjectedPeriod, ProjectionScope, ScheduleAxis, ScopeGrid,
+        ScopeKind, TimetableCell, TimetableProjection,
+    };
+
+    contract![
+        // The display vocabulary. `evara-db` populates it, `evara-report` consumes it.
+        LabelSet,
+        SectionLabel,
+        RoomLabel,
+        StudentLabel,
+        // The projection: axes, lessons, scopes and the laid-out cells.
+        TimetableProjection,
+        ScheduleAxis,
+        ProjectedDay,
+        ProjectedPeriod,
+        ProjectedLesson,
+        ProjectedCellRef,
+        LessonFlags,
+        SpanDefect,
+        ProjectionScope,
+        ScopeKind,
+        ScopeGrid,
+        GridPanel,
+        TimetableCell,
+        CellContent,
+        PinReason,
+        GridConflict,
+        // Findings, at either fidelity.
+        FindingView,
+        FindingEntity,
+        FindingSource,
+        FindingCounts,
+        // Generation orchestration.
+        ValidationView,
+        FindingLine,
+        GenerateSettings,
+        GenerateStarted,
+        GenerateStatus,
+        GenerateResult,
+        SavedView,
+        SessionPhase,
+        ProgressEvent,
+        FinishedEvent,
+        // Saved timetables.
+        TimetableSummary,
+        TimetableView,
+        ScoringView,
+        UnscheduledView,
+        SharedEntity,
+        OutcomeView,
+        RunView,
+        DeletedView,
+        // Shared with the solver's own vocabulary: never omitted from a timetable's
+        // description, so never omitted from its type.
+        UnverifiedCounts,
+    ]
 }

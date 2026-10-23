@@ -24,7 +24,16 @@ use serde::Serialize;
 
 /// A School Setup failure, in a form the interface can act on.
 #[derive(Debug, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+// `rename_all_fields` as well as `rename_all`: the variant names are the `kind` tags and
+// the field names cross as JSON keys, and `CLAUDE.md` requires camelCase on the wire for
+// both. Without the second, `AlreadySaved`'s `timetable_id` would reach the interface in
+// snake_case — the one shape a generated type cannot warn about, because it would be
+// generated wrong too.
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum SetupError {
     /// A command needing an open project ran without one.
@@ -133,6 +142,62 @@ pub enum SetupError {
         message: String,
     },
 
+    /// A scheduling input moved between generating a timetable and saving it.
+    ///
+    /// Its own kind, and **not** [`SetupError::ReviewRequired`], because the two remedies
+    /// are different and only one of them is available here. `ReviewRequired` means *look at
+    /// the recomputed plan and confirm it*; this means **generate again** — there is no
+    /// plan to re-read, because the arrangement was built from inputs that have changed.
+    ///
+    /// The refusal is correct and the message has to make that obvious.
+    /// [TIMETABLE-PERSISTENCE.md](../../../../docs/TIMETABLE-PERSISTENCE.md) §4: nothing
+    /// referential breaks when an availability rule moves after generation, so nothing else
+    /// would catch it, and the result would be *"a plausible, wrong timetable"*. A screen
+    /// that showed a raw error rather than offering the remedy would make a working safety
+    /// check look like a bug — which §13 item 4 names as M8's obligation to avoid.
+    InputsChanged {
+        /// Message to show.
+        message: String,
+    },
+
+    /// The result of a generation is not a timetable, so there is nothing to save.
+    ///
+    /// Two cases, and the message says which, because the user's next step differs:
+    ///
+    /// - **the inputs were refused** — nothing was attempted, and the remedy is the
+    ///   validation findings;
+    /// - **the engine's own final check failed** — the reference scorer rejected what the
+    ///   constructor built. That is a **defect in Evara**, is reported as one, and is
+    ///   deliberately not saveable. `TIMETABLE-PERSISTENCE.md` §9 and `generate`'s own
+    ///   documentation both refuse to let it be returned as a success.
+    NotSaveable {
+        /// Message to show.
+        message: String,
+    },
+
+    /// A write was attempted against a project opened for inspection.
+    ///
+    /// Separate from [`SetupError::Failed`] because it is a boundary working rather than a
+    /// failure: the file was opened read-only on purpose, and the next step is to open it
+    /// normally rather than to retry.
+    ReadOnlyProject {
+        /// Message to show.
+        message: String,
+    },
+
+    /// This generation has already been saved.
+    ///
+    /// Carries the timetable so the interface can offer to **open it** rather than reporting
+    /// an error for something that already succeeded. The case a second click reaches, and
+    /// the reason the session's save is claimed by a compare-and-swap rather than guarded by
+    /// a flag.
+    AlreadySaved {
+        /// The timetable that was written.
+        timetable_id: String,
+        /// Message to show.
+        message: String,
+    },
+
     /// Anything else.
     Failed {
         /// Message to show.
@@ -189,6 +254,24 @@ impl From<DbError> for SetupError {
             },
             DbError::Invalid { message } => Self::Invalid { message },
             DbError::ReviewRequired { .. } => Self::ReviewRequired { message },
+            // The remedy is *generate again*, and it is named rather than implied. See the
+            // variant's own documentation for why this is not `ReviewRequired`.
+            DbError::InputsChanged { .. } => Self::InputsChanged {
+                message: "A scheduling input changed since this timetable was generated, so \
+                          saving it could store a wrong timetable. Nothing was saved. \
+                          Generate again."
+                    .to_owned(),
+            },
+            // `reason` is the engine's own, and the two cases need different things said
+            // about them, so it is forwarded rather than replaced.
+            DbError::NotSaveable { reason } => Self::NotSaveable {
+                message: format!("Nothing was saved: {reason}."),
+            },
+            DbError::ReadOnlyProject => Self::ReadOnlyProject {
+                message: "This campus file was opened for inspection only, so nothing can \
+                          be saved to it."
+                    .to_owned(),
+            },
             DbError::CorruptIdentifier { .. } | DbError::InvalidMetadata { .. } => {
                 Self::CorruptProject {
                     message: "This campus contains a damaged value and cannot be read \
