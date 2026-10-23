@@ -323,6 +323,47 @@ pub enum DbError {
         current: String,
     },
 
+    /// The scheduling inputs moved between generating a timetable and saving it.
+    ///
+    /// # Why this is not [`DbError::Conflict`]
+    ///
+    /// A `Conflict` is about one row the caller had read: it carries a revision, and the
+    /// remedy is to re-read that row. This is about **the whole problem** a solve was run
+    /// against — an availability rule, a room's bookability, a lesson's duration — and the
+    /// remedy is to generate again, because the timetable in hand was built against inputs
+    /// that no longer exist.
+    ///
+    /// Nothing the schema enforces would catch it. Every stored reference still resolves
+    /// (`RESTRICT` guarantees the rows exist), so the save would succeed and store a
+    /// plausible, wrong timetable — which is the one failure a school cannot detect for
+    /// itself.
+    ///
+    /// Detected by comparing the `Assembly`'s change-log watermark against the feed **inside
+    /// the writing transaction**, so it is a predicate on the write rather than a question
+    /// asked beforehand.
+    #[error(
+        "the school's scheduling inputs changed after this timetable was generated, so it \
+         was not saved; generate again to build one against the current inputs"
+    )]
+    InputsChanged {
+        /// The watermark the problem was compiled at.
+        generated_at_seq: i64,
+        /// How many input changes have been recorded since.
+        changes_since: i64,
+    },
+
+    /// A solver outcome was offered for saving that does not describe a timetable.
+    ///
+    /// A run refused at the pre-solve gate attempted nothing, and a run whose own final check
+    /// failed produced an arrangement the reference scorer rejected. Neither is a timetable,
+    /// and storing one would put an artefact in the user's file that no screen could honestly
+    /// render. The findings belong to the report.
+    #[error("{reason}, so there is no timetable to save")]
+    NotSaveable {
+        /// What was wrong, in a sentence that names the status or termination.
+        reason: String,
+    },
+
     /// A safety copy could not be taken before a migration that rebuilds a table.
     ///
     /// `V12` is the first migration to drop and recreate an existing table, and it does so

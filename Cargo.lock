@@ -847,6 +847,7 @@ dependencies = [
  "evara-solver",
  "serde_json",
  "tempfile",
+ "time",
  "uuid",
 ]
 
@@ -878,8 +879,10 @@ name = "evara-db"
 version = "0.1.0"
 dependencies = [
  "directories",
+ "evara-constraints",
  "evara-core",
  "evara-import",
+ "evara-solver",
  "refinery",
  "rusqlite",
  "serde",

@@ -324,6 +324,24 @@ impl Workspace {
             .availability())
     }
 
+    /// Stored timetables for the open project.
+    ///
+    /// Reached through the workspace rather than by opening the file directly, because saving
+    /// **writes**: every change-log trigger calls `evara_site_id()`, which only a connection
+    /// opened with this installation's identity registers. A caller that opened the project
+    /// itself would have no site id to offer and every insert would be refused.
+    ///
+    /// # Errors
+    ///
+    /// [`DbError::NoProjectOpen`] if no project is open.
+    pub fn timetables(&mut self) -> Result<crate::Timetables<'_>> {
+        Ok(self
+            .open
+            .as_mut()
+            .ok_or(DbError::NoProjectOpen)?
+            .timetables())
+    }
+
     /// The constraint repository for the open project.
     ///
     /// # Errors

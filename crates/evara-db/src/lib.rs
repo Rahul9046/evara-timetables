@@ -64,7 +64,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::Connection;
 use uuid::Uuid;
 
-pub use crate::change_log::{ChangeRecord, TrackedTable};
+pub use crate::change_log::{ChangeRecord, TrackedTable, Watermark};
 pub use crate::cloud_sync::SyncedFolder;
 pub use crate::connection::{BUSY_TIMEOUT, PragmaReport};
 pub use crate::error::{DbError, InternalError, Result};
@@ -110,6 +110,11 @@ pub use crate::repo::time_model::{
     MaterialisationRequest, NonWorkingInstructionalDay, Period, PeriodInput, PeriodKind,
     PeriodStructure, PeriodStructureInput, PlanFingerprint, PlannedSlot, TimeModel, Timeslot,
     TimeslotInput, WeeklyCycleDay,
+};
+pub use crate::repo::timetables::{
+    DeletedTimetable, KIND_GENERATION, KIND_REVALIDATION, RunProvenance, SavedTimetable, Scoring,
+    SolveRun, StoredArrangement, StoredViolation, StoredViolationRef, Timetable, TimetableEntry,
+    TimetableEvaluation, Timetables, UnscheduledRecord,
 };
 pub use crate::repo::{Expected, Stamp};
 pub use crate::scheduling::{
@@ -427,6 +432,20 @@ impl Database {
         Constraints::new(self)
     }
 
+    /// Reads and writes stored timetables, their runs and their scorings.
+    ///
+    /// Separate from [`Database::scheduling`] for the same reason [`Database::constraints`] is:
+    /// the two are opposite directions through one subject. `scheduling` **compiles** a school
+    /// into a problem and writes nothing — its receiver is a shared reference so it cannot —
+    /// and this **persists** what a solve produced.
+    ///
+    /// Saving always inserts. Several timetables may exist for one `(cycle, term)` and that
+    /// coexistence is the versioning; a regeneration never overwrites, and replacement is a
+    /// save followed by an explicit delete. See [`Timetables`].
+    pub fn timetables(&mut self) -> Timetables<'_> {
+        Timetables::new(self)
+    }
+
     /// Reads and writes school membership, campus eligibility and enrolment history.
     ///
     /// Separate from [`Database::people`] because the two answer different questions. A
@@ -588,6 +607,8 @@ mod tests_shared_rooms;
 
 #[cfg(test)]
 mod tests_time_model;
+#[cfg(test)]
+mod tests_timetables;
 
 #[cfg(test)]
 mod tests_setup;
