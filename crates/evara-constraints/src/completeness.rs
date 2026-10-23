@@ -14,13 +14,17 @@
 //! record does not, and [`ConstraintType::default_level`] is where that is settled.
 //!
 //! A school that will not accept an unplaced lesson can still raise its own instance to HARD —
-//! ADR 0005 stores the level per instance for exactly that disagreement.
+//! ADR 0005 stores the level per instance for exactly that disagreement. M6 honours a raise and
+//! still returns its partial work: `evara_solver::generate` reports the best arrangement it
+//! reached **and** that the arrangement does not meet the school's completeness requirement,
+//! because discarding the work would leave a school with a raised level strictly worse off than
+//! one without.
 //!
 //! # Partial and complete are different questions, asked separately
 //!
 //! This evaluator reports what is unplaced whatever mode it is called in, because *"12 lessons
 //! are not placed"* is true and useful in both. What differs is the caller's conclusion, and
-//! [`Occupancy::is_complete`](crate::Occupancy::is_complete) is what answers it — see
+//! [`Occupancy::is_complete`](crate::Occupancy) is what answers it — see
 //! [`crate::EvaluationReport`]. Nothing here decides that a partial assignment is acceptable;
 //! it reports the gap and lets the report say which question was being asked.
 
@@ -65,44 +69,29 @@ impl ConstraintEvaluator for ActivityScheduled {
         out: &mut ViolationSink,
     ) {
         for activity in problem.activity_indices() {
-            if occupancy.at(activity).is_some() {
-                continue;
-            }
-            let Some(fact) = problem.activities.get(activity.get()) else {
-                continue;
-            };
-            let section = occupancy.section_of(activity);
-            let label = section.map_or_else(
-                || String::from("an unknown class"),
-                |section| section.name.clone(),
-            );
-
-            out.push(Violation {
-                constraint_type: ConstraintType::ActivityScheduled,
-                level: constraint.level,
-                constraint_id: constraint.id,
-                penalty: constraint.weight,
-                activities: vec![activity],
-                subject: EntityRef::new(
-                    EntityKind::Activity,
-                    fact.id,
-                    format!("{label} (occurrence {})", fact.split_index),
-                ),
-                related: section
-                    .map(|section| {
-                        EntityRef::new(EntityKind::ClassSection, section.id, section.name.clone())
-                    })
-                    .into_iter()
-                    .collect(),
-                cycle_day: None,
-                span: None,
-                detail: format!(
-                    "{} period{} to place",
-                    fact.duration.get(),
-                    if fact.duration.get() == 1 { "" } else { "s" }
-                ),
-            });
+            check_one(problem, occupancy, constraint, activity, out);
         }
+    }
+
+    /// The same check, for one occurrence.
+    ///
+    /// # The one rule whose `affected` set is everything and whose violations are still local
+    ///
+    /// Placing anything changes *how many* occurrences are unplaced, which is why
+    /// [`ActivityScheduled::affected`] returns [`AffectedSet::everything`]. But each violation
+    /// this rule produces names exactly **one** occurrence, so the violation about `A` is
+    /// unchanged by a move of `B` and the narrowed form is still exact — the two statements are
+    /// about different things, and the incremental identity in
+    /// [`ConstraintEvaluator::evaluate_involving`] depends on the second.
+    fn evaluate_involving(
+        &self,
+        problem: &Problem,
+        occupancy: &Occupancy<'_>,
+        constraint: &CompiledConstraint,
+        activity: ActivityIx,
+        out: &mut ViolationSink,
+    ) {
+        check_one(problem, occupancy, constraint, activity, out);
     }
 
     fn affected(
@@ -127,4 +116,53 @@ impl ConstraintEvaluator for ActivityScheduled {
             ),
         )
     }
+}
+
+/// One violation if the occurrence is unplaced, and nothing if it is placed.
+///
+/// The body both drivers share.
+fn check_one(
+    problem: &Problem,
+    occupancy: &Occupancy<'_>,
+    constraint: &CompiledConstraint,
+    activity: ActivityIx,
+    out: &mut ViolationSink,
+) {
+    if occupancy.at(activity).is_some() {
+        return;
+    }
+    let Some(fact) = problem.activities.get(activity.get()) else {
+        return;
+    };
+    let section = occupancy.section_of(activity);
+    let label = section.map_or_else(
+        || String::from("an unknown class"),
+        |section| section.name.clone(),
+    );
+
+    out.push(Violation {
+        constraint_type: ConstraintType::ActivityScheduled,
+        level: constraint.level,
+        constraint_id: constraint.id,
+        penalty: -constraint.weight,
+        activities: vec![activity],
+        subject: EntityRef::new(
+            EntityKind::Activity,
+            fact.id,
+            format!("{label} (occurrence {})", fact.split_index),
+        ),
+        related: section
+            .map(|section| {
+                EntityRef::new(EntityKind::ClassSection, section.id, section.name.clone())
+            })
+            .into_iter()
+            .collect(),
+        cycle_day: None,
+        span: None,
+        detail: format!(
+            "{} period{} to place",
+            fact.duration.get(),
+            if fact.duration.get() == 1 { "" } else { "s" }
+        ),
+    });
 }

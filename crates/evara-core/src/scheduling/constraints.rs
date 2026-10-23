@@ -352,7 +352,12 @@ pub struct CompiledConstraint {
     pub constraint_type: ConstraintType,
     /// The level it is being evaluated at.
     pub level: ConstraintLevel,
-    /// The integer penalty one violation of it contributes.
+    /// The integer penalty one violation of it contributes, as a **magnitude**.
+    ///
+    /// Non-negative, because `constraint_instance.weight` is `CHECK (weight >= 0)` and a
+    /// negative weight would be a rule that rewarded being broken. An evaluator negates it
+    /// when it builds a [`Violation`], which is where the direction `SOLVER.md` §3 fixes is
+    /// applied — once, rather than at every comparison.
     pub weight: i64,
     /// Its typed parameters.
     pub options: ConstraintOptions,
@@ -442,6 +447,11 @@ pub struct Violation {
     /// The stored instance that produced it, where there is one.
     pub constraint_id: Option<Uuid>,
     /// The integer penalty it contributes, already multiplied by the instance's weight.
+    ///
+    /// **Negative-going**, so a violation makes a [`Score`] smaller and
+    /// [`Score::PERFECT`] is the best any arrangement can reach. `SOLVER.md` §3 fixes the
+    /// direction and [`Score`] depends on it: a positive cost here would make [`Ord`] rank a
+    /// broken timetable above a clean one, which is the comparison a search is built on.
     pub penalty: i64,
     /// The occurrences at fault, in index order.
     ///

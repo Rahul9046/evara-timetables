@@ -37,7 +37,7 @@ use evara_core::scheduling::{
     EntityRef, Explanation, Problem, TimeslotIx, Violation, ViolationSink,
 };
 
-use crate::occupancy::{Occupancy, day_label};
+use crate::occupancy::{Occupancy, Placed, day_label};
 use crate::{ConstraintEvaluator, explanation};
 
 /// A placement must not fall where a hard availability rule forbids it.
@@ -53,12 +53,6 @@ impl ConstraintEvaluator for EntityUnavailable {
         crate::params::schema_of(ConstraintType::EntityUnavailable)
     }
 
-    /// # Every slot of the span, not only the first
-    ///
-    /// A double period occupies two slots, and a teacher unavailable for the second of them is
-    /// unavailable for the lesson. So the test runs over every slot the span covers, and the
-    /// first offending one is reported — one violation per `(occurrence, entity)` rather than
-    /// one per slot, because the remedy is the same for all of them.
     fn evaluate(
         &self,
         problem: &Problem,
@@ -67,57 +61,25 @@ impl ConstraintEvaluator for EntityUnavailable {
         out: &mut ViolationSink,
     ) {
         for placed in occupancy.all() {
-            let Some(section) = occupancy.section_of(placed.activity) else {
-                continue;
-            };
+            check_one(problem, occupancy, constraint, placed, out);
+        }
+    }
 
-            let mut involved: Vec<(AvailabilityEntity, EntityRef)> = Vec::new();
-            for teacher in &section.teachers {
-                if let Some(fact) = problem.teachers.get(teacher.get()) {
-                    involved.push((
-                        AvailabilityEntity::Teacher { teacher: *teacher },
-                        EntityRef::new(EntityKind::Teacher, fact.id, fact.name.clone()),
-                    ));
-                }
-            }
-            for group in &section.audience {
-                if let Some(fact) = problem.groups.get(group.get()) {
-                    involved.push((
-                        AvailabilityEntity::Group { group: *group },
-                        EntityRef::new(EntityKind::StudentGroup, fact.id, fact.name.clone()),
-                    ));
-                }
-            }
-            if let Some(room) = placed.span.room
-                && let Some(fact) = problem.rooms.get(room.get())
-            {
-                involved.push((
-                    AvailabilityEntity::Room { room },
-                    EntityRef::new(EntityKind::Room, fact.id, fact.name.clone()),
-                ));
-            }
-
-            for (entity, reference) in involved {
-                let Some(slot) = first_forbidden(problem, &placed.span.slots, entity) else {
-                    continue;
-                };
-                out.push(Violation {
-                    constraint_type: ConstraintType::EntityUnavailable,
-                    level: constraint.level,
-                    constraint_id: constraint.id,
-                    penalty: constraint.weight,
-                    activities: vec![placed.activity],
-                    subject: reference,
-                    related: vec![EntityRef::new(
-                        EntityKind::ClassSection,
-                        section.id,
-                        section.name.clone(),
-                    )],
-                    cycle_day: Some(placed.span.cycle_day),
-                    span: Some(placed.span.interval),
-                    detail: slot_label(problem, slot, placed.span.cycle_day),
-                });
-            }
+    /// The same check, for one occurrence.
+    ///
+    /// Trivially narrowed, because the rule is local: whether a lesson sits where its people
+    /// are free depends on where *it* is and on nothing any other occurrence does. Both
+    /// drivers call the same `check_one`.
+    fn evaluate_involving(
+        &self,
+        problem: &Problem,
+        occupancy: &Occupancy<'_>,
+        constraint: &CompiledConstraint,
+        activity: ActivityIx,
+        out: &mut ViolationSink,
+    ) {
+        if let Some(placed) = occupancy.at(activity) {
+            check_one(problem, occupancy, constraint, placed, out);
         }
     }
 
@@ -145,6 +107,76 @@ impl ConstraintEvaluator for EntityUnavailable {
                 violation.subject.label, violation.detail
             ),
         )
+    }
+}
+
+/// Every entity of one placed occurrence that a hard rule forbids where it is.
+///
+/// The body both drivers share.
+///
+/// # Every slot of the span, not only the first
+///
+/// A double period occupies two slots, and a teacher unavailable for the second of them is
+/// unavailable for the lesson. So the test runs over every slot the span covers, and the first
+/// offending one is reported — one violation per `(occurrence, entity)` rather than one per
+/// slot, because the remedy is the same for all of them.
+fn check_one(
+    problem: &Problem,
+    occupancy: &Occupancy<'_>,
+    constraint: &CompiledConstraint,
+    placed: &Placed,
+    out: &mut ViolationSink,
+) {
+    let Some(section) = occupancy.section_of(placed.activity) else {
+        return;
+    };
+
+    let mut involved: Vec<(AvailabilityEntity, EntityRef)> = Vec::new();
+    for teacher in &section.teachers {
+        if let Some(fact) = problem.teachers.get(teacher.get()) {
+            involved.push((
+                AvailabilityEntity::Teacher { teacher: *teacher },
+                EntityRef::new(EntityKind::Teacher, fact.id, fact.name.clone()),
+            ));
+        }
+    }
+    for group in &section.audience {
+        if let Some(fact) = problem.groups.get(group.get()) {
+            involved.push((
+                AvailabilityEntity::Group { group: *group },
+                EntityRef::new(EntityKind::StudentGroup, fact.id, fact.name.clone()),
+            ));
+        }
+    }
+    if let Some(room) = placed.span.room
+        && let Some(fact) = problem.rooms.get(room.get())
+    {
+        involved.push((
+            AvailabilityEntity::Room { room },
+            EntityRef::new(EntityKind::Room, fact.id, fact.name.clone()),
+        ));
+    }
+
+    for (entity, reference) in involved {
+        let Some(slot) = first_forbidden(problem, &placed.span.slots, entity) else {
+            continue;
+        };
+        out.push(Violation {
+            constraint_type: ConstraintType::EntityUnavailable,
+            level: constraint.level,
+            constraint_id: constraint.id,
+            penalty: -constraint.weight,
+            activities: vec![placed.activity],
+            subject: reference,
+            related: vec![EntityRef::new(
+                EntityKind::ClassSection,
+                section.id,
+                section.name.clone(),
+            )],
+            cycle_day: Some(placed.span.cycle_day),
+            span: Some(placed.span.interval),
+            detail: slot_label(problem, slot, placed.span.cycle_day),
+        });
     }
 }
 

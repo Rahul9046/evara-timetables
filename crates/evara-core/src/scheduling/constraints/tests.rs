@@ -24,7 +24,7 @@ fn violation(kind: ConstraintType, activities: &[u32]) -> Violation {
         constraint_type: kind,
         level: kind.default_level(),
         constraint_id: None,
-        penalty: 1,
+        penalty: -1,
         activities: activities.iter().copied().map(ActivityIx::new).collect(),
         subject: subject(),
         related: Vec::new(),
@@ -285,12 +285,15 @@ fn every_constraint_error_says_what_was_wrong_and_names_its_subject() {
 
 #[test]
 fn a_violation_scores_at_its_own_level() {
+    // Negative-going, per `SOLVER.md` §3: a violation makes the score worse, and worse is
+    // smaller, so `Score::PERFECT` is the top of the order rather than the bottom.
     let clash = violation(ConstraintType::TeacherClash, &[0, 1]);
-    assert_eq!(clash.score(), Score::new(1, 0, 0));
+    assert_eq!(clash.score(), Score::new(-1, 0, 0));
     assert!(!clash.score().is_feasible());
+    assert!(clash.score() < Score::PERFECT);
 
     let unplaced = violation(ConstraintType::ActivityScheduled, &[4]);
-    assert_eq!(unplaced.score(), Score::new(0, 1, 0));
+    assert_eq!(unplaced.score(), Score::new(0, -1, 0));
     assert!(
         unplaced.score().is_feasible(),
         "an unplaced activity does not make a timetable infeasible — it makes it incomplete"
@@ -300,8 +303,12 @@ fn a_violation_scores_at_its_own_level() {
 #[test]
 fn a_weighted_violation_contributes_its_weight() {
     let mut heavy = violation(ConstraintType::RoomClash, &[2, 3]);
-    heavy.penalty = 5;
-    assert_eq!(heavy.score(), Score::new(5, 0, 0));
+    heavy.penalty = -5;
+    assert_eq!(heavy.score(), Score::new(-5, 0, 0));
+    assert!(
+        heavy.score() < violation(ConstraintType::RoomClash, &[2, 3]).score(),
+        "a heavier violation must order below a lighter one"
+    );
 }
 
 #[test]
@@ -315,7 +322,7 @@ fn a_sink_keeps_what_it_was_given_in_the_order_it_was_given() {
     assert_eq!(sink.count_at(ConstraintLevel::Hard), 1);
     assert_eq!(sink.count_at(ConstraintLevel::Medium), 1);
     assert_eq!(sink.count_at(ConstraintLevel::Soft), 0);
-    assert_eq!(sink.score(), Score::new(1, 1, 0));
+    assert_eq!(sink.score(), Score::new(-1, -1, 0));
     assert_eq!(
         sink.violations()[0].constraint_type,
         ConstraintType::TeacherClash
