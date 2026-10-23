@@ -30,12 +30,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 
-import type {
-  ProjectionScope,
-  ScopeGrid,
-  ScopeKind,
-  TimetableProjection,
-} from "@evara/domain";
+import type { ProjectedDay, ProjectionScope, ScopeGrid, ScopeKind } from "@evara/domain";
 
 import { describeTimetableError } from "../../ipc/timetables";
 
@@ -124,7 +119,7 @@ export function ScopePicker(props: {
 
 /** How one day of a panel is chosen, when the whole cycle is too wide to read. */
 export function DayStrip(props: {
-  days: ReadonlyArray<{ cycleDayId: string; ordinal: number; label: string }>;
+  days: readonly ProjectedDay[];
   shown: number | null;
   onChange: (ordinal: number | null) => void;
 }) {
@@ -207,18 +202,4 @@ export function useScopeLoad(
   }, [load, kind, id]);
 
   return { grid, loading, error };
-}
-
-/**
- * The scope a screen should show first.
- *
- * `master` when there is anything to show, because the first question a timetabler asks of a
- * new timetable is *"what does the whole thing look like?"*.
- */
-export function firstScope(projection: TimetableProjection | null): {
-  kind: ScopeKind;
-  id: string | null;
-} {
-  void projection;
-  return { kind: "master", id: null };
 }

@@ -376,6 +376,41 @@ describe("the axes", () => {
     expect(screen.getAllByLabelText(/Day A, 1: free/).length).toBe(1);
   });
 
+  it("render one column when a single day is chosen, and keep the table well formed", () => {
+    // Showing one day is the only filtering this component does, and it is safe because it
+    // removes whole cells rather than part of a span: every row still renders as many cells
+    // as there are visible columns.
+    const lesson = aLesson();
+    const grid = aGrid({
+      panels: [
+        aPanel({
+          cells: cells(PERIODS, DAYS, { "1-1": { kind: "lesson", lesson: 0, rows: 1 } }),
+        }),
+      ],
+    });
+    render(<TimetableGrid grid={grid} lessons={[lesson]} shownDay={2} />);
+
+    const headers = screen
+      .getAllByRole("columnheader")
+      .map((h) => h.textContent)
+      .filter((text) => text !== "Period");
+    expect(headers).toEqual(["Day B"]);
+
+    for (const row of screen.getAllByRole("row").slice(1)) {
+      expect(row.querySelectorAll("td")).toHaveLength(1);
+    }
+    // Day A's lesson is hidden, not relocated.
+    expect(screen.queryByText("9 Mathematics B")).toBeNull();
+  });
+
+  it("stops the keyboard at the one visible column", async () => {
+    const user = userEvent.setup();
+    render(<TimetableGrid grid={aGrid()} lessons={[aLesson()]} shownDay={1} />);
+    await user.tab();
+    await user.keyboard("{ArrowRight}");
+    expect(document.activeElement!.getAttribute("data-cell")).toBe("0-0-0");
+  });
+
   it("use a real table with row and column scopes", () => {
     render(<TimetableGrid grid={aGrid()} lessons={[aLesson()]} />);
     const table = screen.getAllByRole("table")[0]!;

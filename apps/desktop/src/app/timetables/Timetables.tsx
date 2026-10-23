@@ -50,7 +50,7 @@ import {
   UnverifiedPanel,
   UsabilityLine,
 } from "./Disclosure";
-import { ScopePicker, useScopeLoad } from "./ScopeView";
+import { DayStrip, ScopePicker, WHOLE_CYCLE_LIMIT, useScopeLoad } from "./ScopeView";
 import { TimetableGrid } from "./TimetableGrid";
 
 export function Timetables(props: {
@@ -211,6 +211,8 @@ function OpenTimetable(props: {
 
   const [scopeKind, setScopeKind] = useState<ScopeKind>("master");
   const [scopeId, setScopeId] = useState<string | null>(null);
+  // `null` is the whole cycle — see `Generate` for why a wide rotation opens on one day.
+  const [shownDay, setShownDay] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -453,9 +455,16 @@ function OpenTimetable(props: {
               setScopeId(nextId);
             }}
           />
+          {view.projection.days.length <= WHOLE_CYCLE_LIMIT ? null : (
+            <DayStrip days={view.projection.days} shown={shownDay} onChange={setShownDay} />
+          )}
           {gridError === null ? null : <Banner tone="error">{gridError}</Banner>}
           {grid === null ? null : (
-            <TimetableGrid grid={grid} lessons={view.projection.lessons} />
+            <TimetableGrid
+              grid={grid}
+              lessons={view.projection.lessons}
+              shownDay={shownDay}
+            />
           )}
         </section>
       )}

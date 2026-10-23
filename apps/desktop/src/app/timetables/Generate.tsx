@@ -56,7 +56,7 @@ import {
   type Selection,
 } from "../../ipc/timetables";
 import { Banner, Loading } from "../ui/Shell";
-import { ScopePicker, useScopeLoad } from "./ScopeView";
+import { DayStrip, ScopePicker, WHOLE_CYCLE_LIMIT, useScopeLoad } from "./ScopeView";
 import { UnscheduledPanel, UnverifiedPanel, UsabilityLine } from "./Disclosure";
 import { TimetableGrid } from "./TimetableGrid";
 
@@ -87,6 +87,9 @@ export function Generate(props: {
 
   const [scopeKind, setScopeKind] = useState<ScopeKind>("master");
   const [scopeId, setScopeId] = useState<string | null>(null);
+  // `null` is the whole cycle. A rotation wider than the limit opens on one day, because a
+  // sixteen-column table is unreadable before it is wrong — a display preference, not a rule.
+  const [shownDay, setShownDay] = useState<number | null>(null);
 
   // Validation re-runs whenever the chosen grid changes. It writes nothing, so this is safe.
   const key = selection === null ? null : `${selection.cycleId}|${selection.termId ?? ""}`;
@@ -492,9 +495,16 @@ export function Generate(props: {
                 setScopeId(nextId);
               }}
             />
+            {projection === null || projection.days.length <= WHOLE_CYCLE_LIMIT ? null : (
+              <DayStrip days={projection.days} shown={shownDay} onChange={setShownDay} />
+            )}
             {gridError === null ? null : <Banner tone="error">{gridError}</Banner>}
             {grid === null ? null : (
-              <TimetableGrid grid={grid} lessons={projection?.lessons ?? []} />
+              <TimetableGrid
+                grid={grid}
+                lessons={projection?.lessons ?? []}
+                shownDay={shownDay}
+              />
             )}
           </section>
         </>

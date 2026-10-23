@@ -38,6 +38,14 @@
  * period rows do not align. A scope touching both gets two panels and a sentence saying the
  * two cannot be read as one week — never a merged axis, which would assert that Northgate's
  * Period 3 and Southmoor's Period 3 are the same row. They are not.
+ *
+ * ## Showing one day is a display choice, and the only one this component makes
+ *
+ * `shownDay` renders a single column instead of the whole cycle, for a rotation too wide to
+ * read. It is safe to do here, and is the one filtering decision that is: hiding a column
+ * removes whole cells, never part of a span, so every row still renders the same number of
+ * cells as there are visible days and the table stays well-formed. **Which** days exist, and
+ * what occupies each, remain entirely the backend's answer.
  */
 import { useCallback, useRef, useState } from "react";
 
@@ -62,9 +70,11 @@ type Focus = { panel: number; day: number; period: number };
 export function TimetableGrid(props: {
   grid: ScopeGrid;
   lessons: readonly ProjectedLesson[];
+  /** One cycle day's `ordinal`, or `null` for the whole cycle. */
+  shownDay?: number | null;
   onSelectLesson?: (index: number) => void;
 }) {
-  const { grid, lessons, onSelectLesson } = props;
+  const { grid, lessons, shownDay = null, onSelectLesson } = props;
   const container = useRef<HTMLDivElement>(null);
   const [focus, setFocus] = useState<Focus>({ panel: 0, day: 0, period: 0 });
 
@@ -73,27 +83,34 @@ export function TimetableGrid(props: {
       const panel = grid.panels[panelIndex];
       if (panel === undefined) return;
 
+      // The bounds are the *rendered* columns, so arrowing right in a one-day view stops at
+      // the one column rather than focusing a cell nobody can see.
+      const columns =
+        shownDay === null
+          ? panel.days.length
+          : panel.days.filter((one) => one.ordinal === shownDay).length;
+
       const moves: Record<string, [number, number]> = {
         ArrowRight: [day + 1, period],
         ArrowLeft: [day - 1, period],
         ArrowDown: [day, period + 1],
         ArrowUp: [day, period - 1],
         Home: [0, period],
-        End: [panel.days.length - 1, period],
+        End: [columns - 1, period],
       };
       const move = moves[event.key];
       if (move === undefined) return;
 
       event.preventDefault();
       const [nextDay, nextPeriod] = move;
-      if (nextDay < 0 || nextDay >= panel.days.length) return;
+      if (nextDay < 0 || nextDay >= columns) return;
       if (nextPeriod < 0 || nextPeriod >= panel.periods.length) return;
 
       setFocus({ panel: panelIndex, day: nextDay, period: nextPeriod });
       const selector = `[data-cell="${panelIndex}-${nextDay}-${nextPeriod}"]`;
       container.current?.querySelector<HTMLElement>(selector)?.focus();
     },
-    [grid.panels],
+    [grid.panels, shownDay],
   );
 
   if (grid.panels.length === 0) {
@@ -123,6 +140,7 @@ export function TimetableGrid(props: {
         <Panel
           key={panel.scheduleId}
           panel={panel}
+          shownDay={shownDay}
           panelIndex={panelIndex}
           lessons={lessons}
           scopeName={grid.scope.name}
@@ -138,6 +156,7 @@ export function TimetableGrid(props: {
 /** One bell schedule's table. */
 function Panel(props: {
   panel: GridPanel;
+  shownDay: number | null;
   panelIndex: number;
   lessons: readonly ProjectedLesson[];
   scopeName: string;
@@ -145,13 +164,19 @@ function Panel(props: {
   onKeyDown: (event: React.KeyboardEvent, panel: number, day: number, period: number) => void;
   onSelectLesson?: (index: number) => void;
 }) {
-  const { panel, panelIndex, lessons, scopeName, focus, onKeyDown, onSelectLesson } = props;
+  const { panel, shownDay, panelIndex, lessons, scopeName, focus, onKeyDown, onSelectLesson } =
+    props;
+
+  // The columns actually rendered. A filter, not a re-derivation: these are the backend's
+  // days, in the backend's order, with the ones the reader asked to hide left out.
+  const days =
+    shownDay === null ? panel.days : panel.days.filter((day) => day.ordinal === shownDay);
 
   /** The cell at one position. The backend guarantees exactly one exists. */
   const cellAt = (day: number, period: number): TimetableCell | undefined =>
     panel.cells.find(
       (cell) =>
-        cell.dayOrdinal === panel.days[day]?.ordinal &&
+        cell.dayOrdinal === days[day]?.ordinal &&
         cell.periodOrdinal === panel.periods[period]?.ordinal,
     );
 
@@ -176,7 +201,7 @@ function Panel(props: {
               <th scope="col" className="ttPeriodHead">
                 Period
               </th>
-              {panel.days.map((day) => (
+              {days.map((day) => (
                 <th key={day.cycleDayId} scope="col">
                   {day.label}
                 </th>
@@ -198,7 +223,7 @@ function Panel(props: {
                     <span className="ttPeriodKind"> (no teaching)</span>
                   )}
                 </th>
-                {panel.days.map((day, dayIndex) => {
+                {days.map((day, dayIndex) => {
                   const cell = cellAt(dayIndex, periodIndex);
                   // A continuation is covered by the span above it. Rendering a `<td>` here
                   // would push the row one column wide and break the table — which is the
