@@ -16,4 +16,14 @@ workspace = true
 evara-core = { workspace = true }
 evara-constraints = { workspace = true }
 serde = { workspace = true }
-thiserror = { workspace = true }
+# A result names the school, the cycle and the term it is for, and each unplaced occurrence
+# carries the `activity.id` a report has to name. Already in the tree.
+uuid = { workspace = true }
+
+[dev-dependencies]
+# The synthetic scheduling fixtures, which are how every solver test gets a `Problem` without a
+# database -- `evara-solver` may not open one. Behind a feature the desktop binary does not
+# enable, so this adds nothing to the shipped crate.
+evara-core = { workspace = true, features = ["fixtures"] }
+# One test asserts the `Problem`/`Assignment` JSON round trip `SOLVER.md` §9 requires.
+serde_json = { workspace = true }
