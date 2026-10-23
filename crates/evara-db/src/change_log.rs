@@ -196,7 +196,122 @@ pub const TRACKED_TABLES: &[&str] = &[
     // name, `id` and `rev`.
     "constraint_instance",
     "constraint_ref",
+    // V17 -- timetable persistence. Three of the six new tables are entities and three are
+    // not, and the split is about what a future synchronisation would have to reconcile.
+    //
+    // A `timetable` is a school's artefact: named by a user, deleted by a user, and edited
+    // directly by Phase 8. A `timetable_entry` is what Phase 8 edits -- `is_manual` exists to
+    // record that a human placed one -- so an entry's history is a user's history. A
+    // `solve_run` is how a timetable came to be, and ADR 0040's own argument reaches it: "a
+    // table whose rows carry a school's configuration decisions is exactly a table a future
+    // synchronisation has to reconcile."
+    //
+    // `violation`, `violation_ref` and `timetable_evaluation`'s findings are DERIVED -- an
+    // evaluation reproduces them -- and `solve_run_unscheduled` is immutable with its run.
+    // Those four are listed in `NON_ENTITY_TABLES` instead, each with its reason.
+    //
+    // `timetable_evaluation` IS tracked: it is not the findings, it is the record that a
+    // scoring happened and what it concluded, and replacing the current one is a change a
+    // reader of the feed should see.
+    "timetable",
+    "timetable_entry",
+    "solve_run",
+    "timetable_evaluation",
 ];
+
+/// Where the project's history stood at a moment in time.
+///
+/// # Why a sequence number is the right freshness signal
+///
+/// `change_log.seq` is `INTEGER PRIMARY KEY AUTOINCREMENT` and **every** tracked table writes
+/// to it through its triggers, so the maximum is an exact statement of "where this project
+/// stood" — not a sample of it, and not a hash over a chosen set of facts that could be
+/// subtly too narrow.
+///
+/// That is what makes it usable where a fingerprint over scheduling inputs would not be. A
+/// fingerprint has to enumerate what a `Problem` depends on, and getting that list one table
+/// short produces the worst possible outcome: a stale timetable reported as current. A
+/// watermark cannot be too narrow, because a table nobody classified still writes to the feed.
+///
+/// # Monotonic, and never reused
+///
+/// `AUTOINCREMENT` guarantees a sequence number is never reused even after rows are deleted,
+/// so a watermark taken before a delete cannot be matched by one taken after.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
+pub struct Watermark(i64);
+
+impl Watermark {
+    /// A watermark on a project with no history at all.
+    pub const EMPTY: Self = Self(0);
+
+    /// Builds one from a stored sequence number.
+    #[must_use]
+    pub const fn new(seq: i64) -> Self {
+        Self(seq)
+    }
+
+    /// The sequence number, for storing on a run as provenance.
+    #[must_use]
+    pub const fn get(self) -> i64 {
+        self.0
+    }
+}
+
+/// Reads the current high-water mark of the change feed.
+///
+/// `0` for a project nothing has ever written to, which is why [`Watermark::EMPTY`] is that
+/// value rather than a sentinel.
+pub(crate) fn watermark(conn: &Connection) -> Result<Watermark> {
+    let seq: i64 = conn.query_row("SELECT COALESCE(MAX(seq), 0) FROM change_log", [], |row| {
+        row.get(0)
+    })?;
+    Ok(Watermark::new(seq))
+}
+
+/// Tables whose rows are **outputs** of a solve rather than inputs to one.
+///
+/// A change to one of these cannot invalidate a `SolveOutcome`, so saving one timetable must
+/// not make a second outcome — loaded at the same watermark — stale. Everything **not** listed
+/// here counts as an input.
+///
+/// The direction of that default is the point. A table added by a future migration and
+/// forgotten here is treated as an input, so the freshness check refuses where it need not
+/// have; the opposite default would accept a save it should have refused, silently. Refusing
+/// too often is a nuisance, and accepting too often is a wrong timetable.
+pub(crate) const SOLVE_OUTPUT_TABLES: &[&str] = &[
+    "timetable",
+    "timetable_entry",
+    "solve_run",
+    "timetable_evaluation",
+];
+
+/// Whether any **input** to a solve has changed since `since`.
+///
+/// Call this inside the transaction that writes. See [`Watermark`] for why the question is
+/// asked of the feed rather than of a fingerprint.
+pub(crate) fn inputs_changed_since(tx: &Transaction<'_>, since: Watermark) -> Result<bool> {
+    let placeholders = SOLVE_OUTPUT_TABLES
+        .iter()
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT EXISTS (
+             SELECT 1 FROM change_log
+             WHERE seq > ?1 AND entity_table NOT IN ({placeholders})
+         )"
+    );
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(since.get())];
+    for table in SOLVE_OUTPUT_TABLES {
+        params.push(Box::new((*table).to_owned()));
+    }
+    let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(AsRef::as_ref).collect();
+    let changed: bool = tx.query_row(&sql, refs.as_slice(), |row| row.get(0))?;
+    Ok(changed)
+}
 
 /// Installs the change-log triggers for one table.
 ///

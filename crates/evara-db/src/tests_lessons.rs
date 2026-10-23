@@ -574,15 +574,24 @@ fn a_project_at_the_previous_schema_keeps_every_row_and_revision() {
             // V16 goes too. refinery reports a *gap* rather than a rewind if a later
             // migration stays applied while an earlier one's record is removed — "migration
             // V15 is missing from the filesystem" — so the history has to come back to V14
-            // contiguously. Reopening then re-runs V15 and V16 together, which is the real
-            // upgrade path a V14 project takes today.
+            // contiguously. Reopening then re-runs V15, V16 and V17 together, which is the
+            // real upgrade path a V14 project takes today.
+            // V17's tables go first: they reference `activity`, which V15 created, so the
+            // drops have to unwind in the opposite order to the migrations.
             tx.execute_batch(
-                "DROP TABLE IF EXISTS constraint_ref;
+                "DROP TABLE IF EXISTS violation_ref;
+                 DROP TABLE IF EXISTS violation;
+                 DROP TABLE IF EXISTS timetable_evaluation;
+                 DROP TABLE IF EXISTS solve_run_unscheduled;
+                 DROP TABLE IF EXISTS solve_run;
+                 DROP TABLE IF EXISTS timetable_entry;
+                 DROP TABLE IF EXISTS timetable;
+                 DROP TABLE IF EXISTS constraint_ref;
                  DROP TABLE IF EXISTS constraint_instance;
                  ALTER TABLE student_group DROP COLUMN children_are_disjoint",
             )?;
             tx.execute(
-                "DELETE FROM refinery_schema_history WHERE version IN (15, 16)",
+                "DELETE FROM refinery_schema_history WHERE version IN (15, 16, 17)",
                 [],
             )?;
             Ok(())
