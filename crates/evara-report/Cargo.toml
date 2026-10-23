@@ -12,7 +12,31 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# TypeScript definitions for the projection types that cross the IPC boundary. Off by
+# default so the CLI never carries the generator; the desktop crate turns it on. See
+# ADR 0012.
+ts = ["dep:ts-rs", "evara-core/ts"]
+
 [dependencies]
 evara-core = { workspace = true }
+# A findings view renders `explain()`, and that wording lives with the rule that produced
+# it — a report that composed its own sentence would be a second implementation of every
+# rule's reasoning. See ADR 0043. `evara-constraints` has no I/O and no SQL, so the edge
+# adds nothing this crate should not have.
+evara-constraints = { workspace = true }
 serde = { workspace = true }
+# Only to read an `EntityKind` through its serde attribute rather than restating the
+# spelling in a second `match`. `evara-db` writes `violation_ref.entity_kind` the same
+# way, so the stored vocabulary and this one are the same one and cannot drift.
+serde_json = { workspace = true }
 thiserror = { workspace = true }
+# A projection is addressed by stored identifiers: a dense index has no meaning outside the
+# problem that assigned it and never crosses this crate's public API.
+uuid = { workspace = true }
+ts-rs = { workspace = true, optional = true }
+
+[dev-dependencies]
+# Projections are tested against M2's deterministic synthetic schools, the same catalogue
+# the evaluators use, so a projection and a rule are read against one set of facts.
+evara-core = { workspace = true, features = ["fixtures"] }
