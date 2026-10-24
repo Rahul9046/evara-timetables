@@ -1,5 +1,5 @@
 /*
- * Timetables — M8.
+ * Timetables — M8, extended by M9A's editor.
  *
  * The Phase 7 stylesheet `styles.css`'s header promised: *"The real lesson timetable is
  * designed in Phase 7, against real data and real interaction requirements."* This is it,
@@ -20,6 +20,12 @@
  *   - a pattern as well as a tint on every pinned cell, because colour alone is not a
  *     message — the clash case has to survive a monochrome display and a colour-blind
  *     reader, and each one also renders an icon and a word.
+ *
+ * M9A's editing section at the bottom holds to the third of those rather than relaxing it: a
+ * legal drop target is a ring as well as a tint, a refused one is a hatch as well as a tint,
+ * and both say which they are out loud in the cell's `aria-label`. A drop verdict is the one
+ * piece of this screen a user acts on immediately, so it is the last place to let colour
+ * carry a message alone.
  */
 
 .workspaceRail {
@@ -615,6 +621,147 @@
 .ttUnplacedCause code {
   font-size: 11px;
   color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------- editing — M9A */
+
+/*
+ * A free teaching cell and a cell with no teaching are different facts, so they are
+ * different surfaces. `.ttRow--break` already hatches the whole break row; this pair is
+ * what makes a cell inside an otherwise-teaching row readable as unavailable.
+ */
+.ttCell--empty {
+  background: transparent;
+}
+
+.ttCell--unavailable {
+  background: var(--border-subtle);
+}
+
+/*
+ * A drop verdict never relies on colour. `--legal` is a tint *and* a solid inset ring;
+ * `--illegal` is a tint *and* a hatch, the same device the clash cell uses — and both cells
+ * also announce the verdict in their `aria-label`, in the refusing rule's own words.
+ *
+ * These sit after the pinned tones deliberately: while a lesson is in hand, "can it go here"
+ * is the question on screen, and a cell that is both a clash and a legal target should read
+ * as a target.
+ */
+.ttCell--legal {
+  background: var(--ok-bg);
+  box-shadow: inset 0 0 0 2px var(--ok);
+}
+
+.ttCell--illegal {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--bad-bg) 0 4px,
+    transparent 4px 9px
+  );
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--text-muted);
+}
+
+/* What is in hand, wherever it is drawn — in its cell, and in the tray. */
+.ttLesson--held,
+.ttTrayItem--held {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+}
+
+/*
+ * The per-lesson Pick up / Lock / Unschedule row.
+ *
+ * Always rendered while editing rather than revealed on hover: it is the keyboard's route to
+ * the *second* lesson of a shared cell, and an affordance that appears only under a pointer is
+ * no route at all.
+ */
+.ttLessonTools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  margin-top: 3px;
+  font-size: 11px;
+}
+
+.ttEditBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.ttEditHistory {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ttEditCounts {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.ttEditHint {
+  margin: 0;
+  max-width: 76ch;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+/* What is in hand, and where it may go. A live region, so picking up is announced. */
+.ttHeld {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--info-bg);
+}
+
+.ttHeld h3 {
+  margin: 0;
+  flex: 1 1 100%;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.ttPanel--keep {
+  border-left: 3px solid var(--accent);
+}
+
+.ttPanel--tray {
+  border-left: 3px solid var(--text-faint);
+}
+
+.ttTrayList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ttTrayItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 12px;
+  min-width: 140px;
 }
 
 /*

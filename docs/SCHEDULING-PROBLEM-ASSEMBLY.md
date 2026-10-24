@@ -94,8 +94,13 @@ constraint set), `calendar_day` (no clash decision reads a date — ADR 0032 §5
 `teacher_qualification` and `teacher_department` (a qualification warns at assignment time and
 is not a scheduling input — ADR 0028), `school_logo`, `year_level`, `department`.
 
-`Problem::pinned` is empty: `activity.is_locked` does not exist, and `activity-fixed` joins
-the constraint set once locks do.
+**`Problem::pinned` is empty, and the loader will never populate it.** A lock is
+`timetable_entry.is_locked` — an *output* of a solve, stored on a row a solve produced — and this
+module compiles inputs. A loader that read a timetable would make the compiled problem depend on
+which timetable happened to be open, so two users generating against the same setup would be
+solving different problems. M9A's editing session is what populates `pinned`, from
+`Timetables::pins`; [ADR 0045](adr/0045-a-lock-is-a-property-of-a-placement.md) §3 is the record,
+and it corrects this paragraph's earlier claim that the column was `activity.is_locked`.
 
 ## 4. School scoping
 
@@ -168,8 +173,9 @@ section.bell_schedule = grid.resolve(&context, section.campus);
 
 ADR 0036 §2 requires it and `Problem::integrity` reports any drift as
 `IntegrityError::BellScheduleResolutionDisagrees`. The loader *produces* the value M3
-*validates*, with one implementation between them, and M5's `duration-contiguous` and M11's
-`validate_move` will read the same module.
+*validates*, with one implementation between them. M5's `duration-contiguous` reads the same
+module, and so does M9A's editor — through `IncrementalScorer::probe`, not through a
+`validate_move` of its own.
 
 Sections are therefore built **last**: the context and the slots exist, `G` is derived from
 `Problem::timeslots`, and only then is each section's resolution computed and recorded. That
@@ -594,7 +600,7 @@ Stated rather than forced, per the rule that schema semantics are not bent for f
 | `children_are_disjoint = Disjoint` / `MayOverlap` | Future column (ADR 0035 §4) | `NotStated` everywhere; `unknown_overlap` asserts that |
 | An explicit `ExpectedAttendance::Known` | Future column (ADR 0034 §2) | Derived from a single sized group; `tiny` asserts `Known(28)` / `Known(26)` |
 | A declared `AttendanceFloor` with no members | Floor is derived from member rows | Real `student_group_member` rows, in the effective-membership fixture |
-| `activity.is_locked` / `pinned` | Column does not exist | `pinned` is empty, asserted by `integrity` |
+| `pinned` | **Not an input.** A lock is `timetable_entry.is_locked`, an output of a solve; the loader compiles none and never will — [adr/0045](adr/0045-a-lock-is-a-property-of-a-placement.md) §3 | `pinned` is empty, asserted by `integrity` |
 
 ### Round-trip and determinism
 
@@ -768,9 +774,14 @@ What M6 relied on, and what it reported back.
 **Reported back — two things worth recording.**
 
 1. **`Problem::pinned` is still empty and is now read.** The construction places a pinned
-   occurrence first and never moves it. The branch is unreachable at `V16` because there is no
-   `activity.is_locked` column, so this is a hook that is now exercised by nothing rather than a
-   hook nothing touches. When locks land, the loader filling this field is all that is needed.
+   occurrence first and never moves it. The branch was unreachable at `V16`, so this was a hook
+   exercised by nothing rather than a hook nothing touches.
+
+   **M9A corrected the last sentence of this point.** It said *"when locks land, the loader
+   filling this field is all that is needed"*. The loader must **not** fill it: a lock is
+   `timetable_entry.is_locked`, an output of a solve, and a loader that read a timetable would
+   make the compiled problem depend on which timetable happened to be open. The **caller** fills
+   it, from `Timetables::pins` — [adr/0045](adr/0045-a-lock-is-a-property-of-a-placement.md) §3.
 2. **`OverlapRelation` being fully compiled is what made `student-clash` enforceable at
    generation time.** M4 deliberately compiled no overlap answers and M5 supplied them; a
    generator over M4's `unknown()` relation would have placed every pair of sections together and

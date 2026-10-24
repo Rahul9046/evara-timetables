@@ -500,3 +500,254 @@ fn the_empty_arrangement_scores_one_medium_violation_per_occurrence() {
         problem.activities.len() as u64
     );
 }
+
+// =======================================================================================
+// Property 4 — the gate still holds once something is pinned
+// =======================================================================================
+
+/// A copy of `problem` with two occurrences pinned: one where `assignment` put it, one
+/// deliberately elsewhere.
+///
+/// Both states matter. A pin that is honoured must produce nothing, and a pin that is broken
+/// must produce exactly one violation naming one occurrence — and it is the second that the
+/// incremental identity has to survive, because that is the one whose contribution moves when
+/// the occurrence does.
+fn pinned_variant(problem: &Problem, assignment: &Assignment) -> Option<Problem> {
+    let mut pinned = vec![None; problem.activities.len()];
+    let placed: Vec<(ActivityIx, Placement)> = assignment.iter().collect();
+    let (first, honoured) = placed.first().copied()?;
+    pinned[first.get()] = Some(honoured);
+
+    // The second placed occurrence is pinned somewhere it is not, by taking the first's slot.
+    if let Some((second, _)) = placed.get(1).copied() {
+        pinned[second.get()] = Some(Placement {
+            timeslot: honoured.timeslot,
+            room: None,
+        });
+    }
+
+    let mut copy = problem.clone();
+    copy.pinned = pinned;
+    Some(copy)
+}
+
+#[test]
+fn the_narrowed_query_is_complete_for_a_pinned_problem_too() {
+    // `union_of_involving_is_the_full_evaluation` over every fixture cannot exercise
+    // `activity-fixed`, because the catalogue pins nothing — pins come from a timetable, not
+    // from inputs. So the same property is asserted over pinned variants of each fixture,
+    // which is what makes the ninth rule part of the gate rather than beside it.
+    let rules = rules();
+    for found in all_fixtures(2026) {
+        for (n, problem) in found.problems.iter().enumerate() {
+            let assignment = crowded(problem, 11);
+            let Some(problem) = pinned_variant(problem, &assignment) else {
+                continue;
+            };
+            assert!(
+                problem.integrity().is_empty(),
+                "{} problem {n}: a pinned variant must still be a sound problem",
+                found.name
+            );
+            let occupancy = Occupancy::of(&problem, &assignment);
+
+            for constraint in &rules {
+                let swept = keys(&swept_one(&problem, &occupancy, constraint));
+                let mut narrowed = Vec::new();
+                for activity in problem.activity_indices() {
+                    narrowed.extend(involving_one(&problem, &occupancy, constraint, activity));
+                }
+                assert_eq!(
+                    keys(&narrowed),
+                    swept,
+                    "{} problem {n}, rule {}: the narrowed query and the sweep disagree \
+                     once something is pinned",
+                    found.name,
+                    constraint.constraint_type.key()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_pin_violation_names_exactly_one_occurrence() {
+    // The precondition of the whole incremental design: every violation names at most two
+    // occurrences. `activity-fixed` names one, and this is what turns that into a red build
+    // rather than a wrong timetable.
+    let rules = rules();
+    for found in all_fixtures(2026) {
+        for problem in &found.problems {
+            let assignment = crowded(problem, 11);
+            let Some(problem) = pinned_variant(problem, &assignment) else {
+                continue;
+            };
+            let report = evaluate(&problem, &assignment, &rules);
+            for violation in &report.violations {
+                assert!(
+                    violation.activities.len() <= 2,
+                    "{}: {} named {} occurrences",
+                    found.name,
+                    violation.constraint_type.key(),
+                    violation.activities.len()
+                );
+                if violation.constraint_type == ConstraintType::ActivityFixed {
+                    assert_eq!(violation.activities.len(), 1, "{}", found.name);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn the_running_score_agrees_with_the_reference_over_a_pinned_problem() {
+    // Property 3, with pins. A rule whose contribution moved when an occurrence moved and
+    // whose narrowed query missed it would show up here as a divergence and nowhere else.
+    let rules = rules();
+    let found = fixture("tiny", 2026).expect("tiny is in the catalogue");
+    let base = found.problem();
+    let seeded = crowded(base, 11);
+    let problem = pinned_variant(base, &seeded).expect("tiny places something");
+
+    let mut scorer = IncrementalScorer::empty(&problem, &rules);
+    let mut rng = Rng::new(577);
+    let activities: Vec<ActivityIx> = problem.activity_indices().collect();
+
+    for step in 0..120 {
+        let activity = *rng.pick(&activities).expect("a problem has activities");
+        if rng.chance(1, 3) {
+            scorer.withdraw(activity);
+        } else if let Some(placement) = some_placement(&problem, activity, &mut rng) {
+            scorer.place(activity, placement);
+        }
+        let reference = evaluate(&problem, &scorer.assignment(), &rules);
+        assert_eq!(
+            scorer.score(),
+            reference.score,
+            "step {step}: the running score and the reference disagree with pins in play"
+        );
+        assert_eq!(
+            usize::try_from(scorer.count_of(ConstraintType::ActivityFixed)).unwrap_or(usize::MAX),
+            reference.count_of(ConstraintType::ActivityFixed),
+            "step {step}: the pin count drifted"
+        );
+    }
+}
+
+// =======================================================================================
+// A scorer over an existing arrangement equals one built by placing into an empty scorer
+// =======================================================================================
+
+#[test]
+fn a_scorer_of_an_arrangement_equals_one_reached_by_placing_into_an_empty_one() {
+    // `IncrementalScorer::of` is what an edit session seeds from: the arrangement is read from
+    // `timetable_entry` rows, not reached by a construction. The two routes must be the same
+    // scorer, or an editor's every verdict would be measured against a different timetable
+    // from the one on screen.
+    let rules = rules();
+    for found in all_fixtures(2026) {
+        for (n, problem) in found.problems.iter().enumerate() {
+            let assignment = crowded(problem, 11);
+
+            let seeded =
+                IncrementalScorer::of(problem, &assignment, &rules).expect("readable arrangement");
+
+            let mut built = IncrementalScorer::empty(problem, &rules);
+            for (activity, placement) in assignment.iter() {
+                built
+                    .place(activity, placement)
+                    .expect("a placement drawn from the problem is readable");
+            }
+
+            assert_eq!(
+                seeded.score(),
+                built.score(),
+                "{} problem {n}: the two routes disagree about the score",
+                found.name
+            );
+            assert_eq!(
+                seeded.assignment(),
+                built.assignment(),
+                "{} problem {n}: the two routes disagree about what is placed",
+                found.name
+            );
+            for kind in ConstraintType::all() {
+                assert_eq!(
+                    seeded.count_of(*kind),
+                    built.count_of(*kind),
+                    "{} problem {n}: the two routes disagree about {}",
+                    found.name,
+                    kind.key()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_scorer_of_a_pinned_arrangement_starts_at_the_reference_score() {
+    // The editor's own seeding path, with locks in play.
+    let rules = rules();
+    let found = fixture("tiny", 2026).expect("tiny is in the catalogue");
+    let base = found.problem();
+    let assignment = crowded(base, 11);
+    let problem = pinned_variant(base, &assignment).expect("tiny places something");
+
+    let scorer =
+        IncrementalScorer::of(&problem, &assignment, &rules).expect("a readable arrangement");
+    let reference = evaluate(&problem, &assignment, &rules);
+    assert_eq!(scorer.score(), reference.score);
+}
+
+#[test]
+fn probing_a_move_of_a_locked_occurrence_is_refused() {
+    // What the editor's drop targets rest on: a locked lesson has no legal target but its own
+    // place. The verdict comes from the registry, so the editor and a later repair cannot
+    // disagree about what a lock means.
+    let rules = rules();
+    let found = fixture("tiny", 2026).expect("tiny is in the catalogue");
+    let base = found.problem();
+    let assignment = crowded(base, 11);
+    let problem = pinned_variant(base, &assignment).expect("tiny places something");
+
+    let (locked, pin) = problem
+        .pinned
+        .iter()
+        .enumerate()
+        .find_map(|(at, held)| held.map(|p| (ActivityIx::new(u32::try_from(at).unwrap_or(0)), p)))
+        .expect("a pin");
+
+    let mut scorer =
+        IncrementalScorer::of(&problem, &assignment, &rules).expect("a readable arrangement");
+
+    // Its own place is still legal as far as this rule is concerned.
+    let stay = scorer.probe(locked, pin);
+    assert!(
+        !stay
+            .blocking
+            .iter()
+            .any(|v| v.constraint_type == ConstraintType::ActivityFixed),
+        "staying put does not break the pin"
+    );
+
+    // Anywhere else is refused, and the refusal names the rule.
+    let elsewhere = (0..problem.timeslots.len())
+        .map(|at| TimeslotIx::new(u32::try_from(at).unwrap_or(0)))
+        .find(|slot| *slot != pin.timeslot)
+        .expect("a second slot");
+    let moved = scorer.probe(
+        locked,
+        Placement {
+            timeslot: elsewhere,
+            room: pin.room,
+        },
+    );
+    assert!(!moved.allowed, "a locked lesson cannot be moved");
+    assert!(
+        moved
+            .blocking
+            .iter()
+            .any(|v| v.constraint_type == ConstraintType::ActivityFixed),
+        "and the refusal is the pin rule's"
+    );
+}

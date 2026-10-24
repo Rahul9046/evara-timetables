@@ -44,6 +44,7 @@ pub fn run() {
             workspace: Mutex::new(workspace),
             imports: commands::import::ImportSessions::default(),
             generations: commands::session::GenerationSessions::default(),
+            edits: commands::edit_session::EditSessions::default(),
             epoch: commands::session::ProjectEpoch::default(),
         })
         .invoke_handler(tauri::generate_handler![
@@ -270,6 +271,20 @@ pub fn run() {
             commands::views::timetable_rename,
             commands::views::timetable_delete,
             commands::views::timetable_revalidate,
+            // Manual editing — M9A. Four of these write; the rest ask what is legal.
+            commands::edit::edit_open,
+            commands::edit::edit_close,
+            commands::edit::edit_state,
+            commands::edit::edit_scope,
+            commands::edit::edit_candidates,
+            commands::edit::edit_validate,
+            commands::edit::edit_apply,
+            commands::edit::edit_unschedule,
+            commands::edit::edit_set_lock,
+            commands::edit::edit_undo,
+            commands::edit::edit_redo,
+            commands::edit::edit_history,
+            commands::edit::timetable_duplicate,
             // Timetable grid — Phase 1E. `release_orphans` is the only destructive one.
             commands::grid::setup_grid_preview,
             commands::grid::setup_grid_rebuild,

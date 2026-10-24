@@ -475,8 +475,13 @@ introducing a property-testing dependency for them.
    while giving every fifth one a double, so 25 sections reported a legitimate but unintended
    discrepancy. It now declares what it generates, via a named helper both the declaration and
    the activity list read. [PRE-SOLVE-VALIDATION.md](PRE-SOLVE-VALIDATION.md) §13.
-4. **`Problem::pinned` is always empty.** `activity.is_locked` is not in `V15`, and
-   `activity-fixed` joins the constraint set once locks exist.
+4. **`Problem::pinned` is always empty in a catalogue fixture.** A pin comes from a timetable,
+   which is an *output*, so no fixture built from inputs has one — which is why M9A's gate had to
+   build pinned states for itself rather than find them here. `differential.rs`'s `pinned_variant`
+   pins one occurrence where a crowded arrangement put it and a second somewhere it is not, and
+   runs the property tests over every fixture in that state. The lock behind a real pin is
+   `timetable_entry.is_locked`, not the `activity.is_locked` this point originally named —
+   [ADR 0045](adr/0045-a-lock-is-a-property-of-a-placement.md).
 5. **Room capacity has no `Unknown`.** `room.capacity` is `NOT NULL`, so it is always a stated
    number; `0` means zero seats and is reported as suspicious rather than reinterpreted
    (ADR 0034 §5). The uncertainty in capacity checking is entirely on the attendance side. The

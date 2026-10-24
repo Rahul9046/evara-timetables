@@ -10,7 +10,9 @@
   [ADR 0011](0011-stable-timeslot-identity.md) (a timeslot's identity carries no campus),
   [ADR 0014](0014-rooms-shared-across-campuses.md) (the single-implementation discipline this
   follows).
-- Binds: M4's `Problem` loader, M5's `duration-contiguous`, and M11's `validate_move`.
+- Binds: M4's `Problem` loader, M5's `duration-contiguous`, and the move validator —
+  delivered in **M9A** as `IncrementalScorer::probe`'s callers rather than as M11's
+  `validate_move`; see [TIMETABLE-EDITING.md](../TIMETABLE-EDITING.md) §2.
   Implemented by M3 as `evara_core::scheduling::resolve`.
 
 ## Context
@@ -63,7 +65,7 @@ vocabulary, and it is why all four callers can reach it.
 | **M3** validation | Computes the resolution and drives `no-bell-schedule` / `ambiguous-bell-schedule` from the **computed** value, never from the recorded one |
 | **M4** loader | Calls it to *produce* the value it records on each `SectionFact` |
 | **M5** `duration-contiguous` | Reads `runs_on` for the runs a multi-period occurrence may occupy |
-| **M11** `validate_move` | Resolves the same way the generator did, so the editor and the solver cannot disagree |
+| **M9A** manual editing | `edit_candidates` and `edit_validate` resolve the same way the generator did, so the editor and the solver cannot disagree. Delivered earlier than this record expected, and through `IncrementalScorer::probe` rather than a `validate_move` of its own |
 
 This is `CLAUDE.md` §2's rule — one implementation, several callers — applied to a resolution
 rather than to a constraint, and it is the same discipline

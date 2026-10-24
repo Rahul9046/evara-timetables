@@ -539,8 +539,12 @@ stating once rather than rediscovering:
 
 - Lines editor (basic): `line`, `line_member`, evaluated as a `SAME_PERIOD` group. Its table
   is deliberately absent from `V15` — nothing reads it yet and adding a table is additive.
-- Lock toggles: `activity.is_locked`. A lock is about a *placed* timetable, so it belongs
-  with Phase 8's manual editing rather than with the demand.
+- ✅ Lock toggles: **done in M9A**, and on a different column than this line expected. The
+  reasoning was right — a lock is about a *placed* timetable, so it belongs with Phase 8's manual
+  editing rather than with the demand — and the conclusion follows further than the line drew it:
+  the column is `timetable_entry.is_locked`, not `activity.is_locked`, because a lock names one
+  version's placement ([adr/0045](adr/0045-a-lock-is-a-property-of-a-placement.md)). There is no
+  lock on `activity` and there will not be one.
 - Per-occurrence overrides: `activity_teacher`, `activity_group`,
   `activity_room_candidate`, `activity_resource`. Room **allocation** is Phase 6, and
   Stage C's activities inherit their staffing and audience from their class section.
@@ -626,10 +630,15 @@ Two things differ from the bullet above and both are
 has **no hand-written delta** — the delta is an identity derived from the fact that every
 violation names at most two occurrences. `evara-constraints`' `differential` module is the gate.
 
+**✅ The ninth evaluator and the move validator are done (M9A).** `activity-fixed` landed with
+locks ([adr/0045](adr/0045-a-lock-is-a-property-of-a-placement.md)), inside the differential gate
+rather than beside it. The `validate_move` command this bullet list promised was **not written**,
+because `PlacementVerdict` already was it: `edit_candidates` and `edit_validate` call
+`IncrementalScorer::probe`, so the editor and the generator cannot disagree about a drop target by
+construction rather than by discipline — [TIMETABLE-EDITING.md](TIMETABLE-EDITING.md) §2.
+
 **Still to do in this phase:** the remaining `M1` evaluators (CONSTRAINTS.md §3 lists about
-twenty-two in total, of which eight exist), and the `validate_move` command — `PlacementVerdict`
-is now exactly what that command returns, and it comes from the same scorer the generator uses, so
-the editor and the generator cannot disagree about a drop target. No Tauri handler exposes it yet.
+twenty-two in total, of which nine exist).
 
 **Done when:** the infeasible fixture produces specific, actionable diagnostics with no
 solver involved — **met**: `evara validate infeasible-duration` names the occurrence, both
@@ -771,16 +780,43 @@ rather than dynamically re-ranked; and `IncrementalScorer` lives in `evara-const
 
 ---
 
-## Phase 8 — Manual editing
+## Phase 8 — Manual editing · 8A ✅ complete (M9A)
 
-- Drag-and-drop in the grid, validating on hover: legal targets tinted, illegal targets
-  showing the blocking reason.
-- `apply_move` command writing through a transaction; undo/redo stack.
-- Violation inspector listing every current violation with entity links.
-- Lock/unlock an entry. Repair run: scope filter + `minimise-disruption`, offering a diff
-  of what would change before committing.
+- ✅ Drag-and-drop in the grid, validating on hover: legal targets tinted, illegal targets
+  showing the blocking reason — **in the refusing rule's own words**, and with a keyboard path
+  that reaches everything the mouse does.
+- ✅ An apply command writing through a transaction; undo/redo stack. Named `edit_apply`, with
+  `edit_unschedule` and `edit_set_lock` beside it; the stack is in the session, in Rust, and an
+  undo is a **new transaction** rather than a rollback.
+- ✅ Lock/unlock an entry, enforced by the ninth constraint type.
+- Violation inspector listing every current violation with entity links. *Partly*: the editor
+  renders the current findings with each rule's own sentence, as the read-only view does; the
+  entity **links** into the grid are still additive over the same data.
+- Repair run: scope filter + `minimise-disruption`, offering a diff of what would change before
+  committing. **Not started** — this is 8B, and nothing in M9A implements repair, baseline-first
+  ordering, a scope filter or any change to the solver's `start` parameter.
 
-**Closes M1-13, M1-14.**
+**Closes M1-13. M1-14 waits on 8B's repair.**
+
+[TIMETABLE-EDITING.md](TIMETABLE-EDITING.md) is what shipped. Five things worth knowing:
+
+- **The move validator was already written.** `IncrementalScorer::probe` withdraws the occurrence
+  before placing it at the candidate, so moving a lesson one period later is not reported as
+  clashing with itself — the thing a hand-written validator gets wrong. M9A added the third
+  caller of the evaluators, not a second implementation of them.
+- **A lock is `timetable_entry.is_locked`, per version** — never `activity.is_locked`, which five
+  earlier records said and which would have pinned a lesson in every version of one cycle at once
+  ([adr/0045](adr/0045-a-lock-is-a-property-of-a-placement.md)).
+- **An edit changes the version it is open on, and Duplicate is offered first**, with the sentence
+  that explains it ([adr/0046](adr/0046-an-edit-changes-the-version-it-is-open-on.md)). ADR 0042
+  §5's immutable `GENERATION` scoring exists because of exactly this.
+- **`expectedRev` is not enough, and the guard is an exact placement list.** A second window
+  moving a *different* entry leaves this session's row at the revision it read, so a revision check
+  passes while every verdict on screen has become false
+  ([adr/0047](adr/0047-a-cross-session-guard-is-an-exact-placement-list.md)).
+- **No migration.** `V17` already held every column, index and trigger. One thing it lacked was a
+  user-facing error path for the cross-cycle trigger, so the repository now asks first and names
+  the remedy.
 
 ---
 

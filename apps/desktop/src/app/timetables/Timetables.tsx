@@ -8,15 +8,20 @@
  * by when each was generated. Replacement is not an operation: it is a save followed by an
  * explicit delete, which is two decisions by the user rather than one silent one.
  *
- * ## Read-only, and visibly so
+ * ## This screen is read-only, and editing is a screen of its own
  *
- * There is no drag handle, no drop target and no hover validation — **absent** rather than
- * disabled, because a greyed-out affordance teaches a user that editing exists here and in
- * this milestone it does not. The four writes in the whole area are save (on the Generate
- * screen), rename, delete and revalidate.
+ * The list and the open view hold no drag handle, no drop target and no hover validation. That
+ * is not a limitation any more — it is a boundary. An opened timetable can be read, renamed,
+ * re-scored, deleted and **opened for editing**, and the last of those hands over to
+ * {@link EditTimetable}, which owns an `edit_open` session for as long as it is on screen.
  *
- * `isLocked` and `isManual` are rendered where set and written nowhere, so that when Phase 8
- * begins writing them the grid already tells the truth.
+ * Two screens rather than a mode on one, because editing has a lifetime: a session holds the
+ * compiled problem, the cross-session stamp and the undo stack, all computed from one snapshot.
+ * A toggle on this screen would have to open and close one on every flip, and the undo stack
+ * would quietly vanish each time.
+ *
+ * `isLocked` and `isManual` are rendered here where set and written only by the editor, so a
+ * timetable somebody has edited by hand says so wherever it is read.
  *
  * ## A timetable whose grid moved is still worth opening
  *
@@ -43,6 +48,7 @@ import {
   timetableScope,
 } from "../../ipc/timetables";
 import { Banner, Loading } from "../ui/Shell";
+import { EditTimetable } from "./EditTimetable";
 import {
   FindingsPanel,
   ScoringPanel,
@@ -65,6 +71,10 @@ export function Timetables(props: {
 
   const [list, setList] = useState<TimetableSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Which timetable is open **for editing**, which is only ever the one that is open. Held as an
+  // identifier rather than a flag so that closing one timetable and opening another cannot land
+  // the user in an editor they did not ask for.
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (schoolId === null) {
@@ -101,6 +111,21 @@ export function Timetables(props: {
     );
   }
 
+  if (openId !== null && editingId === openId) {
+    return (
+      <EditTimetable
+        key={openId}
+        id={openId}
+        schoolName={schoolName}
+        onDone={() => {
+          setEditingId(null);
+          void refresh();
+        }}
+        onChanged={() => void refresh()}
+      />
+    );
+  }
+
   if (openId !== null) {
     return (
       <OpenTimetable
@@ -108,8 +133,10 @@ export function Timetables(props: {
         schoolName={schoolName}
         onBack={() => {
           onOpen(null);
+          setEditingId(null);
           void refresh();
         }}
+        onEdit={() => setEditingId(openId)}
         onChanged={() => void refresh()}
       />
     );
@@ -198,9 +225,11 @@ function OpenTimetable(props: {
   id: string;
   schoolName: string;
   onBack: () => void;
+  /** Hands over to the editor, which opens a session of its own. */
+  onEdit: () => void;
   onChanged: () => void;
 }) {
-  const { id, schoolName, onBack, onChanged } = props;
+  const { id, schoolName, onBack, onEdit, onChanged } = props;
 
   const [view, setView] = useState<TimetableView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -348,6 +377,26 @@ function OpenTimetable(props: {
       {error === null ? null : <Banner tone="error">{error}</Banner>}
 
       <div className="ttActions">
+        {/*
+         * Disabled rather than absent when there is no grid, and the reason is on screen. The
+         * editor needs a compiled problem to check anything against, and ADR 0046 §4 refuses a
+         * degraded mode: an editor that could validate nothing would be offering to write
+         * placements nothing had checked.
+         */}
+        <button
+          type="button"
+          className="primary"
+          disabled={busy || view.projection === null}
+          onClick={onEdit}
+        >
+          Edit this timetable
+        </button>
+        {view.projection === null ? (
+          <span className="ttDisabledWhy">
+            No grid could be built for this timetable, so there is nothing to check an edit
+            against.
+          </span>
+        ) : null}
         {renaming ? null : (
           <button
             type="button"

@@ -24,8 +24,11 @@ Every constraint type must have:
 3. documented semantics in this file
 4. an isolated unit test, plus a synthetic fixture exercising it
 5. a human-readable `explain()` implementation
+6. an `evaluate_involving()` — the rule's own narrowed query, **sharing one body** with its full
+   sweep. Since M6 a trait member rather than a convention, so a type without one cannot be
+   registered; §3's M6 note is why.
 
-No constraint is "supported" until all five exist.
+No constraint is "supported" until all six exist.
 
 ---
 
@@ -77,12 +80,13 @@ No `appliesTo` rows means project-wide. `term_id` on the instance scopes it in t
 
 Status: `M1` = Milestone 1, `M2+` = later, `R` = schema reserved only.
 
-> **The `Status` column is a plan, not a record of what works.** As of `V16`, **eight of
+> **The `Status` column is a plan, not a record of what works.** As of `V17`, **nine of
 > the types below are implemented** and the rest are not: the engine, the two tables and the
-> eight evaluators exist, and `evara evaluate` runs them headlessly. The eight are
+> nine evaluators exist, and `evara evaluate` runs them headlessly. Eight arrived in M5 —
 > `teacher-clash`, `student-clash`, `room-clash`, `room-type-required`, `entity-unavailable`,
-> `duration-contiguous`, `no-teaching-in-period` and `activity-scheduled`; each is marked
-> **✅ M5** in the tables. Every other row is still a plan.
+> `duration-contiguous`, `no-teaching-in-period` and `activity-scheduled`, each marked
+> **✅ M5** in the tables — and `activity-fixed` arrived with M9A's locks, marked **✅ M9A**.
+> Every other row is still a plan.
 >
 > **M6 added no constraint type and changed no rule's semantics.** What it changed is who asks:
 > the eight are now read by a *generator* as well as by a scorer, every one of them through the
@@ -102,11 +106,23 @@ Status: `M1` = Milestone 1, `M2+` = later, `R` = schema reserved only.
 > [TIMETABLE-CONSTRUCTION-SOLVER.md](TIMETABLE-CONSTRUCTION-SOLVER.md) is what the generator
 > does with them.
 >
-> `activity-fixed` is the ninth type of the first set and is **deferred**: there is no
-> `activity.is_locked` column at `V16`, locks arrive with Phase 8's manual editing, and a
-> registered rule that cannot fire tells the user something is being checked when it is not.
-> It is not promoted to hard by implication —
-> [CONSTRAINT-ENGINE.md](CONSTRAINT-ENGINE.md) §3.
+> **M9A added the ninth type and the hard set became eight**, which is
+> [SCHEDULING-ARCHITECTURE-DECISIONS.md](SCHEDULING-ARCHITECTURE-DECISIONS.md) §6's split in
+> full for the first time. Three things about it are worth reading here rather than inferring
+> from the row:
+>
+> - **A lock is a column on `timetable_entry`, not on `activity`.** Earlier drafts of this file
+>   and four other records said `activity.is_locked`; that would have made a lock a property of
+>   a *lesson*, so locking a placement in one version would have pinned it in every other
+>   version of the same cycle. [adr/0045](adr/0045-a-lock-is-a-property-of-a-placement.md).
+> - **The loader compiles no pins.** `Problem::pinned` is populated by the caller from the
+>   timetable being edited, because a lock is an *output* of a solve and a `Problem` is compiled
+>   from inputs only. ADR 0045 §4.
+> - **An unplaced pinned occurrence is not a violation of it.** A pin says *where*;
+>   `activity-scheduled` already says *that*, at MEDIUM. A rule that fired on an unplaced pin
+>   would make the empty arrangement of a pinned problem infeasible and break construction — the
+>   same argument that keeps completeness at MEDIUM.
+>   [CONSTRAINT-ENGINE.md](CONSTRAINT-ENGINE.md) §3.
 >
 > `M1` here also means *specified for* Milestone 1 rather than *in the first solver*. The
 > first solver's set is nine types — eight hard plus `activity-scheduled` — and
@@ -164,7 +180,7 @@ Status: `M1` = Milestone 1, `M2+` = later, `R` = schema reserved only.
 | `entity-unavailable` | HARD | Honours `availability.status = UNAVAILABLE` for teachers, rooms and groups — the three an occurrence occupies. A `DISCOURAGED` slot is legal and merely worse; a missing rule is not a restriction. A `RESOURCE`, `CAMPUS` or `SUBJECT` rule is reported as not enforced rather than silently dropped. `CORE-004` | ✅ M5 |
 | `preferred-time` | SOFT | Reward/penalise against `PREFERRED` / `DISCOURAGED` availability. `CORE-012` | M1 |
 | `subject-time-window` | SOFT | A subject prefers (or must take) certain periods — e.g. PE not in period 1, Maths in the morning. | M1 |
-| `activity-fixed` | HARD | A locked activity keeps its timeslot and room. **Deferred**: `activity.is_locked` does not exist at `V16` and locks arrive with Phase 8. `CORE-007` | M2+ |
+| `activity-fixed` | HARD | A **pinned** occurrence keeps the exact placement it is pinned to — slot **and** room, because a repair that kept a locked lesson's period and took its room away has moved it. The pin is `Problem::pinned`, populated by the caller from `timetable_entry.is_locked`; the loader compiles none ([adr/0045](adr/0045-a-lock-is-a-property-of-a-placement.md) §4). An **unplaced** pinned occurrence is *not* a violation of this rule — that is `activity-scheduled`'s question, at MEDIUM. No parameters. One violation per occurrence, so the differential identity holds trivially. `CORE-007` | ✅ M9A |
 | `no-teaching-in-period` | HARD | A period kind (`BREAK`, `REGISTRATION`) holds no lessons. Reads the stored `timeslot.is_teaching` rather than inferring from a label. | ✅ M5 |
 
 ### Frequency, duration, distribution
@@ -255,7 +271,7 @@ vendor concepts. Recorded here so research stays traceable.
 | Edval "clash tables", "composites" | derived from `student_group` hierarchy and `student-clash` |
 | TimeTabler "schedule structure", "doubles" | `period_structure`; `duration_periods = 2` + `duration-contiguous` |
 | Veracross "blocks / rotations" | `cycle` + `cycle_day` + `calendar_day` |
-| Any vendor's "fixed lesson" | `activity.is_locked` + `activity-fixed` (both deferred to Phase 8) |
+| Any vendor's "fixed lesson" | `timetable_entry.is_locked` + `activity-fixed`. Per-version, not per-lesson — [adr/0045](adr/0045-a-lock-is-a-property-of-a-placement.md) |
 
 Where a vendor's concept cannot be expressed, the fix is a **new generic constraint type**
 with a vendor-neutral name — never a vendor branch in the core.

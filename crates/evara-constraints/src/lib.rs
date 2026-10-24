@@ -40,10 +40,12 @@
 //!
 //! # What is implemented
 //!
-//! Eight types — seven `HARD` and `activity-scheduled` at `MEDIUM`, which is
-//! `SCHEDULING-ARCHITECTURE-DECISIONS.md` §6's split. `activity-fixed` is the eighth hard type
-//! of that record and is **not** implemented: `activity.is_locked` does not exist, so it would
-//! be a registered rule that cannot fire.
+//! Nine types — eight `HARD` and `activity-scheduled` at `MEDIUM`, which is
+//! `SCHEDULING-ARCHITECTURE-DECISIONS.md` §6's split in full. `activity-fixed` is the eighth
+//! hard type of that record and M9A implements it: locks exist as `timetable_entry.is_locked`,
+//! the caller that opened a timetable reads them into `Problem::pinned`, and the rule therefore
+//! has something to fire on. See [`pinning`] for why an *unplaced* pinned occurrence is
+//! `activity-scheduled`'s business and not its.
 //!
 //! Nothing here searches, optimises or writes. `evaluate` is the reference implementation
 //! `SOLVER.md` §4 describes as *"always correct, never fast"*, and [`IncrementalScorer`] is the
@@ -69,6 +71,7 @@ mod facilities;
 mod incremental;
 mod occupancy;
 mod params;
+mod pinning;
 mod registry;
 mod timing;
 
@@ -87,6 +90,9 @@ mod evaluation;
 
 #[cfg(test)]
 mod differential;
+/// What a candidate panel costs at the realistic upper end — R5's editing half.
+#[cfg(test)]
+mod editing_budget;
 #[cfg(test)]
 mod tests;
 

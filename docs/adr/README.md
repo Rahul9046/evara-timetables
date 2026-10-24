@@ -48,6 +48,11 @@ tempted to undo it without knowing why.
 | [0040](0040-the-constraint-tables-are-entities-and-their-scope-is-cleared.md) | A scope row is an entity with a change-log entry, and its deletion is written rather than cascaded | Accepted |
 | [0041](0041-the-incremental-scorer-lives-with-the-evaluators.md) | The incremental scorer lives with the evaluators, and derives its delta from a property of the rules rather than hand-writing one | Accepted — implements [SOLVER.md](../SOLVER.md) §4 and discharges R1 |
 | [0042](0042-a-stored-timetable-is-a-version-and-a-save-refuses-stale-inputs.md) | A stored timetable is a version among several, a save refuses inputs that moved since generation, and a revalidation never overwrites how a timetable was generated | Accepted — corrects six details of [DATA-MODEL.md](../DATA-MODEL.md) §7's sketch |
+| [0043](0043-a-report-renders-a-rules-own-explanation.md) | A report renders the rule's own sentence by calling `explain()`, and a stored `violation` row carries no prose | Accepted |
+| [0044](0044-the-display-vocabulary-sits-beside-the-problem.md) | The names a grid needs and a solve does not live beside the `Problem`, never inside it | Accepted — extends [0037](0037-stored-row-diagnostics-belong-to-the-loader.md) §2 to a report-only field |
+| [0045](0045-a-lock-is-a-property-of-a-placement.md) | A lock is `timetable_entry.is_locked` — per version, never `activity.is_locked`; and the loader compiles no pins | Accepted — corrects five records that said `activity.is_locked` |
+| [0046](0046-an-edit-changes-the-version-it-is-open-on.md) | An edit changes the version it is open on; duplicating first is the user's decision, and an undo is a new transaction rather than a rollback | Accepted — implements the guarantee [0042](0042-a-stored-timetable-is-a-version-and-a-save-refuses-stale-inputs.md) §5 was written for |
+| [0047](0047-a-cross-session-guard-is-an-exact-placement-list.md) | An editing write carries the exact `(entry id, rev)` list of the arrangement; a digest collides and a scoped watermark cannot see a deletion | Accepted |
 
 Statuses: **Proposed** (awaiting a decision), **Accepted**, **Superseded by NNNN**,
 **Deprecated**. Accepted records are not edited to reflect a change of mind — a new

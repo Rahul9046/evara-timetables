@@ -352,6 +352,31 @@ pub enum DbError {
         changes_since: i64,
     },
 
+    /// Another window changed the timetable being edited.
+    ///
+    /// # Why this is neither [`DbError::Conflict`] nor [`DbError::InputsChanged`]
+    ///
+    /// A `Conflict` is about **one row** the caller had read, and the remedy is to re-read that
+    /// row. `InputsChanged` is about the **problem** a timetable was built against, and the
+    /// remedy is to generate again. This is about the **arrangement**: a second editing session
+    /// moved a different entry of the same timetable, so this session's target row still matches
+    /// its revision and yet every verdict it has computed — which cells are free, what a move
+    /// would cost — was measured against an arrangement that no longer exists.
+    ///
+    /// Nothing else would catch it. The references all still resolve, the uniqueness rules still
+    /// hold, the timetable row's own revision has not moved because an entry changed, and the
+    /// input watermark has not moved because `timetable_entry` is a solve *output*. The remedy
+    /// is to reopen the timetable, which recompiles the problem and reseeds the session.
+    ///
+    /// Detected by comparing an `ArrangementStamp` inside the writing transaction.
+    #[error(
+        "{entries_changed} placement(s) in this timetable were changed elsewhere after it was          opened for editing, so nothing was written; reopen it to see what is now true"
+    )]
+    ArrangementChanged {
+        /// How many entries differ from what the caller last saw: changed, added or removed.
+        entries_changed: i64,
+    },
+
     /// A solver outcome was offered for saving that does not describe a timetable.
     ///
     /// A run refused at the pre-solve gate attempted nothing, and a run whose own final check

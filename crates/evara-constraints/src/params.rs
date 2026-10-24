@@ -9,9 +9,9 @@
 //! that it parses as JSON, and that it accepts exactly the fields
 //! [`ConstraintOptions`](evara_core::scheduling::ConstraintOptions) can hold.
 //!
-//! # Seven schemas are the same schema
+//! # Eight schemas are the same schema
 //!
-//! Seven of the eight implemented types take no parameters, so they publish the schema that
+//! Eight of the nine implemented types take no parameters, so they publish the schema that
 //! accepts an empty object and nothing else: `additionalProperties: false`. That is not a
 //! placeholder — it is the statement that these rules have nothing to configure, and it makes
 //! a row carrying parameters for one of them an error rather than a silently ignored field.
@@ -56,6 +56,7 @@ pub fn schema_of(constraint_type: ConstraintType) -> &'static str {
         | ConstraintType::RoomTypeRequired
         | ConstraintType::EntityUnavailable
         | ConstraintType::NoTeachingInPeriod
+        | ConstraintType::ActivityFixed
         | ConstraintType::ActivityScheduled => NO_PARAMETERS,
     }
 }

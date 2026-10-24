@@ -15,8 +15,8 @@
 //! # Mandatory in the registry, not in the data
 //!
 //! [`Registry::mandatory`] returns one [`CompiledConstraint`] per implemented type, whatever
-//! the database holds. That is the answer to *"how are the eight MVP constraints active
-//! without the user creating eight rows?"*, and it has a property no amount of seeding gives:
+//! the database holds. That is the answer to *"how are the MVP constraints active without the
+//! user creating a row each?"*, and it has a property no amount of seeding gives:
 //! **there is no row whose deletion disables a safety rule.** ADR 0039.
 //!
 //! A stored instance of a mandatory type does not *add* a rule — it *tunes* the one that is
@@ -35,6 +35,7 @@ use crate::clash::{RoomClash, StudentClash, TeacherClash};
 use crate::completeness::ActivityScheduled;
 use crate::facilities::RoomTypeRequired;
 use crate::params;
+use crate::pinning::ActivityFixed;
 use crate::timing::{DurationContiguous, NoTeachingInPeriod};
 
 /// The evaluator for one type.
@@ -53,6 +54,7 @@ pub fn evaluator_for(constraint_type: ConstraintType) -> &'static dyn Constraint
         ConstraintType::EntityUnavailable => &EntityUnavailable,
         ConstraintType::DurationContiguous => &DurationContiguous,
         ConstraintType::NoTeachingInPeriod => &NoTeachingInPeriod,
+        ConstraintType::ActivityFixed => &ActivityFixed,
         ConstraintType::ActivityScheduled => &ActivityScheduled,
     }
 }
@@ -81,7 +83,7 @@ impl Registry {
 
     /// The constraints a project evaluates when it has configured nothing.
     ///
-    /// All eight, at their shipped levels, with weight 1 and no narrowing. **Every project
+    /// All nine, at their shipped levels, with weight 1 and no narrowing. **Every project
     /// evaluates these**, which is what makes the MVP set mandatory without a single stored
     /// row — see this module's header.
     #[must_use]
@@ -204,8 +206,8 @@ mod tests {
     }
 
     #[test]
-    fn all_eight_keys_are_registered_and_dispatch_to_their_own_evaluator() {
-        assert_eq!(Registry::types().len(), 8);
+    fn all_nine_keys_are_registered_and_dispatch_to_their_own_evaluator() {
+        assert_eq!(Registry::types().len(), 9);
         for kind in Registry::types() {
             assert_eq!(
                 evaluator_for(*kind).constraint_type(),
@@ -243,17 +245,17 @@ mod tests {
     }
 
     #[test]
-    fn an_unconfigured_project_evaluates_all_eight() {
+    fn an_unconfigured_project_evaluates_all_nine() {
         // The mandatory model: no rows, every rule running.
         let mandatory = Registry::mandatory();
-        assert_eq!(mandatory.len(), 8);
+        assert_eq!(mandatory.len(), 9);
         assert!(mandatory.iter().all(|c| c.id.is_none()));
         assert_eq!(
             mandatory
                 .iter()
                 .filter(|c| c.level == ConstraintLevel::Hard)
                 .count(),
-            7
+            8
         );
         assert_eq!(
             mandatory
@@ -278,7 +280,7 @@ mod tests {
         tuned.weight = 9;
         let compiled = Registry::compile(&[tuned], None).expect("valid");
 
-        assert_eq!(compiled.len(), 8, "still one rule per type");
+        assert_eq!(compiled.len(), 9, "still one rule per type");
         let teacher = compiled
             .iter()
             .find(|c| c.constraint_type == ConstraintType::TeacherClash)

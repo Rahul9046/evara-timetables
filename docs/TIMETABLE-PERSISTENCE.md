@@ -367,7 +367,7 @@ Named assertions worth knowing:
 
 | Limitation | Why | Where it goes |
 | --- | --- | --- |
-| **No manual editing.** `is_locked` and `is_manual` are columns the generator writes as 0 | Phase 8's `apply_move` | ROADMAP Phase 8 |
+| ~~**No manual editing.** `is_locked` and `is_manual` are columns the generator writes as 0~~ | ✅ **done in M9A**, with **no migration** — `V17` already held both columns, both uniqueness rules, the cross-cycle trigger, all three indexes and the change-log triggers. An edit carries an `ArrangementStamp` beside its `expectedRev`, because a second window moving a *different* entry passes a revision check ([adr/0047](adr/0047-a-cross-session-guard-is-an-exact-placement-list.md)) | [TIMETABLE-EDITING.md](TIMETABLE-EDITING.md) |
 | **No published/archived lifecycle** | out of the MVP (§6 of the M1 record) | a later `status` column |
 | **No scenario lineage.** `based_on_timetable_id` is not in `V17` | repair is what needs it | `SOLVER.md` §7 |
 | **No export.** The contract is recorded, not built | Phase 9 | `PROJECT-FORMAT.md` §3 |

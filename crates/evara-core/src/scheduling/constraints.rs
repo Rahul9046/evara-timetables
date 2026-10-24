@@ -61,7 +61,7 @@ use super::outcome::Score;
 ///
 /// # This is the *implemented* set, not the specified one
 ///
-/// [`CONSTRAINTS.md`](../../../../docs/CONSTRAINTS.md) §3 specifies about sixty types. Eight
+/// [`CONSTRAINTS.md`](../../../../docs/CONSTRAINTS.md) §3 specifies about sixty types. Nine
 /// are implemented, and only those appear here: a variant with no evaluator would violate
 /// `CLAUDE.md` §4's rule that no type is supported until all five of its artefacts exist, and
 /// a registered key that never fires *"tells the user their rooms are being checked"* when
@@ -71,13 +71,13 @@ use super::outcome::Score;
 /// honest answer while the set is small, and the enum grows one variant per type as the
 /// evaluators land.
 ///
-/// # `activity-fixed` is the eighth hard type and is not here
+/// # `activity-fixed` arrived with locks, and the hard set is now eight of the nine
 ///
 /// `SCHEDULING-ARCHITECTURE-DECISIONS.md` §6's hard set is seven of these plus `activity-fixed`
-/// *"once locks exist"*. `activity.is_locked` does not exist at `V16` — the roadmap keeps lock
-/// toggles with Phase 8's manual editing, because a lock is about a *placed* timetable rather
-/// than about the demand — and [`Problem::pinned`](super::Problem) is the declared hook that
-/// nothing populates. Adding a variant for it would be adding a rule that cannot fire.
+/// *"once locks exist"*. They exist: `timetable_entry.is_locked` is written by M9A's editor and
+/// read into [`Problem::pinned`](super::Problem) by the caller that opened the timetable, so the
+/// rule has something to fire on. A lock is a property of a **placement** rather than of the
+/// demand, which is why the column is on the entry and not on `activity` — ADR 0045.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ConstraintType {
@@ -95,6 +95,8 @@ pub enum ConstraintType {
     DurationContiguous,
     /// A lesson may not occupy a period that is not for teaching.
     NoTeachingInPeriod,
+    /// A pinned occurrence must be where it is pinned, if it is placed at all.
+    ActivityFixed,
     /// Every activity in scope must be placed, exactly once.
     ActivityScheduled,
 }
@@ -111,6 +113,7 @@ impl ConstraintType {
             Self::EntityUnavailable => "entity-unavailable",
             Self::DurationContiguous => "duration-contiguous",
             Self::NoTeachingInPeriod => "no-teaching-in-period",
+            Self::ActivityFixed => "activity-fixed",
             Self::ActivityScheduled => "activity-scheduled",
         }
     }
@@ -129,8 +132,8 @@ impl ConstraintType {
     ///
     /// The order is the order violations are reported in, and it is chosen so a reader meets
     /// causes before consequences: the four clash and compatibility rules about *where* a
-    /// lesson sits, then the two about *when* it may sit there, then whether it sits anywhere
-    /// at all.
+    /// lesson sits, then the two about *when* it may sit there, then whether it is where
+    /// somebody pinned it, then whether it sits anywhere at all.
     #[must_use]
     pub const fn all() -> &'static [Self] {
         &[
@@ -141,6 +144,7 @@ impl ConstraintType {
             Self::EntityUnavailable,
             Self::DurationContiguous,
             Self::NoTeachingInPeriod,
+            Self::ActivityFixed,
             Self::ActivityScheduled,
         ]
     }
@@ -166,13 +170,14 @@ impl ConstraintType {
             | Self::RoomTypeRequired
             | Self::EntityUnavailable
             | Self::DurationContiguous
-            | Self::NoTeachingInPeriod => ConstraintLevel::Hard,
+            | Self::NoTeachingInPeriod
+            | Self::ActivityFixed => ConstraintLevel::Hard,
         }
     }
 
     /// Whether the engine always evaluates this type, whatever the database holds.
     ///
-    /// All eight are, and that is the answer to the question the brief's §8 asks: the MVP set
+    /// All nine are, and that is the answer to the question the brief's §8 asks: the MVP set
     /// is **mandatory in the registry, not materialised as rows**. Evaluation runs them
     /// because they are in [`ConstraintType::all`], so deleting a `constraint_instance` cannot
     /// disable a safety rule — there is no row to delete. See ADR 0039.
@@ -187,9 +192,10 @@ impl ConstraintType {
 
     /// Whether this type can be narrowed to particular entities by `constraint_ref` rows.
     ///
-    /// None of the eight can. Each is a property of the whole timetable — a teacher clash is a
-    /// clash wherever it happens — so a `constraint_ref` narrowing one would either do nothing
-    /// or silently switch a safety rule off for part of a school.
+    /// None of the nine can. Each is a property of the whole timetable — a teacher clash is a
+    /// clash wherever it happens, and a pin is a decision about one occurrence that no scope
+    /// could narrow further — so a `constraint_ref` narrowing one would either do nothing or
+    /// silently switch a safety rule off for part of a school.
     ///
     /// Stated as a method rather than assumed, because the refusal has to be explicit:
     /// compiling a narrowed instance of one of these is an error, not a scope quietly ignored.
@@ -273,11 +279,11 @@ impl ConstraintLevel {
 ///
 /// # One field, because the MVP has one parameter
 ///
-/// Seven of the eight implemented types take no parameters at all, and `duration-contiguous`
+/// Eight of the nine implemented types take no parameters at all, and `duration-contiguous`
 /// takes exactly one — `CONSTRAINTS.md` describes it as *"consecutive periods on one day, not
 /// spanning a break unless permitted"*, and this is the permission.
 ///
-/// A struct rather than an enum of eight variants, seven of them empty. When a second
+/// A struct rather than an enum of nine variants, eight of them empty. When a second
 /// parameterised type arrives it adds a field; when that becomes unwieldy it becomes an enum,
 /// and the typed boundary means that change is a compiler error rather than a silent
 /// misreading. The JSON Schema each type publishes lives beside its evaluator in
@@ -343,7 +349,7 @@ pub struct ScopeRef {
 pub struct CompiledConstraint {
     /// The stored row this came from, or `None` for a mandatory built-in.
     ///
-    /// `None` is the ordinary case in the MVP and is not a missing value: the eight types are
+    /// `None` is the ordinary case in the MVP and is not a missing value: the nine types are
     /// mandatory in the registry, so an unconfigured project evaluates all of them and has no
     /// rows at all. A violation carries this through so a future screen can link a finding to
     /// the instance that produced it, where there is one.
