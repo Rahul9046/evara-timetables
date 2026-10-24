@@ -471,7 +471,7 @@ read the one compiled index.
 | Check | Why | Evidence |
 | --- | --- | --- |
 | Lines whose members exceed the rooms of the required type | **There is no `line` table.** `V15`'s header names `line` and `line_member` among tables it deliberately did not create, and `ROADMAP.md` Phase 3 still lists the lines editor as remaining work | `grep "CREATE TABLE line"` over `crates/evara-db/migrations/` matches nothing |
-| Pinned activities that already conflict | **There is no `activity.is_locked` column.** `Problem::pinned` is the declared hook and nothing populates it, so a check over it would be unreachable code asserting nothing | `grep "is_locked"` matches only doc comments saying it is absent |
+| Pinned activities that already conflict | **Still absent, and no longer for this reason.** When this was written there was no lock column and `Problem::pinned` was a hook nothing populated. M9A added `timetable_entry.is_locked` and the editing session fills `pinned` from it — but a *pre-solve* check runs over a compiled `Problem`, and the loader compiles no pins ([adr/0045](adr/0045-a-lock-is-a-property-of-a-placement.md) §3), so the field is still empty for every caller that reaches these checks. The editor asks the same question per candidate instead, through `IncrementalScorer::probe` | `Problem::pinned` is empty after any `evara_db::scheduling` load; `integrity` asserts it |
 
 Neither was stubbed. Inventing the vocabulary is not M3's job.
 
@@ -596,7 +596,8 @@ in prose.
    <path> --school <id> --cycle <id> [--term <id>]` compiles a real `.evaraproj` and runs these
    checks over it, through an open that migrates nothing and writes nothing. The same three
    exit codes.
-3. **Checks 5 and 6 are absent** because `line` and `activity.is_locked` do not exist.
+3. **Checks 5 and 6 are absent.** `line` does not exist; the pin check is absent because the
+   loader compiles no pins, which is still true now that locks do exist — §11.
 4. **Check 3 under-counts demand**, deliberately: overlapping groups' lessons are not
    attributed without M5's evaluator.
 5. **The indeterminate warning does not say how much each answer buys** — ADR 0038.

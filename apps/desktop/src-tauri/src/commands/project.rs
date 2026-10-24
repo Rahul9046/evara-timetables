@@ -44,6 +44,15 @@ pub struct AppState {
     ///
     /// Cleared when the project closes — see [`project_close`].
     pub generations: crate::commands::session::GenerationSessions,
+    /// Every timetable open for editing.
+    ///
+    /// Its own lock, like `generations` and for the same reasons: an edit session holds a
+    /// compiled problem and **no** connection, it outlives the command that opened it, and
+    /// reading its history must not block behind a write somewhere else in the application.
+    ///
+    /// Cleared when the project closes — see [`project_close`]. An undo stack whose rows are in
+    /// a file that is no longer open is worse than no undo stack.
+    pub edits: crate::commands::edit_session::EditSessions,
     /// Which project is open, as a monotonic counter.
     ///
     /// Bumped on every create, open and close. A generation session records the value it
@@ -242,6 +251,7 @@ pub fn project_create(state: State<'_, AppState>, path: PathBuf) -> CommandResul
     // reason `project_close` clears the import session first: a failure to take the lock must
     // not leave a session pointing at a project that is no longer the open one.
     state.generations.clear();
+    state.edits.clear();
     state.epoch.bump();
     let mut workspace = lock(&state)?;
     Ok(workspace.create_project(&path)?.into())
@@ -251,6 +261,7 @@ pub fn project_create(state: State<'_, AppState>, path: PathBuf) -> CommandResul
 #[tauri::command]
 pub fn project_open(state: State<'_, AppState>, path: PathBuf) -> CommandResult<ProjectView> {
     state.generations.clear();
+    state.edits.clear();
     state.epoch.bump();
     let mut workspace = lock(&state)?;
     Ok(workspace.open_project(&path)?.into())
@@ -269,6 +280,7 @@ pub fn project_close(state: State<'_, AppState>) -> CommandResult<bool> {
     // survive the close. Discarding stops a worker mid-solve rather than leaving it computing
     // an answer nothing can save.
     state.generations.clear();
+    state.edits.clear();
     state.epoch.bump();
     let mut workspace = lock(&state)?;
     Ok(workspace.close_project())

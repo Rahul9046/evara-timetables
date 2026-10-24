@@ -260,11 +260,12 @@ fn place_one(
     config: &SolveConfig,
     prepared: &Prepared,
 ) -> Attempt {
-    // A pinned occurrence is placed where it is pinned, and nothing else is tried. Nothing
-    // populates `Problem::pinned` at `V16` — there is no `activity.is_locked` column — so this
-    // branch is unreachable today and is written because repair is the mechanism partial
-    // regeneration is built from (`SOLVER.md` §7) and a pin honoured by accident later is a pin
-    // not honoured.
+    // A pinned occurrence is placed where it is pinned, and nothing else is tried. Since M9A
+    // `Problem::pinned` is populated by the caller that opened a timetable, from
+    // `timetable_entry.is_locked`, so this branch is reachable — and `activity-fixed` is the
+    // registered rule that judges the same thing, so a pin honoured here and a pin checked
+    // there cannot disagree. The probe is what makes an *impossible* pin reported rather than
+    // forced (`SOLVER.md` §5).
     if let Some(pinned) = prepared.pinned {
         statistics.candidate_evaluations += 1;
         return match scorer.probe(prepared.activity, pinned) {
@@ -363,7 +364,12 @@ fn cause_of(verdict: &PlacementVerdict) -> UnplacedCause {
             ConstraintType::DurationContiguous | ConstraintType::NoTeachingInPeriod => {
                 cause = UnplacedCause::NoContiguousRun;
             }
-            ConstraintType::ActivityScheduled => {}
+            // A pin cannot be the reason a *candidate* was refused: the pinned branch tries
+            // the pin and nothing else, so a violation of this rule means the pin itself is
+            // impossible — which is a property of the arrangement around it, not of the
+            // occurrence. `BlockedByPlacements` is already the default and is the honest
+            // answer; naming an impossibility here would overclaim.
+            ConstraintType::ActivityFixed | ConstraintType::ActivityScheduled => {}
         }
     }
     cause

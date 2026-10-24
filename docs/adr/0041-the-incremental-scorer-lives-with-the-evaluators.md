@@ -145,7 +145,7 @@ unsound without it.
   timetable and are now lookups, which speeds up the **reference** scorer too.
 - `evara-solver` depends on `evara-constraints` for legality and owns none of it. The crate is
   smaller than the sketch in `SOLVER.md` §2 implied, and that is the point.
-- M11's `validate_move` has its implementation already: `PlacementVerdict` is
+- The move validator has its implementation already: `PlacementVerdict` is
   `SOLVER.md` §6's `MoveVerdict` less the suggestions, and it comes from the same scorer the
   generator used — so the editor and the generator cannot disagree about a drop target.
 - The one reading that changed: `PlacementVerdict::allowed` is `false` when the result *carries*

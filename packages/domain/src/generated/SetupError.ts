@@ -91,6 +91,18 @@ timetableId: string,
 /**
  * Message to show.
  */
+message: string, } | { "kind": "locked", 
+/**
+ * Message to show.
+ */
+message: string, } | { "kind": "arrangementChanged", 
+/**
+ * How many placements differ from what this window last saw.
+ */
+entriesChanged: number, 
+/**
+ * Message to show.
+ */
 message: string, } | { "kind": "failed", 
 /**
  * Message to show.

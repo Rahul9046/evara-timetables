@@ -16,7 +16,7 @@
  * type guards, discriminated-union helpers and display formatting.
  *
  * Type generation was wired up in Phase 1E. `./generated/` now holds the whole IPC
- * contract — 175 types, written by `npm run types:generate` and verified by
+ * contract — 185 types, written by `npm run types:generate` and verified by
  * `npm run types:check`, which CI runs. See
  * [ADR 0009](../../../docs/adr/0009-typescript-type-generation.md) and
  * [ADR 0012](../../../docs/adr/0012-records-are-the-ipc-contract.md).
@@ -42,6 +42,9 @@ export type {
   CalendarDayKind,
   Campus,
   CampusInput,
+  CandidateCell,
+  CandidateGrid,
+  CandidateRoom,
   CellContent,
   Choice,
   ClassEnrolment,
@@ -74,6 +77,10 @@ export type {
   Department,
   DepartmentDependents,
   DepartmentInput,
+  EditHistoryView,
+  EditLesson,
+  EditStateView,
+  EditUnplaced,
   EnrolmentStatus,
   FieldSpec,
   FindingCounts,
@@ -104,6 +111,7 @@ export type {
   MaterialisationCounts,
   MaterialisationPlan,
   MaterialisationRequest,
+  MoveVerdictView,
   NonWorkingInstructionalDay,
   OutcomeView,
   Period,
@@ -122,6 +130,7 @@ export type {
   ProjectedLesson,
   ProjectedPeriod,
   ProjectionScope,
+  ProposedMove,
   QualifiedSubject,
   QualifiedTeacher,
   Resource,
@@ -146,6 +155,7 @@ export type {
   SchoolLogoView,
   ScopeGrid,
   ScopeKind,
+  ScoreView,
   ScoringView,
   SectionDemand,
   SectionLabel,
@@ -163,8 +173,8 @@ export type {
   StudentGroupInput,
   StudentGroupMember,
   StudentGroupMemberInput,
-  StudentInSchool,
   StudentInput,
+  StudentInSchool,
   StudentLabel,
   Subject,
   SubjectDependents,
@@ -177,8 +187,8 @@ export type {
   TeacherDepartment,
   TeacherDepartmentInput,
   TeacherDepartmentView,
-  TeacherInSchool,
   TeacherInput,
+  TeacherInSchool,
   TeacherQualification,
   TeacherQualificationInput,
   TeacherSchool,

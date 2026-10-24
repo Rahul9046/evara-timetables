@@ -1891,15 +1891,17 @@ fn no_fixture_pins_a_placement_or_implies_a_solver() {
 }
 
 #[test]
-fn nothing_in_the_catalogue_is_pinned_because_locks_do_not_exist() {
-    // `activity.is_locked` is not in V15, and `activity-fixed` joins the constraint set once
-    // locks do. A fixture that pinned something would be depending on a column that is not
-    // there.
+fn the_catalogue_pins_nothing_because_a_pin_comes_from_a_timetable() {
+    // Locks exist since M9A — `timetable_entry.is_locked` — and `activity-fixed` is in the
+    // registry. The catalogue still pins nothing, and that is the point rather than a gap: a
+    // pin is read from a stored *timetable*, which is an output of a solve, while a fixture is
+    // an input. A fixture that pinned something would be asserting that the loader compiles
+    // locks, which it deliberately does not (ADR 0045 §4).
     for found in all_fixtures(SEED) {
         for problem in &found.problems {
             assert!(
                 problem.pinned.is_empty(),
-                "{} pins a placement, and locks do not exist yet",
+                "{} pins a placement, and a pin is not an input",
                 found.name
             );
         }

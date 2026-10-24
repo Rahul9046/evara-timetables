@@ -416,16 +416,21 @@ disabling: a greyed-out drag handle teaches a user that editing exists here, and
 
 | Not built | Owner |
 | --- | --- |
-| `apply_move`, `validate_move`, drag-and-drop, hover validation, undo/redo | ROADMAP Phase 8 |
-| locking, repair, partial regeneration, `minimise-disruption` | Phase 8, `SOLVER.md` §7 |
+| ~~`apply_move`, `validate_move`, drag-and-drop, hover validation, undo/redo~~ | ✅ **M9A** — as `edit_apply` and `IncrementalScorer::probe`'s callers; [TIMETABLE-EDITING.md](TIMETABLE-EDITING.md) |
+| ~~locking~~ | ✅ **M9A** — [adr/0045](adr/0045-a-lock-is-a-property-of-a-placement.md) |
+| repair, partial regeneration, `minimise-disruption` | Phase 8B, `SOLVER.md` §7 |
 | print, print stylesheets, PDF, CSV, the renderer trait | Phase 10 |
 | `.evara` export of a timetable | Phase 9 |
 
-`PlacementVerdict` already exists and is exactly what `validate_move` returns. M8 does not
-expose it, so ROADMAP Phase 5's *"no Tauri handler exposes it yet"* stays true.
+`PlacementVerdict` already exists and is exactly what a move validator returns. M8 does not
+expose it; **M9A does**, through `edit_candidates` and `edit_validate`, so ROADMAP Phase 5's
+*"no Tauri handler exposes it yet"* is no longer true.
 
-`is_locked` and `is_manual` are **rendered where set and written nowhere**, so that when
-Phase 8 begins writing them the grid already tells the truth.
+`is_locked` and `is_manual` are **rendered here where set and written only by the editor**, so a
+timetable somebody has edited by hand says so wherever it is read. M9A kept the boundary rather
+than erasing it: this screen is still read-only, and **Edit this timetable** hands over to a
+screen that owns an editing session — two screens rather than a mode on one, because a session
+holds the compiled problem and the undo stack and a toggle would discard them on every flip.
 
 **The four writes in the whole milestone** are `save_generated`, `rename`, `delete` and
 `record_revalidation`. Every other command goes through `Scheduling`, whose receiver is a
@@ -500,7 +505,7 @@ Named assertions worth knowing:
 
 | Limitation | Why | Where it goes |
 | --- | --- | --- |
-| **No editing.** No move, no lock, no repair | §12 | ROADMAP Phase 8 |
+| ~~**No editing.** No move, no lock, no repair~~ | ✅ Move and lock landed in **M9A**, on a screen of their own; repair has not | §12, [TIMETABLE-EDITING.md](TIMETABLE-EDITING.md) · repair is Phase 8B |
 | **No print, PDF or CSV** | the renderer trait is Phase 10's, and a trait with one implementation is a guess about the second | Phase 10, OPEN-DECISIONS D10 |
 | **The master grid is not paginated yet** | measured at 40 cells for the upper end, so nothing needs it; the shape is ready if a measurement changes | §9 |
 | **Opening a timetable compiles a problem every time** | the alternative is a cache whose lifetime nothing else in the crate has; a load is cheap | §6 |

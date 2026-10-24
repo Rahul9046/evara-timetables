@@ -39,6 +39,25 @@
  * two cannot be read as one week — never a merged axis, which would assert that Northgate's
  * Period 3 and Southmoor's Period 3 are the same row. They are not.
  *
+ * ## Editing, when it is offered, decides nothing
+ *
+ * The `editing` prop turns cells into pick-up and drop targets. Every verdict it renders arrives
+ * already decided: `editing.candidates` is a `CandidateGrid` the backend probed cell by cell
+ * through the constraint registry, so a tinted cell is one Rust called legal and a refused one
+ * carries the rule's own sentence. This component chooses no target, computes no clash and
+ * compares no interval.
+ *
+ * The keyboard path reaches **everything** the mouse does and is asserted to, because a grid that
+ * can only be edited by dragging is a grid half the people who have to use it cannot edit:
+ *
+ * | Key | On a cell |
+ * | --- | --- |
+ * | Enter / Space | pick up the lesson here, or drop the one in hand |
+ * | Escape | put down what is in hand, changing nothing |
+ * | Delete / Backspace | unschedule the lesson here |
+ * | `l` | lock or unlock the lesson here |
+ * | arrows, Home, End | move the focus, as in the read-only grid |
+ *
  * ## Showing one day is a display choice, and the only one this component makes
  *
  * `shownDay` renders a single column instead of the whole cycle, for a rotation too wide to
@@ -50,12 +69,38 @@
 import { useCallback, useRef, useState } from "react";
 
 import type {
+  CandidateGrid,
   GridPanel,
   PinReason,
   ProjectedLesson,
   ScopeGrid,
   TimetableCell,
 } from "@evara/domain";
+
+import { verdictAt } from "../../ipc/edit";
+
+/**
+ * What the grid needs in order to be editable, and nothing more.
+ *
+ * Every field is either a fact the backend decided or a callback into it. There is no state here
+ * from which legality could be inferred.
+ */
+export type Editing = {
+  /** The occurrence currently in hand, or `null`. */
+  pickedUp: string | null;
+  /** The verdicts for the occurrence in hand, as the backend probed them. */
+  candidates: CandidateGrid | null;
+  /** Whether a write is in flight, so the grid stops offering a second one. */
+  busy: boolean;
+  /** Picks a lesson up, or puts it down when it is already in hand. */
+  onPickUp: (activityId: string | null) => void;
+  /** Drops what is in hand into one slot. */
+  onDrop: (timeslotId: string) => void;
+  /** Takes one lesson off the timetable. */
+  onUnschedule: (activityId: string) => void;
+  /** Locks or unlocks one placement. */
+  onToggleLock: (activityId: string) => void;
+};
 
 /** What a reader is told about a pinned cell, by why it was pinned. */
 const PIN_REASON: Record<PinReason, { label: string; tone: string }> = {
@@ -72,9 +117,11 @@ export function TimetableGrid(props: {
   lessons: readonly ProjectedLesson[];
   /** One cycle day's `ordinal`, or `null` for the whole cycle. */
   shownDay?: number | null;
+  /** Present only when the timetable is open for editing. Absent means read-only. */
+  editing?: Editing;
   onSelectLesson?: (index: number) => void;
 }) {
-  const { grid, lessons, shownDay = null, onSelectLesson } = props;
+  const { grid, lessons, shownDay = null, editing, onSelectLesson } = props;
   const container = useRef<HTMLDivElement>(null);
   const [focus, setFocus] = useState<Focus>({ panel: 0, day: 0, period: 0 });
 
@@ -145,6 +192,7 @@ export function TimetableGrid(props: {
           lessons={lessons}
           scopeName={grid.scope.name}
           focus={focus}
+          editing={editing}
           onKeyDown={onKeyDown}
           onSelectLesson={onSelectLesson}
         />
@@ -161,11 +209,31 @@ function Panel(props: {
   lessons: readonly ProjectedLesson[];
   scopeName: string;
   focus: Focus;
+  editing?: Editing;
   onKeyDown: (event: React.KeyboardEvent, panel: number, day: number, period: number) => void;
   onSelectLesson?: (index: number) => void;
 }) {
-  const { panel, shownDay, panelIndex, lessons, scopeName, focus, onKeyDown, onSelectLesson } =
-    props;
+  const {
+    panel,
+    shownDay,
+    panelIndex,
+    lessons,
+    scopeName,
+    focus,
+    editing,
+    onKeyDown,
+    onSelectLesson,
+  } = props;
+
+  // The candidate grid is the lesson in hand's own bell schedule. A panel of a *different*
+  // schedule therefore offers no drop target at all, which is the truthful answer rather than a
+  // dead cell: a lesson may only sit in slots of the schedule its class resolved to, and
+  // `duration-contiguous` is the rule that owns that. The grid does not restate it — it simply
+  // has no verdict to render, and says so.
+  const candidatesHere =
+    editing?.candidates != null && editing.candidates.scheduleId === panel.scheduleId
+      ? editing.candidates
+      : null;
 
   // The columns actually rendered. A filter, not a re-derivation: these are the backend's
   // days, in the backend's order, with the ones the reader asked to hide left out.
@@ -248,6 +316,8 @@ function Panel(props: {
                       periodIndex={periodIndex}
                       isTabStop={isTabStop}
                       isTeaching={period.isTeaching}
+                      editing={editing}
+                      candidate={verdictAt(candidatesHere, day.ordinal, period.ordinal)}
                       onKeyDown={onKeyDown}
                       onSelectLesson={onSelectLesson}
                     />
@@ -274,6 +344,8 @@ function Cell(props: {
   periodIndex: number;
   isTabStop: boolean;
   isTeaching: boolean;
+  editing?: Editing;
+  candidate: CandidateGrid["cells"][number] | null;
   onKeyDown: (event: React.KeyboardEvent, panel: number, day: number, period: number) => void;
   onSelectLesson?: (index: number) => void;
 }) {
@@ -287,22 +359,94 @@ function Cell(props: {
     periodIndex,
     isTabStop,
     isTeaching,
+    editing,
+    candidate,
     onKeyDown,
     onSelectLesson,
   } = props;
 
+  const held = editing?.pickedUp ?? null;
+  // Every one of these is read, never computed. `candidate.allowed` is the constraint registry's
+  // answer for this exact cell; `candidate.blocking` is the rule's own sentence for refusing it.
+  const isTarget = held !== null && candidate !== null;
+  const mayDrop = isTarget && candidate.allowed && editing?.busy !== true;
+  const dropTone = !isTarget ? "" : candidate.allowed ? " ttCell--legal" : " ttCell--illegal";
+
+  /** The keyboard accelerators a cell carries. Every one has a button equivalent. */
+  const onCellKeys = (event: React.KeyboardEvent) => {
+    if (editing === undefined) {
+      onKeyDown(event, panelIndex, dayIndex, periodIndex);
+      return;
+    }
+    if (event.key === "Escape" && held !== null) {
+      event.preventDefault();
+      editing.onPickUp(null);
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      if (mayDrop && candidate !== null) {
+        event.preventDefault();
+        editing.onDrop(candidate.timeslotId);
+        return;
+      }
+      const first = firstActivity(cell, lessons);
+      if (held === null && first !== null) {
+        event.preventDefault();
+        editing.onPickUp(first);
+        return;
+      }
+    }
+    if (event.key === "Delete" || event.key === "Backspace") {
+      const first = firstActivity(cell, lessons);
+      if (first !== null) {
+        event.preventDefault();
+        editing.onUnschedule(first);
+        return;
+      }
+    }
+    if (event.key === "l" || event.key === "L") {
+      const first = firstActivity(cell, lessons);
+      if (first !== null) {
+        event.preventDefault();
+        editing.onToggleLock(first);
+        return;
+      }
+    }
+    onKeyDown(event, panelIndex, dayIndex, periodIndex);
+  };
+
+  const dropProps = {
+    onDragOver: (event: React.DragEvent) => {
+      if (mayDrop) event.preventDefault();
+    },
+    onDrop: (event: React.DragEvent) => {
+      if (!mayDrop || candidate === null) return;
+      event.preventDefault();
+      editing?.onDrop(candidate.timeslotId);
+    },
+  };
+
+  /** What a reader hears about this cell as a target, which is the rules' own words. */
+  const targetSays = !isTarget
+    ? ""
+    : candidate.allowed
+      ? " Legal drop target."
+      : ` Cannot be dropped here. ${candidate.blocking.join(" ")}`;
+
   if (cell.content.kind === "empty") {
     return (
       <td
-        className={isTeaching ? "ttCell ttCell--empty" : "ttCell ttCell--unavailable"}
+        className={`${isTeaching ? "ttCell ttCell--empty" : "ttCell ttCell--unavailable"}${dropTone}`}
         data-cell={`${panelIndex}-${dayIndex}-${periodIndex}`}
+        data-droppable={mayDrop ? "true" : undefined}
         tabIndex={isTabStop ? 0 : -1}
         aria-label={
-          isTeaching
+          (isTeaching
             ? `${dayLabel}, ${periodLabel}: free`
-            : `${dayLabel}, ${periodLabel}: not a teaching period`
+            : `${dayLabel}, ${periodLabel}: not a teaching period`) + targetSays
         }
-        onKeyDown={(event) => onKeyDown(event, panelIndex, dayIndex, periodIndex)}
+        onKeyDown={onCellKeys}
+        {...(editing === undefined ? {} : dropProps)}
       />
     );
   }
@@ -333,18 +477,20 @@ function Cell(props: {
   }
   const tone = pinned === null ? "" : ` ${PIN_REASON[pinned].tone}`;
 
-  const held: ProjectedLesson[] = indexes
+  const inCell: ProjectedLesson[] = indexes
     .map((index: number) => lessons[index])
     .filter((lesson): lesson is ProjectedLesson => lesson !== undefined);
 
   return (
     <td
-      className={`ttCell ttCell--filled${tone}`}
+      className={`ttCell ttCell--filled${tone}${dropTone}`}
       rowSpan={rowSpan}
       data-cell={`${panelIndex}-${dayIndex}-${periodIndex}`}
+      data-droppable={mayDrop ? "true" : undefined}
       tabIndex={isTabStop ? 0 : -1}
-      aria-label={describeCell(held, dayLabel, periodLabel, rowSpan, pinned)}
-      onKeyDown={(event) => onKeyDown(event, panelIndex, dayIndex, periodIndex)}
+      aria-label={describeCell(inCell, dayLabel, periodLabel, rowSpan, pinned) + targetSays}
+      onKeyDown={onCellKeys}
+      {...(editing === undefined ? {} : dropProps)}
       onClick={() => {
         const first = indexes[0];
         if (first !== undefined) onSelectLesson?.(first);
@@ -358,8 +504,16 @@ function Cell(props: {
         </p>
       )}
       <ul className="ttLessons">
-        {held.map((lesson: ProjectedLesson, at: number) => (
-          <li key={`${lesson.activityId}-${at}`} className="ttLesson">
+        {inCell.map((lesson: ProjectedLesson, at: number) => (
+          <li
+            key={`${lesson.activityId}-${at}`}
+            className={`ttLesson${editing?.pickedUp === lesson.activityId ? " ttLesson--held" : ""}`}
+            // The mouse path. Its keyboard equivalent is the Pick up button below, so every
+            // lesson of a shared cell is reachable both ways rather than only the first.
+            draggable={editing !== undefined && !lesson.flags.isLocked && !editing.busy}
+            onDragStart={() => editing?.onPickUp(lesson.activityId)}
+            onDragEnd={() => editing?.onPickUp(null)}
+          >
             <span className="ttLessonName">
               {lesson.label === null ? lesson.sectionId : lesson.label.short}
             </span>
@@ -385,11 +539,68 @@ function Cell(props: {
             {lesson.flags.isManual ? (
               <span className="ttLessonFlag">Placed by hand</span>
             ) : null}
+            {editing === undefined ? null : (
+              <span className="ttLessonTools">
+                <button
+                  type="button"
+                  className="linkish"
+                  disabled={editing.busy || lesson.flags.isLocked}
+                  aria-pressed={editing.pickedUp === lesson.activityId}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    editing.onPickUp(
+                      editing.pickedUp === lesson.activityId ? null : lesson.activityId,
+                    );
+                  }}
+                >
+                  {editing.pickedUp === lesson.activityId ? "Put down" : "Pick up"}
+                </button>
+                <button
+                  type="button"
+                  className="linkish"
+                  disabled={editing.busy}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    editing.onToggleLock(lesson.activityId);
+                  }}
+                >
+                  {lesson.flags.isLocked ? "Unlock" : "Lock"}
+                </button>
+                <button
+                  type="button"
+                  className="linkish"
+                  disabled={editing.busy || lesson.flags.isLocked}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    editing.onUnschedule(lesson.activityId);
+                  }}
+                >
+                  Unschedule
+                </button>
+              </span>
+            )}
           </li>
         ))}
       </ul>
     </td>
   );
+}
+
+/**
+ * The first occurrence a cell holds, for the keyboard accelerators.
+ *
+ * A shortcut, never the only route: every lesson of a shared cell has its own Pick up, Lock and
+ * Unschedule button, so the keyboard reaches all of them and not only this one.
+ */
+function firstActivity(
+  cell: TimetableCell,
+  lessons: readonly ProjectedLesson[],
+): string | null {
+  const content = cell.content;
+  const index =
+    content.kind === "lesson" ? content.lesson : content.kind === "pinned" ? content.lessons[0] : undefined;
+  if (index === undefined) return null;
+  return lessons[index]?.activityId ?? null;
 }
 
 /**

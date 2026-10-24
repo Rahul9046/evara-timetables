@@ -17,12 +17,18 @@
  * - the whole grid is reachable from the keyboard alone;
  * - a span defect is rendered rather than swallowed, which is the state a stored timetable
  *   reaches after its grid moves.
+ *
+ * The editing section at the bottom is held to the same division. Whether a cell may take a
+ * lesson is Rust's answer and is asserted nowhere here; what is asserted is that the grid offers
+ * a drop exactly where it was told one is legal, refuses one where it was not, renders the
+ * refusing rule's own sentence, and reaches all of it from the keyboard.
  */
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import type {
+  CandidateGrid,
   CellContent,
   GridPanel,
   ProjectedDay,
@@ -34,7 +40,7 @@ import type {
   TimetableCell,
 } from "@evara/domain";
 
-import { TimetableGrid } from "./TimetableGrid";
+import { TimetableGrid, type Editing } from "./TimetableGrid";
 
 // ---------------------------------------------------------------- fixtures
 
@@ -598,5 +604,420 @@ describe("the grid is read-only", () => {
     );
     await user.click(screen.getByText("9 Mathematics B"));
     expect(onSelectLesson).toHaveBeenCalledWith(0);
+  });
+});
+
+// ---------------------------------------------------------------- editing
+
+/**
+ * Editing, which decides nothing.
+ *
+ * Every case here is about the grid **rendering a verdict it was given** rather than forming one.
+ * The fixtures therefore state the verdict explicitly — `allowed: true` on one cell and
+ * `allowed: false` with the rule's sentence on another — and the assertions are that the grid
+ * offered a drop where the backend allowed it, refused one where it did not, and said which rule
+ * refused in words a screen reader reaches.
+ *
+ * The keyboard half is not a nicety. A grid that can only be edited by dragging is a grid half
+ * the people who have to use it cannot edit, so every mouse affordance is asserted to have a
+ * keyboard equivalent — including on the **second** lesson of a shared cell, which is the one a
+ * single-accelerator design silently strands.
+ */
+describe("editing", () => {
+  /** One verdict per cell, as the backend probed them. */
+  function aCandidateGrid(over: Partial<CandidateGrid> = {}): CandidateGrid {
+    return {
+      activityId: "a1",
+      scheduleId: "bs1",
+      roomId: "r1",
+      rooms: [{ roomId: "r1", name: "Room B12" }],
+      roomlessAllowed: false,
+      cells: [
+        {
+          timeslotId: "ts-legal",
+          dayOrdinal: 2,
+          periodOrdinal: 1,
+          allowed: true,
+          isCurrent: false,
+          blocking: [],
+          mediumDelta: 0,
+        },
+        {
+          timeslotId: "ts-illegal",
+          dayOrdinal: 2,
+          periodOrdinal: 2,
+          allowed: false,
+          isCurrent: false,
+          blocking: ["A. Okafor already teaches 9 Science A at this time."],
+          mediumDelta: 0,
+        },
+      ],
+      unavailable: null,
+      ...over,
+    };
+  }
+
+  function anEditing(over: Partial<Editing> = {}): Editing {
+    return {
+      pickedUp: null,
+      candidates: null,
+      busy: false,
+      onPickUp: vi.fn(),
+      onDrop: vi.fn(),
+      onUnschedule: vi.fn(),
+      onToggleLock: vi.fn(),
+      ...over,
+    };
+  }
+
+  /** The default fixture: one lesson at Day A, Period 1 — which is also the grid's tab stop. */
+  const withLesson = () =>
+    aGrid({
+      panels: [
+        aPanel({
+          cells: cells(PERIODS, DAYS, { "1-1": { kind: "lesson", lesson: 0, rows: 1 } }),
+        }),
+      ],
+    });
+
+  const cellAt = (at: string) => document.querySelector(`[data-cell="${at}"]`)!;
+
+  describe("a drop target", () => {
+    it("is offered exactly where the backend allowed one", () => {
+      render(
+        <TimetableGrid
+          grid={withLesson()}
+          lessons={[aLesson()]}
+          editing={anEditing({ pickedUp: "a1", candidates: aCandidateGrid() })}
+        />,
+      );
+      // Day B Period 1 is the allowed cell; Day B Period 2 is the refused one.
+      expect(cellAt("0-1-0").getAttribute("data-droppable")).toBe("true");
+      expect(cellAt("0-1-1").getAttribute("data-droppable")).toBeNull();
+    });
+
+    it("says why it refuses, in the rule's own words", () => {
+      render(
+        <TimetableGrid
+          grid={withLesson()}
+          lessons={[aLesson()]}
+          editing={anEditing({ pickedUp: "a1", candidates: aCandidateGrid() })}
+        />,
+      );
+      expect(cellAt("0-1-1").getAttribute("aria-label")).toContain(
+        "A. Okafor already teaches 9 Science A at this time.",
+      );
+      expect(cellAt("0-1-0").getAttribute("aria-label")).toContain("Legal drop target.");
+    });
+
+    it("is not offered for a cell the backend sent no verdict for", () => {
+      render(
+        <TimetableGrid
+          grid={withLesson()}
+          lessons={[aLesson()]}
+          editing={anEditing({ pickedUp: "a1", candidates: aCandidateGrid() })}
+        />,
+      );
+      // Day A Period 2 is in no candidate cell. No verdict is a missing answer, so the cell is
+      // neither a target nor marked as refused — it says nothing about dropping at all.
+      const quiet = cellAt("0-0-1");
+      expect(quiet.getAttribute("data-droppable")).toBeNull();
+      expect(quiet.getAttribute("aria-label")).not.toContain("Cannot be dropped here");
+    });
+
+    it("is offered nowhere on a panel of a different bell schedule", () => {
+      const grid = aGrid({
+        panels: [
+          aPanel({ scheduleId: "bs2", scheduleName: "Southmoor Day" }),
+          aPanel({ scheduleId: "bs1" }),
+        ],
+      });
+      render(
+        <TimetableGrid
+          grid={grid}
+          lessons={[aLesson()]}
+          editing={anEditing({ pickedUp: "a1", candidates: aCandidateGrid() })}
+        />,
+      );
+      // Panel 0 is Southmoor's; the candidates are Standard Day's. A lesson may only sit in slots
+      // of the schedule its class resolved to, and the grid has no verdict rather than a guess.
+      const onSouthmoor = Array.from(document.querySelectorAll("[data-droppable]")).filter(
+        (cell) => cell.getAttribute("data-cell")?.startsWith("0-"),
+      );
+      const onStandard = Array.from(document.querySelectorAll("[data-droppable]")).filter(
+        (cell) => cell.getAttribute("data-cell")?.startsWith("1-"),
+      );
+      expect(onSouthmoor).toHaveLength(0);
+      expect(onStandard).toHaveLength(1);
+    });
+
+    it("is withdrawn while a write is in flight", () => {
+      render(
+        <TimetableGrid
+          grid={withLesson()}
+          lessons={[aLesson()]}
+          editing={anEditing({ pickedUp: "a1", candidates: aCandidateGrid(), busy: true })}
+        />,
+      );
+      expect(document.querySelectorAll("[data-droppable]")).toHaveLength(0);
+    });
+  });
+
+  describe("the mouse", () => {
+    it("picks a lesson up and drops it in one slot", async () => {
+      const user = userEvent.setup();
+      const onPickUp = vi.fn();
+      const onDrop = vi.fn();
+      const { rerender } = render(
+        <TimetableGrid
+          grid={withLesson()}
+          lessons={[aLesson()]}
+          editing={anEditing({ onPickUp })}
+        />,
+      );
+      await user.click(screen.getByRole("button", { name: "Pick up" }));
+      expect(onPickUp).toHaveBeenCalledWith("a1");
+
+      rerender(
+        <TimetableGrid
+          grid={withLesson()}
+          lessons={[aLesson()]}
+          editing={anEditing({ pickedUp: "a1", candidates: aCandidateGrid(), onDrop })}
+        />,
+      );
+      cellAt("0-1-0").dispatchEvent(new MouseEvent("drop", { bubbles: true, cancelable: true }));
+      expect(onDrop).toHaveBeenCalledWith("ts-legal");
+    });
+
+    it("cannot drop onto a cell the backend refused", () => {
+      const onDrop = vi.fn();
+      render(
+        <TimetableGrid
+          grid={withLesson()}
+          lessons={[aLesson()]}
+          editing={anEditing({ pickedUp: "a1", candidates: aCandidateGrid(), onDrop })}
+        />,
+      );
+      cellAt("0-1-1").dispatchEvent(new MouseEvent("drop", { bubbles: true, cancelable: true }));
+      expect(onDrop).not.toHaveBeenCalled();
+    });
+
+    it("offers the held lesson a put-down rather than a second pick-up", () => {
+      render(
+        <TimetableGrid
+          grid={withLesson()}
+          lessons={[aLesson()]}
+          editing={anEditing({ pickedUp: "a1", candidates: aCandidateGrid() })}
+        />,
+      );
+      expect(
+        screen.getByRole("button", { name: "Put down" }).getAttribute("aria-pressed"),
+      ).toBe("true");
+    });
+  });
+
+  describe("the keyboard reaches everything the mouse does", () => {
+    it("picks up with Enter and drops with Enter", async () => {
+      const user = userEvent.setup();
+      const onPickUp = vi.fn();
+      const onDrop = vi.fn();
+      const { rerender } = render(
+        <TimetableGrid
+          grid={withLesson()}
+          lessons={[aLesson()]}
+          editing={anEditing({ onPickUp })}
+        />,
+      );
+      await user.tab();
+      expect(document.activeElement!.getAttribute("data-cell")).toBe("0-0-0");
+      await user.keyboard("{Enter}");
+      expect(onPickUp).toHaveBeenCalledWith("a1");
+
+      rerender(
+        <TimetableGrid
+          grid={withLesson()}
+          lessons={[aLesson()]}
+          editing={anEditing({ pickedUp: "a1", candidates: aCandidateGrid(), onDrop })}
+        />,
+      );
+      (cellAt("0-0-0") as HTMLElement).focus();
+      await user.keyboard("{ArrowRight}{Enter}");
+      expect(onDrop).toHaveBeenCalledWith("ts-legal");
+    });
+
+    it("does not drop onto a refused cell", async () => {
+      const user = userEvent.setup();
+      const onDrop = vi.fn();
+      render(
+        <TimetableGrid
+          grid={withLesson()}
+          lessons={[aLesson()]}
+          editing={anEditing({ pickedUp: "a1", candidates: aCandidateGrid(), onDrop })}
+        />,
+      );
+      (cellAt("0-1-1") as HTMLElement).focus();
+      await user.keyboard("{Enter}");
+      expect(onDrop).not.toHaveBeenCalled();
+    });
+
+    it("puts down with Escape, changing nothing", async () => {
+      const user = userEvent.setup();
+      const onPickUp = vi.fn();
+      const onDrop = vi.fn();
+      render(
+        <TimetableGrid
+          grid={withLesson()}
+          lessons={[aLesson()]}
+          editing={anEditing({ pickedUp: "a1", candidates: aCandidateGrid(), onPickUp, onDrop })}
+        />,
+      );
+      (cellAt("0-1-0") as HTMLElement).focus();
+      await user.keyboard("{Escape}");
+      expect(onPickUp).toHaveBeenCalledWith(null);
+      expect(onDrop).not.toHaveBeenCalled();
+    });
+
+    it("unschedules with Delete", async () => {
+      const user = userEvent.setup();
+      const onUnschedule = vi.fn();
+      render(
+        <TimetableGrid
+          grid={withLesson()}
+          lessons={[aLesson()]}
+          editing={anEditing({ onUnschedule })}
+        />,
+      );
+      await user.tab();
+      await user.keyboard("{Delete}");
+      expect(onUnschedule).toHaveBeenCalledWith("a1");
+    });
+
+    it("locks and unlocks with l", async () => {
+      const user = userEvent.setup();
+      const onToggleLock = vi.fn();
+      render(
+        <TimetableGrid
+          grid={withLesson()}
+          lessons={[aLesson()]}
+          editing={anEditing({ onToggleLock })}
+        />,
+      );
+      await user.tab();
+      await user.keyboard("l");
+      expect(onToggleLock).toHaveBeenCalledWith("a1");
+    });
+
+    it("still moves the focus when the key is not an accelerator", async () => {
+      const user = userEvent.setup();
+      render(
+        <TimetableGrid grid={withLesson()} lessons={[aLesson()]} editing={anEditing()} />,
+      );
+      await user.tab();
+      await user.keyboard("{ArrowDown}");
+      expect(document.activeElement!.getAttribute("data-cell")).toBe("0-0-1");
+    });
+
+    it("reaches the second lesson of a shared cell, which an accelerator alone strands", async () => {
+      const user = userEvent.setup();
+      const onPickUp = vi.fn();
+      const grid = aGrid({
+        panels: [
+          aPanel({
+            cells: cells(PERIODS, DAYS, {
+              "1-1": { kind: "pinned", lessons: [0, 1], reason: "conflict" },
+            }),
+          }),
+        ],
+      });
+      const second = aLesson({
+        activityId: "a2",
+        label: {
+          sectionId: "s2",
+          subject: "Science",
+          course: "Science Year 9",
+          section: "A",
+          yearLevel: "9",
+          campus: null,
+          short: "9 Science A",
+        },
+      });
+      render(
+        <TimetableGrid
+          grid={grid}
+          lessons={[aLesson(), second]}
+          editing={anEditing({ onPickUp })}
+        />,
+      );
+      // Two of each, one per lesson. The `l`/Enter/Delete accelerators all act on the first, so
+      // without these buttons the second lesson of a clash would be mouse-only.
+      const pickUps = screen.getAllByRole("button", { name: "Pick up" });
+      expect(pickUps).toHaveLength(2);
+      await user.click(pickUps[1]!);
+      expect(onPickUp).toHaveBeenCalledWith("a2");
+    });
+  });
+
+  describe("a locked placement", () => {
+    const locked = () => aLesson({ flags: { isLocked: true, isManual: false } });
+
+    it("offers no drag and no pick-up", () => {
+      render(
+        <TimetableGrid grid={withLesson()} lessons={[locked()]} editing={anEditing()} />,
+      );
+      expect(document.querySelectorAll("[draggable='true']")).toHaveLength(0);
+      expect(screen.getByRole("button", { name: "Pick up" })).toHaveProperty("disabled", true);
+      expect(screen.getByRole("button", { name: "Unschedule" })).toHaveProperty(
+        "disabled",
+        true,
+      );
+    });
+
+    it("offers Unlock, because the lock is the thing the user can change", async () => {
+      const user = userEvent.setup();
+      const onToggleLock = vi.fn();
+      render(
+        <TimetableGrid
+          grid={withLesson()}
+          lessons={[locked()]}
+          editing={anEditing({ onToggleLock })}
+        />,
+      );
+      const button = screen.getByRole("button", { name: "Unlock" });
+      expect(button).toHaveProperty("disabled", false);
+      await user.click(button);
+      expect(onToggleLock).toHaveBeenCalledWith("a1");
+    });
+
+    it("is still said to be locked in words, not only by a missing handle", () => {
+      render(
+        <TimetableGrid grid={withLesson()} lessons={[locked()]} editing={anEditing()} />,
+      );
+      expect(screen.getByText("Locked")).toBeTruthy();
+    });
+  });
+
+  it("marks what is in hand", () => {
+    render(
+      <TimetableGrid
+        grid={withLesson()}
+        lessons={[aLesson()]}
+        editing={anEditing({ pickedUp: "a1", candidates: aCandidateGrid() })}
+      />,
+    );
+    expect(document.querySelectorAll(".ttLesson--held")).toHaveLength(1);
+  });
+
+  it("stops offering writes while one is in flight", () => {
+    render(
+      <TimetableGrid
+        grid={withLesson()}
+        lessons={[aLesson()]}
+        editing={anEditing({ busy: true })}
+      />,
+    );
+    for (const name of ["Pick up", "Lock", "Unschedule"]) {
+      expect(screen.getByRole("button", { name })).toHaveProperty("disabled", true);
+    }
+    expect(document.querySelectorAll("[draggable='true']")).toHaveLength(0);
   });
 });

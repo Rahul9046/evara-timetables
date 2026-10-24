@@ -80,10 +80,9 @@ fn the_serialised_name_matches_the_key() {
 
 #[test]
 fn an_unimplemented_key_is_unknown_rather_than_guessed_at() {
-    // `CONSTRAINTS.md` specifies about sixty types and eight are implemented. A stored row
-    // naming one of the other fifty-two must be reported, not approximated.
+    // `CONSTRAINTS.md` specifies about sixty types and nine are implemented. A stored row
+    // naming one of the other fifty-one must be reported, not approximated.
     for key in [
-        "activity-fixed",
         "room-capacity",
         "resource-clash",
         "teacher-max-per-day",
@@ -104,7 +103,7 @@ fn an_unimplemented_key_is_unknown_rather_than_guessed_at() {
 // =======================================================================================
 
 #[test]
-fn seven_types_are_hard_and_activity_scheduled_is_medium() {
+fn eight_types_are_hard_and_activity_scheduled_is_medium() {
     // `SCHEDULING-ARCHITECTURE-DECISIONS.md` §6's split, asserted rather than assumed. The
     // original M5 brief called `activity-scheduled` hard; the accepted record makes it MEDIUM,
     // and this is the test that stops it drifting back.
@@ -113,7 +112,11 @@ fn seven_types_are_hard_and_activity_scheduled_is_medium() {
         .filter(|k| k.default_level() == ConstraintLevel::Hard)
         .map(|k| k.key())
         .collect();
-    assert_eq!(hard.len(), 7, "{hard:?}");
+    assert_eq!(hard.len(), 8, "{hard:?}");
+    assert!(
+        hard.contains(&"activity-fixed"),
+        "§6's eighth hard type, which arrived with locks: {hard:?}"
+    );
     assert_eq!(
         ConstraintType::ActivityScheduled.default_level(),
         ConstraintLevel::Medium,

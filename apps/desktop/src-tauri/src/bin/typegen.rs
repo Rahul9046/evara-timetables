@@ -580,6 +580,10 @@ fn timetables() -> (Vec<Generated>, Vec<String>, BTreeSet<(PathBuf, String)>) {
     use evara_core::scheduling::UnverifiedCounts;
     use evara_core::scheduling::display::{LabelSet, RoomLabel, SectionLabel, StudentLabel};
     use evara_core::scheduling::span::SpanDefect;
+    use evara_desktop_lib::commands::edit::{
+        CandidateCell, CandidateGrid, CandidateRoom, EditHistoryView, EditLesson, EditStateView,
+        EditUnplaced, MoveVerdictView, ProposedMove, ScoreView,
+    };
     use evara_desktop_lib::commands::session::SessionPhase;
     use evara_desktop_lib::commands::solve::{
         FindingLine, FinishedEvent, GenerateResult, GenerateSettings, GenerateStarted,
@@ -644,6 +648,18 @@ fn timetables() -> (Vec<Generated>, Vec<String>, BTreeSet<(PathBuf, String)>) {
         OutcomeView,
         RunView,
         DeletedView,
+        // Manual editing — M9A. Every verdict in here is the registry's; the interface
+        // renders them and computes none.
+        EditStateView,
+        EditLesson,
+        EditUnplaced,
+        EditHistoryView,
+        ScoreView,
+        ProposedMove,
+        MoveVerdictView,
+        CandidateGrid,
+        CandidateCell,
+        CandidateRoom,
         // Shared with the solver's own vocabulary: never omitted from a timetable's
         // description, so never omitted from its type.
         UnverifiedCounts,

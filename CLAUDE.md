@@ -331,6 +331,24 @@ disagree about whether a placement is legal, the product is broken.
   pass a "has it finished?" test and write twice; `Saved` is terminal. A session records the
   project epoch it began under, so a timetable generated against one campus file can never be
   saved into another.
+- **A lock is a property of a placement, and an edit never writes a rule.**
+  `timetable_entry.is_locked` — per version, **never `activity.is_locked`**: several timetables
+  coexist for one `(cycle, term)`, so a lock on the lesson would pin it in all of them at once
+  ([adr/0045](docs/adr/0045-a-lock-is-a-property-of-a-placement.md)). The **loader compiles no
+  pins**; `Problem::pinned` is filled by the caller that opened a timetable, because a lock is an
+  *output* of a solve. `activity-fixed` is the ninth type and compares the whole `Placement`, slot
+  and room — and an **unplaced** pinned occurrence is *not* a violation of it, or the empty
+  arrangement of a pinned problem would start infeasible and break construction. The editor adds
+  no move validator: `IncrementalScorer::probe` was already one, and it withdraws the occurrence
+  before placing it at the candidate, so a one-period move is not reported as clashing with
+  itself. An edit **changes the version it is open on** and `timetable_duplicate` is the
+  affordance that makes that safe ([adr/0046](docs/adr/0046-an-edit-changes-the-version-it-is-open-on.md));
+  an undo is a new transaction, so it can be refused, and a refusal clears both stacks. Every
+  editing write carries the **exact `(entry id, rev)` list** of the arrangement beside its
+  revision, compared inside the writing transaction — a digest collides on
+  unschedule-then-place and a scoped change-log watermark cannot see a deletion
+  ([adr/0047](docs/adr/0047-a-cross-session-guard-is-an-exact-placement-list.md)).
+  [TIMETABLE-EDITING.md](docs/TIMETABLE-EDITING.md).
 
 ## 4. Definition of done for a constraint
 

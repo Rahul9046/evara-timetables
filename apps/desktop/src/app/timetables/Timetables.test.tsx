@@ -12,7 +12,8 @@
  *   there is no grid — and shows **no** grid rather than a partial one;
  * - a timetable that is readable but incomplete says so, because a short grid shown as whole
  *   is the one failure a school cannot detect for itself;
- * - the area is read-only: no drag affordance, and no write but the four named.
+ * - this screen stays read-only and **hands over** to the editor: no drag affordance here, no
+ *   move, lock or repair action, and editing reached only by opening a session of its own.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -35,6 +36,20 @@ vi.mock("../../ipc/timetables", () => ({
   deleteTimetable: (...args: unknown[]) => deleteTimetable(...args),
   revalidateTimetable: (...args: unknown[]) => revalidateTimetable(...args),
   describeTimetableError: () => "Something went wrong. Please try again.",
+  isInputsChanged: (error: unknown) =>
+    typeof error === "object" && error !== null && "kind" in error
+      ? (error as { kind: string }).kind === "inputsChanged"
+      : false,
+}));
+
+// Only the one command this screen's hand-over has to reach. The rest of `ipc/edit` stays real,
+// `verdictAt` among them, because the grid calls it on every render.
+const openForEditing = vi.fn();
+
+vi.mock("../../ipc/edit", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../ipc/edit")>()),
+  openForEditing: (...args: unknown[]) => openForEditing(...args),
+  closeEditing: vi.fn(async () => true),
 }));
 
 const { Timetables } = await import("./Timetables");
@@ -313,9 +328,9 @@ describe("a timetable whose grid cannot be rebuilt", () => {
   });
 });
 
-// ---------------------------------------------------------------- read-only
+// ---------------------------------------------------------------- read-only, and the hand-over
 
-describe("the area is read-only", () => {
+describe("this screen stays read-only", () => {
   it("offers no drag affordance anywhere", async () => {
     renderList("tt-1");
     await screen.findByText("As generated");
@@ -323,11 +338,53 @@ describe("the area is read-only", () => {
     expect(document.querySelectorAll("[aria-dropeffect]")).toHaveLength(0);
   });
 
-  it("offers no move, lock or repair action", async () => {
+  it("offers no move, lock or repair action of its own", async () => {
     renderList("tt-1");
     await screen.findByText("As generated");
     for (const forbidden of [/move/i, /lock/i, /repair/i, /drag/i]) {
       expect(screen.queryByRole("button", { name: forbidden })).toBeNull();
     }
+  });
+});
+
+describe("the hand-over to the editor", () => {
+  it("is offered on an opened timetable", async () => {
+    renderList("tt-1");
+    expect(
+      await screen.findByRole("button", { name: "Edit this timetable" }),
+    ).toHaveProperty("disabled", false);
+  });
+
+  it("opens a session of its own rather than making this screen writable", async () => {
+    const user = userEvent.setup();
+    openForEditing.mockRejectedValue({ kind: "invalid", message: "Not now." });
+    renderList("tt-1");
+    await user.click(await screen.findByRole("button", { name: "Edit this timetable" }));
+    // The identifier, not a view this screen already loaded: the session compiles its own
+    // problem and takes its own cross-session stamp, from one snapshot.
+    await waitFor(() => expect(openForEditing).toHaveBeenCalledWith("tt-1"));
+  });
+
+  it("comes back to the read-only view, which re-reads the timetable", async () => {
+    const user = userEvent.setup();
+    openForEditing.mockRejectedValue({ kind: "invalid", message: "Not now." });
+    renderList("tt-1");
+    await user.click(await screen.findByRole("button", { name: "Edit this timetable" }));
+    await user.click(await screen.findByRole("button", { name: /Back to this timetable/ }));
+    expect(await screen.findByText("As generated")).toBeTruthy();
+  });
+
+  it("is refused, with the reason, when no grid could be built", async () => {
+    openTimetable.mockResolvedValue(
+      aView({ projection: null, unreadable: "This timetable's cycle no longer exists" }),
+    );
+    renderList("tt-1");
+    expect(await screen.findByRole("button", { name: "Edit this timetable" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(
+      screen.getByText(/there is nothing to check an edit against/),
+    ).toBeTruthy();
   });
 });

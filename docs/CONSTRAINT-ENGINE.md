@@ -4,12 +4,13 @@ What `evara-constraints` is, what each implemented rule checks, what it delibera
 and what a caller is entitled to conclude from a clean report.
 
 [CONSTRAINTS.md](CONSTRAINTS.md) is the **catalogue**: every constraint type Evara intends to
-support, with a status column that is a plan. This file is the **engine**: the eight types that
+support, with a status column that is a plan. This file is the **engine**: the nine types that
 exist, and the machinery they run in. Where the two disagree about a semantic detail, this one
 is the record of what the code does.
 
-Shipped in M5, and extended in M6 with the incremental scorer
-([ADR 0041](adr/0041-the-incremental-scorer-lives-with-the-evaluators.md)). Nothing here
+Shipped in M5, extended in M6 with the incremental scorer
+([ADR 0041](adr/0041-the-incremental-scorer-lives-with-the-evaluators.md)), and in M9A with the
+ninth rule, `activity-fixed` ([ADR 0045](adr/0045-a-lock-is-a-property-of-a-placement.md)). Nothing here
 generates, improves or searches for a timetable — that is `evara-solver`'s, and
 [TIMETABLE-CONSTRUCTION-SOLVER.md](TIMETABLE-CONSTRUCTION-SOLVER.md) is what it does. This engine
 answers two questions about an arrangement: *what is wrong with this?*, and — since M6 — *would
@@ -24,7 +25,7 @@ evara-core          the vocabulary:  ConstraintType, ConstraintLevel, CompiledCo
                                      Violation, Explanation, AffectedSet, StoredConstraint
    ^
 evara-constraints   the engine:      Registry, ConstraintEvaluator, Occupancy,
-                                     eight evaluators, evaluate(), evaluate_placement(),
+                                     nine evaluators, evaluate(), evaluate_placement(),
                                      IncrementalScorer                       <- M6
    ^
 evara-solver        the search:      candidate generation, construction, explanation
@@ -45,17 +46,19 @@ evaluators also name.
 | `availability.rs` | `entity-unavailable` |
 | `timing.rs` | `duration-contiguous`, `no-teaching-in-period` |
 | `completeness.rs` | `activity-scheduled` |
+| `pinning.rs` | `activity-fixed` — M9A |
 | `evaluation.rs` | `evaluate`, `evaluate_placement`, `EvaluationReport` |
 | `incremental.rs` | `IncrementalScorer`, `PlacementVerdict` — M6 |
 | `differential.rs` | the gate: the incremental scorer against the reference one — M6 |
 
 ---
 
-## 2. The eight rules
+## 2. The nine rules
 
-Seven hard, one medium. This is
+Eight hard, one medium. This is
 [SCHEDULING-ARCHITECTURE-DECISIONS.md](SCHEDULING-ARCHITECTURE-DECISIONS.md) §6's first
-constraint set, less `activity-fixed` — see §3.
+constraint set **in full**: the eight below arrived in M5, and `activity-fixed` arrived with
+M9A's locks — see §3.
 
 | `type_key` | Level | What it refuses |
 | --- | --- | --- |
@@ -172,21 +175,44 @@ is prevented by the type rather than detected by a rule.
 
 ---
 
-## 3. `activity-fixed` is deferred, and not quietly
+## 3. `activity-fixed` — deferred in M5, landed in M9A
 
 `SCHEDULING-ARCHITECTURE-DECISIONS.md` §6's hard set is seven of the above **plus
-`activity-fixed`**, *"once locks exist"*. They do not exist at `V16`: there is no
-`activity.is_locked` column, the roadmap keeps lock toggles with Phase 8's manual editing
-because a lock is about a *placed* timetable rather than about the demand, and
-`Problem::pinned` is a declared hook that nothing populates.
+`activity-fixed`**, *"once locks exist"*. M5 deferred it, in these words and for these reasons:
 
-So `ConstraintType` has no variant for it. A registered rule that can never fire *"tells the
-user their rooms are being checked"* when they are not, and `CLAUDE.md` §4 is explicit that no
-type is supported until all five of its artefacts exist.
+> They do not exist at `V16`: there is no `activity.is_locked` column, the roadmap keeps lock
+> toggles with Phase 8's manual editing because a lock is about a *placed* timetable rather than
+> about the demand, and `Problem::pinned` is a declared hook that nothing populates.
+>
+> So `ConstraintType` has no variant for it. A registered rule that can never fire *"tells the
+> user their rooms are being checked"* when they are not […]
+>
+> **It is not promoted to hard by implication.** When locks land, `activity-fixed` arrives with
+> its evaluator, its schema, its tests and its row in CONSTRAINTS.md, and the hard set becomes
+> eight.
 
-**It is not promoted to hard by implication.** When locks land, `activity-fixed` arrives with
-its evaluator, its schema, its tests and its row in CONSTRAINTS.md, and the hard set becomes
-eight.
+**Locks landed in M9A and all four arrived**, so the hard set is eight. The deferral was right
+about the second clause and wrong about the first: the column is on **`timetable_entry`**, not on
+`activity`. A lock names a placement, and `activity.is_locked` would have pinned a lesson in every
+version of the same cycle at once — [ADR 0045](adr/0045-a-lock-is-a-property-of-a-placement.md),
+which corrects five records that said otherwise, this one among them.
+
+Three things the rule's shape decides, kept here because they are engine facts:
+
+- **The loader compiles no pins.** `Problem::pinned` is populated by the **caller** — the editing
+  session, from `Timetables::pins` — because a lock is an *output* of a solve and a `Problem` is
+  compiled from inputs only. Generation from scratch therefore pins nothing, which is correct.
+- **An unplaced pinned occurrence is not a violation of it.** A pin says *where*;
+  `activity-scheduled` already says *that*, at MEDIUM. A rule that fired on an unplaced pin would
+  make `IncrementalScorer::empty` over a pinned problem start **infeasible**, and so every
+  intermediate construction state — which is exactly the failure §6 below refused to introduce
+  when it kept completeness at MEDIUM.
+- **A pin compares the whole `Placement`, slot and room.** A repair that kept a locked lesson's
+  period and took its room away has moved it.
+
+`differential.rs`'s gate was extended to cover it rather than left running beside it: the fixture
+catalogue pins nothing, so `pinned_variant` builds the pinned states the property test needs.
+[TIMETABLE-EDITING.md](TIMETABLE-EDITING.md) §3.
 
 ---
 
@@ -250,14 +276,14 @@ gate rather than a smoke check.
 `SOLVER.md` §4's second scorer, and [ADR 0041](adr/0041-the-incremental-scorer-lives-with-the-evaluators.md)
 is the record. Two things to know.
 
-**It is here and not in `evara-solver`.** A scorer that must agree with these eight rules to the
+**It is here and not in `evara-solver`.** A scorer that must agree with these nine rules to the
 violation needs `Occupancy`'s span resolver and each rule's narrowed query, both `pub(crate)`.
 Reaching them from another crate means either a second copy of the predicates — `CLAUDE.md` §2's
 most important rule, broken where a solver usually breaks it — or a public API wide enough to make
 that copy easy later. `evara-solver` decides what to try and when to stop; deciding whether a
 placement is legal was never its job.
 
-**There is no hand-written delta.** Every violation the eight rules produce names at most two
+**There is no hand-written delta.** Every violation the nine rules produce names at most two
 occurrences, so a violation that does not name `a` cannot change when `a` moves, and
 
 ```text
@@ -277,9 +303,12 @@ once, at the end, so a maintained list would be bug surface bought for nothing.
 teacher, per room and per cycle day. The indexes speed up the **reference** scorer too:
 `taught_by` and `booked_into` were scans of the whole timetable and are now lookups.
 
-`PlacementVerdict` is `SOLVER.md` §6's `MoveVerdict` less the suggestions, so M11's
-`validate_move` has its implementation already — and it comes from the same scorer the generator
-used, which is what stops the editor and the generator from disagreeing about a drop target.
+`PlacementVerdict` is `SOLVER.md` §6's `MoveVerdict` less the suggestions, so the move
+validator had its implementation already — and it comes from the same scorer the generator used,
+which is what stops the editor and the generator from disagreeing about a drop target. **M9A
+wrote no move validator**: `edit_candidates` and `edit_validate` call `probe`, which withdraws
+the occurrence before placing it at the candidate, so moving a lesson one period later is not
+reported as clashing with itself. [TIMETABLE-EDITING.md](TIMETABLE-EDITING.md) §2.
 
 ## 5. Occupancy: resolved once, read by every rule
 
@@ -347,7 +376,7 @@ iterates a hash map. Same problem, same assignment, same configuration, identica
 implementation `SOLVER.md` §4 calls *"always correct, never fast"*.
 
 `evaluate_placement(problem, assignment, constraints, moved)` answers the question M6's search
-and M11's `validate_move` actually ask — *would putting this occurrence here break anything?* —
+and M9A's editor actually ask — *would putting this occurrence here break anything?* —
 by running only the rules whose `affected()` set contains the occurrence that moved. For
 example `room-type-required` is entirely local, so moving one lesson cannot change its verdict
 about another; `activity-scheduled` depends on the whole timetable and is always selected.
@@ -382,7 +411,7 @@ readings of the same records agreeing.
 
 A project **can** be scored against a stored timetable since M7:
 `evara evaluate --project <p> --timetable <id>` reads the entries back into an arrangement and
-runs the eight rules over it, which is how a school finds out whether a timetable generated last
+runs the nine rules over it, which is how a school finds out whether a timetable generated last
 week is still usable — an availability rule added over a placed slot breaks nothing referential
 and shows up nowhere else.
 
@@ -405,7 +434,7 @@ apart would undo §2's distinction at the last step.
 
 | Not implemented | Where it goes |
 | --- | --- |
-| `activity-fixed` | §3 — with Phase 8's locks |
+| ~~`activity-fixed`~~ | ✅ **Done in M9A** — §3, and [ADR 0045](adr/0045-a-lock-is-a-property-of-a-placement.md). The lock is `timetable_entry.is_locked`, not `activity.is_locked` |
 | `room-capacity` | ADR 0034 — with `class_section.expected_attendance` |
 | every soft type (`preferred-time`, `spread-across-days`, `teacher-min-gaps`, …) | After the MVP. Nothing in the engine optimises, and `ConstraintLevel::Soft` exists only because a level is stored per instance |
 | `resource-clash`, `same-period`, the workload ceilings | CONSTRAINTS.md §3's `M1` set beyond the first nine |
@@ -413,7 +442,7 @@ apart would undo §2's distinction at the last step.
 | a configuration screen | Phase 4's UI half. The repository and the schemas exist; nothing in the interface writes a row yet |
 | ~~persisted violations~~ | ✅ **Done in M7.** `violation` and `violation_ref` hang off a `timetable_evaluation`, so what the generator found and what is wrong now are different rows — [ADR 0042](adr/0042-a-stored-timetable-is-a-version-and-a-save-refuses-stale-inputs.md) C3 |
 
-A clean report from this engine means: *of the eight rules implemented, none is broken by the
+A clean report from this engine means: *of the nine rules implemented, none is broken by the
 arrangement you gave me* — or, when `evara-solver` built the arrangement, *none is broken by the
 one I produced.* It does not mean the timetable is good, complete, or possible to
 improve on — and where the engine cannot check something, M3's pre-solve validation says so

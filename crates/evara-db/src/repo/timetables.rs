@@ -58,7 +58,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction};
 use uuid::Uuid;
 
 use super::row::{FromColumn, entity};
-use super::{Expected, Stamp, delete, translate, update};
+use super::{Expected, Stamp, delete, require_school_owner, translate, update};
 use crate::Database;
 use crate::change_log::{Watermark, inputs_changed_since};
 use crate::error::{DbError, Result};
@@ -352,7 +352,18 @@ impl Timetables<'_> {
 
             let timetable = insert_timetable(tx, &selection, &name, counts, outcome)?;
             for (activity_id, placement) in &plan {
-                insert_entry(tx, timetable.id, *activity_id, placement)?;
+                // A generated placement is neither locked nor hand-placed, and saying so
+                // explicitly is what makes M9A's two other writers readable beside it.
+                insert_entry(
+                    tx,
+                    timetable.id,
+                    *activity_id,
+                    placement,
+                    EntryFlags {
+                        is_locked: false,
+                        is_manual: false,
+                    },
+                )?;
             }
             let run_row = insert_run(tx, timetable.id, outcome, run, watermark, &app_version)?;
             for record in &unplaced {
@@ -495,17 +506,7 @@ impl Timetables<'_> {
 
     /// The stored entries of one timetable, in a deterministic order.
     pub fn entries(&self, timetable_id: Uuid) -> Result<Vec<TimetableEntry>> {
-        self.db.read(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, timetable_id, activity_id, timeslot_id, room_id,
-                        is_locked, is_manual, created_at, updated_at, rev
-                 FROM timetable_entry
-                 WHERE timetable_id = ?1
-                 ORDER BY activity_id",
-            )?;
-            let rows = stmt.query_map([timetable_id.to_string()], TimetableEntry::from_row)?;
-            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-        })
+        self.db.read(|conn| read_entries(conn, timetable_id))
     }
 
     /// The run that produced one timetable, where there is one.
@@ -789,9 +790,15 @@ entity!(
         timeslot_id: Uuid,
         /// The room booked, where one was.
         room_id: Option<Uuid>,
-        /// Whether the solver must preserve it. Phase 8's.
+        /// Whether a repair must preserve this placement.
+        ///
+        /// Written by [`Timetables::set_lock`]. Read into `Problem::pinned` by the caller that
+        /// opened the timetable, where `activity-fixed` judges it — ADR 0045.
         is_locked: bool,
-        /// Whether a human placed it. Phase 8's.
+        /// Whether a human placed it, rather than a solve.
+        ///
+        /// Written `1` by [`Timetables::place`] and [`Timetables::move_entry`], and untouched by
+        /// a lock: locking where the solver put a lesson does not make it hand-placed.
         is_manual: bool,
     }
 );
@@ -960,7 +967,7 @@ fn guard_freshness(tx: &Transaction<'_>, watermark: Watermark) -> Result<()> {
 fn project_entries(
     assembly: &Assembly,
     assignment: &Assignment,
-) -> Result<Vec<(Uuid, StoredPlacement)>> {
+) -> Result<Vec<(Uuid, EntryPlacement)>> {
     let index = &assembly.index;
     let mut rows = Vec::with_capacity(assignment.scheduled_count());
 
@@ -981,7 +988,7 @@ fn project_entries(
         };
         rows.push((
             activity_id,
-            StoredPlacement {
+            EntryPlacement {
                 timeslot_id,
                 room_id,
             },
@@ -990,13 +997,6 @@ fn project_entries(
     // By activity identifier, so two saves of one arrangement write the rows in one order.
     rows.sort_by_key(|(activity, _)| *activity);
     Ok(rows)
-}
-
-/// A placement with its identifiers resolved.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct StoredPlacement {
-    timeslot_id: Uuid,
-    room_id: Option<Uuid>,
 }
 
 /// Turns the unplaced list into the rows to write.
@@ -1096,31 +1096,41 @@ fn insert_timetable(
     })
 }
 
+/// Writes one `timetable_entry`, returning the identifier it was given.
+///
+/// The one insert for all three writers — a save, a manual placement and a duplicate — so the
+/// column list exists once and a new column cannot be forgotten by one of them. The flags are a
+/// parameter rather than literals because those are exactly what the three disagree about: a
+/// save writes `0, 0`, a manual placement writes `is_manual = 1`, and a duplicate preserves
+/// whatever the row it is copying held.
 fn insert_entry(
     tx: &Transaction<'_>,
     timetable_id: Uuid,
     activity_id: Uuid,
-    placement: &StoredPlacement,
-) -> Result<()> {
+    placement: &EntryPlacement,
+    flags: EntryFlags,
+) -> Result<Uuid> {
     let stamp = Stamp::new();
     tx.execute(
         "INSERT INTO timetable_entry (
              id, timetable_id, activity_id, timeslot_id, room_id,
              is_locked, is_manual, created_at, updated_at, rev)
-         VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6, ?7, ?8)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         rusqlite::params![
             stamp.id.to_string(),
             timetable_id.to_string(),
             activity_id.to_string(),
             placement.timeslot_id.to_string(),
             placement.room_id.map(|id| id.to_string()),
+            i64::from(flags.is_locked),
+            i64::from(flags.is_manual),
             stamp.created_at,
             stamp.updated_at,
             stamp.rev,
         ],
     )
     .map_err(|e| translate(e, "timetable"))?;
-    Ok(())
+    Ok(stamp.id)
 }
 
 fn insert_run(
@@ -1438,4 +1448,677 @@ const fn status_key(status: SolveStatus) -> &'static str {
 /// Minutes since midnight as `'HH:MM'`, zero-padded so text order is chronological.
 fn clock_text(minutes: u16) -> String {
     format!("{:02}:{:02}", minutes / 60, minutes % 60)
+}
+
+// =======================================================================================
+// Manual editing — M9A
+// =======================================================================================
+
+/// What an editing caller believes a timetable's whole arrangement is.
+///
+/// # The guard `expectedRev` cannot be
+///
+/// A revision protects **one row**. An edit session holds much more than one: a compiled
+/// `Problem`, the whole arrangement, and a validation the user has already been shown. A second
+/// window that moves a *different* entry of the same timetable leaves this session's target row
+/// untouched — so its `expectedRev` still matches — and yet every verdict the session has
+/// computed is now measured against an arrangement that no longer exists. The user would be told
+/// a cell is free and would drop a lesson into a clash.
+///
+/// Nothing else would catch it. Every stored reference still resolves, `UNIQUE
+/// (timetable_id, activity_id)` is still satisfied, the input watermark has not moved because
+/// `timetable_entry` is a solve **output** (`SOLVE_OUTPUT_TABLES`), and the timetable row's own
+/// revision does not move when an entry changes.
+///
+/// So an editing write carries this as well: every entry of the timetable with the revision the
+/// caller last saw it at. It is compared **inside the writing transaction** and the write is
+/// refused [`DbError::ArrangementChanged`] if anything differs — ADR 0030's rule, which
+/// `CLAUDE.md` §3 restates, applied to an arrangement rather than to an import plan.
+///
+/// # Exact, rather than a digest
+///
+/// An `(id, rev)` pair per entry rather than a checksum, for two reasons. A count-and-sum digest
+/// collides on a real sequence — unscheduling an entry at `rev = 1` and placing a new one gives
+/// back the same count and the same total — and an exact list can say **what** changed, which is
+/// what lets the interface tell a user that another window moved three lessons rather than that
+/// something happened. At the 2 000-entry upper end the list is a few tens of kilobytes and the
+/// read is one indexed scan.
+///
+/// A scoped change-log watermark was considered and rejected: `change_log` records
+/// `(entity_table, entity_id)`, so a scoped query can find changes to entries that still exist
+/// and cannot find the **deletion** of one it has never heard of — an unschedule in another
+/// window would pass unnoticed, which is the case that matters most.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ArrangementStamp {
+    /// Every entry of the timetable, as `(id, rev)`, sorted by identifier.
+    entries: Vec<(Uuid, i64)>,
+}
+
+impl ArrangementStamp {
+    /// How many entries the arrangement held.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether the timetable held no placed occurrence at all.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// How many entries differ between two stamps: changed, added or removed.
+    ///
+    /// A count rather than a verdict, so a message can say how much moved. Zero means the two
+    /// describe the same arrangement.
+    #[must_use]
+    pub fn differences(&self, other: &Self) -> usize {
+        let mut changed = 0;
+        for (id, rev) in &self.entries {
+            match other.entries.binary_search_by_key(id, |(other, _)| *other) {
+                Ok(at) if other.entries[at].1 == *rev => {}
+                _ => changed += 1,
+            }
+        }
+        for (id, _) in &other.entries {
+            if self
+                .entries
+                .binary_search_by_key(id, |(mine, _)| *mine)
+                .is_err()
+            {
+                changed += 1;
+            }
+        }
+        changed
+    }
+}
+
+/// Where one occurrence is placed, as stored identifiers.
+///
+/// The **start** slot and the room, which is the whole of a placement: rows 2…`d` of a
+/// multi-period occurrence are derived by `evara_core::scheduling::span`, so moving a double
+/// period is one `UPDATE` of one column and a half-moved double is unrepresentable
+/// (ADR 0042 D1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EntryPlacement {
+    /// The slot the occurrence starts in.
+    pub timeslot_id: Uuid,
+    /// The room booked, where one is.
+    pub room_id: Option<Uuid>,
+}
+
+/// The two guards every editing write carries.
+///
+/// Grouped because they are one question asked of two different things — *has the world moved
+/// under this session?* — and a caller holding them apart could pass one timetable's stamp with
+/// another problem's watermark.
+#[derive(Debug, Clone, Copy)]
+pub struct EditGuard<'a> {
+    /// Where the project's history stood when the session compiled its problem.
+    ///
+    /// M7's freshness check, unchanged: a scheduling input that moved makes every verdict the
+    /// session computed untrue, and nothing referential would catch it.
+    pub watermark: Watermark,
+    /// What the session believes the arrangement is. See [`ArrangementStamp`].
+    pub stamp: &'a ArrangementStamp,
+}
+
+/// What one applied edit wrote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppliedEdit {
+    /// The row as it now stands, or `None` for an unschedule.
+    pub entry: Option<TimetableEntry>,
+    /// The arrangement as it now stands, for the session to hold instead of its old one.
+    ///
+    /// Returned rather than left to the caller to re-read: a session that had to ask again
+    /// would have a window between its own write and its new stamp, which is the race this
+    /// type exists to close.
+    pub stamp: ArrangementStamp,
+}
+
+/// A timetable copied, with its arrangement and without its provenance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DuplicatedTimetable {
+    /// The new timetable row.
+    pub timetable: Timetable,
+    /// How many entries were copied.
+    pub entries: usize,
+}
+
+impl Timetables<'_> {
+    /// Every entry of one timetable with the revision it is at.
+    ///
+    /// What an edit session reads once, at the start, and compares on every write.
+    pub fn arrangement_stamp(&self, timetable_id: Uuid) -> Result<ArrangementStamp> {
+        self.db.read(|conn| read_stamp(conn, timetable_id))
+    }
+
+    /// Places an occurrence that is not placed in this timetable.
+    ///
+    /// # A creation, so no revision precondition
+    ///
+    /// There is no row to be stale about. `UNIQUE (timetable_id, activity_id)` is what refuses a
+    /// second placement of the same occurrence, reported as [`DbError::DuplicateValue`] — which
+    /// is also what a second click on the same empty cell receives, rather than two rows.
+    ///
+    /// `is_manual` is written `1`: a human put it there, and a later screen that said a solve
+    /// had would be wrong.
+    ///
+    /// # Errors
+    ///
+    /// - [`DbError::InputsChanged`] if a scheduling input moved since the session compiled.
+    /// - [`DbError::ArrangementChanged`] if another window changed this timetable's entries.
+    /// - [`DbError::WrongSchool`] if the occurrence belongs to another school.
+    /// - [`DbError::DuplicateValue`] if the occurrence is already placed in this timetable.
+    /// - [`DbError::Invalid`] if the slot belongs to a different cycle than the timetable.
+    pub fn place(
+        &mut self,
+        timetable_id: Uuid,
+        activity_id: Uuid,
+        at: EntryPlacement,
+        guard: EditGuard<'_>,
+    ) -> Result<AppliedEdit> {
+        let EditGuard { watermark, stamp } = guard;
+        let stamp = stamp.clone();
+        self.db.write(|tx| {
+            guard_edit(tx, timetable_id, watermark, &stamp)?;
+            require_activity_of_timetable(tx, timetable_id, activity_id)?;
+            require_slot_of_timetable(tx, timetable_id, at.timeslot_id)?;
+
+            let id = insert_entry(
+                tx,
+                timetable_id,
+                activity_id,
+                &at,
+                EntryFlags {
+                    is_locked: false,
+                    is_manual: true,
+                },
+            )?;
+            applied(tx, timetable_id, Some(id))
+        })
+    }
+
+    /// Moves a placed occurrence to another slot, another room, or both.
+    ///
+    /// # An `UPDATE`, never a delete and an insert
+    ///
+    /// `UNIQUE (timetable_id, activity_id)` makes the row the identity of *"this occurrence's
+    /// placement in this timetable"*. Removing it and writing another would mint a new `id`,
+    /// reset `rev` to 1, append two change-log entries for one user action, and drop
+    /// `is_locked` as a side effect of moving. One `UPDATE` through
+    /// [`update`](super::update) carries the revision predicate, bumps `rev` once and appends
+    /// one entry.
+    ///
+    /// # Errors
+    ///
+    /// As [`Timetables::place`], plus [`DbError::Conflict`] if the entry moved since
+    /// `expected`. A **locked** entry is refused by the command layer before this is called —
+    /// see ADR 0045 §5 — and by `activity-fixed` if anything else ever tries.
+    pub fn move_entry(
+        &mut self,
+        entry_id: Uuid,
+        expected: i64,
+        to: EntryPlacement,
+        guard: EditGuard<'_>,
+    ) -> Result<AppliedEdit> {
+        let EditGuard { watermark, stamp } = guard;
+        let stamp = stamp.clone();
+        self.db.write(|tx| {
+            let timetable_id = timetable_of_entry(tx, entry_id)?;
+            guard_edit(tx, timetable_id, watermark, &stamp)?;
+            require_slot_of_timetable(tx, timetable_id, to.timeslot_id)?;
+
+            update(
+                tx,
+                "timetableEntry",
+                "timetable_entry",
+                entry_id,
+                Expected::Rev(expected),
+                "timeslot_id = ?, room_id = ?, is_manual = 1",
+                &[
+                    &to.timeslot_id.to_string(),
+                    &to.room_id.map(|id| id.to_string()),
+                ],
+            )?;
+            applied(tx, timetable_id, Some(entry_id))
+        })
+    }
+
+    /// Takes a placed occurrence off the timetable.
+    ///
+    /// The occurrence returns to unplaced, where `activity-scheduled` reports it at MEDIUM. That
+    /// is always permitted and always costs: a rule that refused it would make the obvious first
+    /// step of a manual rearrangement impossible.
+    ///
+    /// # Errors
+    ///
+    /// As [`Timetables::move_entry`].
+    pub fn unschedule(
+        &mut self,
+        entry_id: Uuid,
+        expected: i64,
+        guard: EditGuard<'_>,
+    ) -> Result<AppliedEdit> {
+        let EditGuard { watermark, stamp } = guard;
+        let stamp = stamp.clone();
+        self.db.write(|tx| {
+            let timetable_id = timetable_of_entry(tx, entry_id)?;
+            guard_edit(tx, timetable_id, watermark, &stamp)?;
+
+            delete(
+                tx,
+                "timetableEntry",
+                "timetable_entry",
+                entry_id,
+                Expected::Rev(expected),
+            )?;
+            applied(tx, timetable_id, None)
+        })
+    }
+
+    /// Locks or unlocks one placement.
+    ///
+    /// # A lock is about a placement, not about a demand
+    ///
+    /// Hence the column on the entry: *"in **this** timetable, this placement is fixed"*. Two
+    /// timetables of one cycle lock independently, which is what lets a user fix a lesson in the
+    /// version they are publishing while leaving it free in the draft beside it. ADR 0045.
+    ///
+    /// `is_manual` is **not** touched. Locking is not placing, and a screen that said a lesson
+    /// had been put there by hand because somebody locked where the solver put it would be
+    /// wrong.
+    ///
+    /// # Errors
+    ///
+    /// As [`Timetables::move_entry`].
+    pub fn set_lock(
+        &mut self,
+        entry_id: Uuid,
+        expected: i64,
+        locked: bool,
+        guard: EditGuard<'_>,
+    ) -> Result<AppliedEdit> {
+        let EditGuard { watermark, stamp } = guard;
+        let stamp = stamp.clone();
+        self.db.write(|tx| {
+            let timetable_id = timetable_of_entry(tx, entry_id)?;
+            guard_edit(tx, timetable_id, watermark, &stamp)?;
+
+            update(
+                tx,
+                "timetableEntry",
+                "timetable_entry",
+                entry_id,
+                Expected::Rev(expected),
+                "is_locked = ?",
+                &[&i64::from(locked)],
+            )?;
+            applied(tx, timetable_id, Some(entry_id))
+        })
+    }
+
+    /// Copies one timetable and its arrangement under a new name.
+    ///
+    /// # Why this exists, and what it deliberately does not copy
+    ///
+    /// Editing is **in place**: `is_manual` is a per-entry flag on the same timetable, and
+    /// ADR 0042 §5 keeps the `GENERATION` scoring immutable precisely so that re-scoring can
+    /// never misrepresent how a timetable was generated — a guarantee that is only needed
+    /// *because* the arrangement beneath it can change. So a user who wants to keep the
+    /// generated arrangement duplicates first, and this is that action.
+    ///
+    /// The copy carries **no `solve_run` and no evaluation of any kind**. It was not generated,
+    /// and a `GENERATION` row cloned onto it would be a claim about a run that did not produce
+    /// it. Re-scoring the copy records a `REVALIDATION`, which is the honest shape: *this is
+    /// what the rules find about these placements now*.
+    ///
+    /// The entries are copied with fresh identifiers at `rev = 1` and with `is_locked` and
+    /// `is_manual` **preserved** — those describe the placements, which is what was copied.
+    ///
+    /// # Errors
+    ///
+    /// - [`DbError::Conflict`] if the source moved since `expected`.
+    /// - [`DbError::NotFound`] if there is no such timetable.
+    /// - [`DbError::DuplicateValue`] if the scope already holds that name.
+    pub fn duplicate(
+        &mut self,
+        id: Uuid,
+        expected: i64,
+        name: &str,
+    ) -> Result<DuplicatedTimetable> {
+        let name = name.trim().to_owned();
+        if name.is_empty() {
+            return Err(DbError::Invalid {
+                message: "a timetable needs a name".to_owned(),
+            });
+        }
+        self.db.write(|tx| {
+            // The source's revision is the precondition, and it is consumed: `updated_at`
+            // moves on a row nothing else about has changed, which is the honest record that
+            // something was done with it. ADR 0027 §3 category 3.
+            update(
+                tx,
+                "timetable",
+                "timetable",
+                id,
+                Expected::Rev(expected),
+                "name = name",
+                &[],
+            )?;
+            let source = read_timetable(tx, id)?.ok_or(DbError::NotFound {
+                entity: "timetable",
+            })?;
+
+            let stamp = Stamp::new();
+            tx.execute(
+                "INSERT INTO timetable (
+                     id, cycle_id, term_id, name, generated_at,
+                     indeterminate_student_pairs, unchecked_capacities, shared_entities,
+                     unenforced_restrictions, created_at, updated_at, rev)
+                 SELECT ?1, cycle_id, term_id, ?2, generated_at,
+                        indeterminate_student_pairs, unchecked_capacities, shared_entities,
+                        unenforced_restrictions, ?3, ?4, ?5
+                 FROM timetable WHERE id = ?6",
+                rusqlite::params![
+                    stamp.id.to_string(),
+                    name,
+                    stamp.created_at,
+                    stamp.updated_at,
+                    stamp.rev,
+                    source.id.to_string(),
+                ],
+            )
+            .map_err(|e| translate(e, "timetable"))?;
+
+            let mut copied = 0;
+            for entry in read_entries(tx, id)? {
+                insert_entry(
+                    tx,
+                    stamp.id,
+                    entry.activity_id,
+                    &EntryPlacement {
+                        timeslot_id: entry.timeslot_id,
+                        room_id: entry.room_id,
+                    },
+                    EntryFlags {
+                        is_locked: entry.is_locked,
+                        is_manual: entry.is_manual,
+                    },
+                )?;
+                copied += 1;
+            }
+
+            let timetable = read_timetable(tx, stamp.id)?.ok_or(DbError::NotFound {
+                entity: "timetable",
+            })?;
+            Ok(DuplicatedTimetable {
+                timetable,
+                entries: copied,
+            })
+        })
+    }
+}
+
+/// The stored flags one entry is written with.
+///
+/// A struct rather than two `bool` arguments, because two adjacent booleans at a call site are
+/// the shape a reader cannot check and a writer can transpose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EntryFlags {
+    is_locked: bool,
+    is_manual: bool,
+}
+
+/// Both guards, in the transaction that writes.
+///
+/// Order matters for the message, not for correctness: a moved *input* makes the whole session
+/// stale and is reported first, because reopening the timetable is the remedy for both and the
+/// input case is the one that cannot be fixed by looking at the grid again.
+fn guard_edit(
+    tx: &Transaction<'_>,
+    timetable_id: Uuid,
+    watermark: Watermark,
+    stamp: &ArrangementStamp,
+) -> Result<()> {
+    guard_freshness(tx, watermark)?;
+    let current = read_stamp(tx, timetable_id)?;
+    let changed = stamp.differences(&current);
+    if changed > 0 {
+        return Err(DbError::ArrangementChanged {
+            entries_changed: i64::try_from(changed).unwrap_or(i64::MAX),
+        });
+    }
+    Ok(())
+}
+
+/// Reads one timetable's `(entry id, rev)` pairs, sorted by identifier.
+fn read_stamp(conn: &Connection, timetable_id: Uuid) -> Result<ArrangementStamp> {
+    let mut stmt =
+        conn.prepare("SELECT id, rev FROM timetable_entry WHERE timetable_id = ?1 ORDER BY id")?;
+    let rows = stmt.query_map([timetable_id.to_string()], |row| {
+        Ok((FromColumn::read(row, 0)?, row.get::<_, i64>(1)?))
+    })?;
+    let mut entries = rows
+        .collect::<rusqlite::Result<Vec<(Uuid, i64)>>>()
+        .map_err(|e| translate(e, "timetable"))?;
+    // `ORDER BY id` is over the stored text; `differences` binary-searches on `Uuid`, so the
+    // list is sorted again by the key it will be searched with rather than by the one SQLite
+    // happened to use.
+    entries.sort_unstable_by_key(|(id, _)| *id);
+    Ok(ArrangementStamp { entries })
+}
+
+/// The timetable one entry belongs to.
+fn timetable_of_entry(tx: &Transaction<'_>, entry_id: Uuid) -> Result<Uuid> {
+    tx.query_row(
+        "SELECT timetable_id FROM timetable_entry WHERE id = ?1",
+        [entry_id.to_string()],
+        |row| FromColumn::read(row, 0),
+    )
+    .optional()
+    .map_err(|e| translate(e, "timetableEntry"))?
+    .ok_or(DbError::NotFound {
+        entity: "timetableEntry",
+    })
+}
+
+/// Refuses a slot that is not in the timetable's own grid.
+///
+/// # The trigger is the backstop and this is the message
+///
+/// `V17`'s `timetable_entry_slot_in_cycle` trigger pair already refuses this, in the same
+/// transaction, and it is what makes the rule true for every writer. But a `RAISE(ABORT)`
+/// reaches a caller as an unclassified constraint failure, which the interface reports as
+/// *"this campus could not be updated; it may be damaged"* — the wrong sentence for a boundary
+/// working correctly. So the repository asks first and names the remedy, which is the same
+/// division of labour the membership triggers and `assign_teacher` already use (`CLAUDE.md` §3).
+fn require_slot_of_timetable(
+    tx: &Transaction<'_>,
+    timetable_id: Uuid,
+    timeslot_id: Uuid,
+) -> Result<()> {
+    let same: Option<bool> = tx
+        .query_row(
+            "SELECT ts.cycle_id = t.cycle_id
+             FROM timetable t, timeslot ts
+             WHERE t.id = ?1 AND ts.id = ?2",
+            [timetable_id.to_string(), timeslot_id.to_string()],
+            |row| row.get(0),
+        )
+        .optional()?;
+    match same {
+        Some(true) => Ok(()),
+        Some(false) => Err(DbError::Invalid {
+            message: "that period belongs to a different cycle than this timetable, so no                       lesson can be placed there; open a timetable of that cycle instead"
+                .to_owned(),
+        }),
+        // One of the two rows is not there. Which one matters to the message, and the
+        // identifier the caller supplied is the likelier of the two.
+        None => Err(DbError::NotFound {
+            entity: "timeslot",
+        }),
+    }
+}
+
+/// Refuses an occurrence that is not the timetable's school's.
+///
+/// The chain is `activity -> class_section -> course -> subject.school_id`, and the timetable's
+/// is `cycle.school_id`. Neither carries a second `school_id` column and neither will:
+/// `CLAUDE.md` §3's rule is that a child's school is resolved through its parents.
+///
+/// `V17`'s trigger already refuses a slot of another cycle, so a timeslot needs no equivalent
+/// check here. A **room** gets none deliberately: `room_campus` reaches across schools by
+/// design, so a shared room is a legitimate booking for either.
+fn require_activity_of_timetable(
+    tx: &Transaction<'_>,
+    timetable_id: Uuid,
+    activity_id: Uuid,
+) -> Result<()> {
+    let school: Option<String> = tx
+        .query_row(
+            "SELECT c.school_id FROM timetable t
+             JOIN cycle c ON c.id = t.cycle_id
+             WHERE t.id = ?1",
+            [timetable_id.to_string()],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(school) = school else {
+        return Err(DbError::NotFound {
+            entity: "timetable",
+        });
+    };
+    let school = Uuid::parse_str(&school).map_err(|_| DbError::CorruptIdentifier {
+        column: "cycle.school_id".to_owned(),
+        value: school.clone(),
+    })?;
+
+    require_school_owner(
+        tx,
+        "activity",
+        "SELECT su.school_id FROM activity a
+         JOIN class_section cs ON cs.id = a.class_section_id
+         JOIN course       co ON co.id = cs.course_id
+         JOIN subject      su ON su.id = co.subject_id
+         WHERE a.id = ?",
+        activity_id,
+        school,
+    )
+}
+
+/// The result of one applied edit: the row, where there still is one, and the new stamp.
+fn applied(
+    tx: &Transaction<'_>,
+    timetable_id: Uuid,
+    entry_id: Option<Uuid>,
+) -> Result<AppliedEdit> {
+    let entry = match entry_id {
+        None => None,
+        Some(id) => Some(read_entry(tx, id)?.ok_or(DbError::NotFound {
+            entity: "timetableEntry",
+        })?),
+    };
+    Ok(AppliedEdit {
+        entry,
+        stamp: read_stamp(tx, timetable_id)?,
+    })
+}
+
+/// One entry by identifier.
+fn read_entry(conn: &Connection, id: Uuid) -> Result<Option<TimetableEntry>> {
+    Ok(conn
+        .query_row(
+            "SELECT id, timetable_id, activity_id, timeslot_id, room_id,
+                    is_locked, is_manual, created_at, updated_at, rev
+             FROM timetable_entry WHERE id = ?1",
+            [id.to_string()],
+            TimetableEntry::from_row,
+        )
+        .optional()?)
+}
+
+/// Every entry of one timetable, in activity order.
+fn read_entries(conn: &Connection, timetable_id: Uuid) -> Result<Vec<TimetableEntry>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, timetable_id, activity_id, timeslot_id, room_id,
+                is_locked, is_manual, created_at, updated_at, rev
+         FROM timetable_entry WHERE timetable_id = ?1 ORDER BY activity_id",
+    )?;
+    let rows = stmt.query_map([timetable_id.to_string()], TimetableEntry::from_row)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| translate(e, "timetable"))
+}
+
+/// The locked placements of one timetable, as `Problem::pinned` wants them.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct StoredPins {
+    /// One entry per activity index, or **empty** when nothing is locked.
+    ///
+    /// Empty rather than all-`None` on purpose. `Problem::integrity` accepts either, and the
+    /// empty list is what every other caller produces — a generation, a fixture — so a problem
+    /// with no locks is byte-identical whether it was opened for editing or not.
+    pub pinned: Vec<Option<Placement>>,
+    /// How many entries were locked.
+    pub locked: usize,
+    /// Locked entries naming something the problem no longer holds.
+    ///
+    /// A lock on a lesson that has since been deleted, or in a slot the grid no longer
+    /// materialises. Reported rather than refused, for the same reason
+    /// [`StoredArrangement::not_in_problem`] is: a timetable whose inputs moved is still worth
+    /// opening, and a lock that cannot be expressed as a pin is a thing to tell the user about.
+    pub not_in_problem: Vec<Uuid>,
+}
+
+impl Timetables<'_> {
+    /// The locked placements of one timetable, translated into dense indices.
+    ///
+    /// # Why the caller assigns this and the loader does not
+    ///
+    /// `Scheduling::load` compiles a school's **inputs**. A lock is a `timetable_entry` column,
+    /// which is an *output* of a solve — it is in `SOLVE_OUTPUT_TABLES` for exactly that reason.
+    /// A loader that read one would make the compiled `Problem` depend on which timetable
+    /// happened to be open, and would put output rows under the `Assembly`'s watermark, which
+    /// the freshness check deliberately excludes. So this is a second read, and the caller
+    /// writes the result onto `problem.pinned`. ADR 0045 §4.
+    ///
+    /// # Errors
+    ///
+    /// Any SQLite failure, and [`DbError::CorruptIdentifier`] from reading the rows.
+    pub fn pins(&self, timetable_id: Uuid, assembly: &Assembly) -> Result<StoredPins> {
+        let entries = self.entries(timetable_id)?;
+        let mut pinned: Vec<Option<Placement>> = Vec::new();
+        let mut locked = 0;
+        let mut not_in_problem = Vec::new();
+
+        for entry in entries.iter().filter(|entry| entry.is_locked) {
+            locked += 1;
+            let (Some(activity), Some(timeslot)) = (
+                assembly.index.activity_index(entry.activity_id),
+                assembly.index.timeslot_index(entry.timeslot_id),
+            ) else {
+                not_in_problem.push(entry.activity_id);
+                continue;
+            };
+            let room = entry
+                .room_id
+                .and_then(|room| assembly.index.room_index(room));
+            if entry.room_id.is_some() && room.is_none() {
+                not_in_problem.push(entry.activity_id);
+                continue;
+            }
+            if pinned.is_empty() {
+                pinned = vec![None; assembly.problem.activities.len()];
+            }
+            if let Some(slot) = pinned.get_mut(activity.get()) {
+                *slot = Some(Placement { timeslot, room });
+            }
+        }
+
+        Ok(StoredPins {
+            pinned,
+            locked,
+            not_in_problem,
+        })
+    }
 }

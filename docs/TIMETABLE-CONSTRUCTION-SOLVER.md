@@ -156,10 +156,12 @@ The four keys, in that order, plus a fifth:
    seed sort identically. A sort whose ties fall out in whatever order the loader produced is
    not reproducible across a change to the loader.
 
-Nothing populates `Problem::pinned` at `V16` — there is no `activity.is_locked` column — so key 1
-is unreachable today. It is implemented anyway, because repair is the mechanism partial
-regeneration is built from (`SOLVER.md` §7) and a pin honoured by accident later is a pin not
-honoured.
+Key 1 was unreachable when this was written and is reachable since **M9A**: a caller that opened
+a timetable populates `Problem::pinned` from `timetable_entry.is_locked`
+([adr/0045](adr/0045-a-lock-is-a-property-of-a-placement.md)). The loader still compiles none, so
+a generation from scratch sorts on keys 2 to 5 exactly as before. Implementing it ahead of the
+caller was the right call for the reason given — a pin honoured by accident is a pin not
+honoured — and it is why M9A needed no change to the walk.
 
 ### Static order, plus retry passes
 
@@ -669,7 +671,7 @@ is still planned and is where they will live.
 | **Indeterminate group pairs are not kept apart** | ADR 0035 §6: enforce what is proved. Counted and disclosed | ADR 0035 |
 | **No cross-school clash detection.** A teacher shared with another school can be double-booked across the two | ADR 0032 §4 — needs a time alignment and a timezone database. Counted and disclosed | ADR 0032 |
 | **`RESOURCE` and `SUBJECT` availability rules are not enforced** | Nothing schedules those entity kinds. Counted and disclosed as the fourth unverified figure | the loader's `Completeness` |
-| **Locks are not honoured because they do not exist.** `Problem::pinned` is read and nothing fills it | No `activity.is_locked` column at `V16` | Phase 8 |
+| ~~**Locks are not honoured because they do not exist.**~~ ✅ **Resolved in M9A.** `Problem::pinned` is filled by the caller that opened a timetable, the pinned branch places the pin and tries nothing else, and `activity-fixed` judges the same thing in the registry | The column is `timetable_entry.is_locked`, not `activity.is_locked` | [adr/0045](adr/0045-a-lock-is-a-property-of-a-placement.md) |
 | **Teacher is not a planning variable.** A section's staffing is fixed input | D7. The solver cannot pick an ineligible teacher because it picks none | OPEN-DECISIONS D7 |
 | **No progress events, no background thread** | The traits exist (`ProgressSink`, `Cancel`) and nothing in M6 drives them from a UI | `SOLVER.md` §5; the orchestration milestone |
 | **No committed score baselines** | `evara bench` is still planned | R2 |

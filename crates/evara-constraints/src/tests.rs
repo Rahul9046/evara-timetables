@@ -1127,3 +1127,167 @@ fn violations_are_reported_in_registry_order() {
     sorted.sort_unstable();
     assert_eq!(order, sorted, "{order:?}");
 }
+
+// =======================================================================================
+// activity-fixed
+// =======================================================================================
+
+/// `two_sections`, with activity 0 pinned to the first slot of day 1 in Room 1.
+///
+/// Pins are one entry per activity, which is what `Problem::integrity` requires of a non-empty
+/// list — a half-length list would make the rule's lookup silently miss the tail.
+fn with_a_pin(problem: &mut Problem, at: Placement) {
+    problem.pinned = vec![None; problem.activities.len()];
+    problem.pinned[0] = Some(at);
+}
+
+#[test]
+fn a_pinned_occurrence_placed_where_it_is_pinned_breaks_nothing() {
+    let (mut problem, _) = two_sections();
+    let slots = day(&problem, 1);
+    let pin = Placement::in_room(slots[0], RoomIx::new(0));
+    with_a_pin(&mut problem, pin);
+
+    let mut assignment = nothing(&problem);
+    assignment.place(a(0), pin);
+
+    let report = evaluate(&problem, &assignment, &rules());
+    assert_eq!(
+        report.count_of(ConstraintType::ActivityFixed),
+        0,
+        "the pin is honoured"
+    );
+}
+
+#[test]
+fn a_pinned_occurrence_placed_elsewhere_is_a_hard_violation() {
+    let (mut problem, _) = two_sections();
+    let slots = day(&problem, 1);
+    with_a_pin(&mut problem, Placement::in_room(slots[0], RoomIx::new(0)));
+
+    let mut assignment = nothing(&problem);
+    assignment.place(a(0), Placement::in_room(slots[1], RoomIx::new(0)));
+
+    let report = evaluate(&problem, &assignment, &rules());
+    assert_eq!(report.count_of(ConstraintType::ActivityFixed), 1);
+    let found = report
+        .violations
+        .iter()
+        .find(|v| v.constraint_type == ConstraintType::ActivityFixed)
+        .expect("the violation");
+    assert_eq!(found.level, ConstraintLevel::Hard);
+    assert_eq!(found.activities, vec![a(0)], "exactly one occurrence named");
+    assert!(found.detail.contains("locked to"), "{}", found.detail);
+}
+
+#[test]
+fn a_pin_names_the_room_as_well_as_the_slot() {
+    // A lock protects a `Placement`, which is the unit the solver moves. A repair that kept
+    // the period and took the room away has moved the lesson.
+    let (mut problem, _) = two_sections();
+    let slots = day(&problem, 1);
+    with_a_pin(&mut problem, Placement::in_room(slots[0], RoomIx::new(0)));
+
+    let mut assignment = nothing(&problem);
+    assignment.place(a(0), Placement::unroomed(slots[0]));
+
+    let report = evaluate(&problem, &assignment, &rules());
+    assert_eq!(
+        report.count_of(ConstraintType::ActivityFixed),
+        1,
+        "same slot, no room, is not where it was pinned"
+    );
+}
+
+#[test]
+fn an_unplaced_pinned_occurrence_is_incomplete_and_not_infeasible() {
+    // The decision in this rule's shape. If a pin fired on an unplaced occurrence, the empty
+    // arrangement of a pinned problem would be infeasible and so would every intermediate
+    // construction state — which is the failure `activity-scheduled`'s MEDIUM level exists to
+    // prevent, and a pin is not a licence to reintroduce it.
+    let (mut problem, _) = two_sections();
+    let slots = day(&problem, 1);
+    with_a_pin(&mut problem, Placement::in_room(slots[0], RoomIx::new(0)));
+
+    let report = evaluate(&problem, &nothing(&problem), &rules());
+    assert_eq!(report.count_of(ConstraintType::ActivityFixed), 0);
+    assert!(
+        report.is_usable(),
+        "nothing placed breaks no hard rule, pins included"
+    );
+    assert_eq!(
+        report.count_of(ConstraintType::ActivityScheduled),
+        problem.activities.len(),
+        "being nowhere is the completeness rule's business"
+    );
+}
+
+#[test]
+fn an_unpinned_occurrence_is_not_judged_by_the_pin_rule() {
+    let (mut problem, _) = two_sections();
+    let slots = day(&problem, 1);
+    with_a_pin(&mut problem, Placement::in_room(slots[0], RoomIx::new(0)));
+
+    let mut assignment = nothing(&problem);
+    // Activity 1 carries no pin, so wherever it goes this rule has no opinion.
+    assignment.place(a(1), Placement::in_room(slots[3], RoomIx::new(0)));
+
+    let report = evaluate(&problem, &assignment, &rules());
+    assert_eq!(report.count_of(ConstraintType::ActivityFixed), 0);
+}
+
+#[test]
+fn a_problem_with_no_pins_never_produces_the_rule() {
+    // The common case — a generation from scratch — and the reason registering the rule costs
+    // its callers nothing.
+    let (problem, _) = two_sections();
+    assert_eq!(problem.pinned.len(), 0, "the builder pins nothing");
+    let slots = day(&problem, 1);
+    let mut assignment = nothing(&problem);
+    assignment.place(a(0), Placement::in_room(slots[0], RoomIx::new(0)));
+
+    let report = evaluate(&problem, &assignment, &rules());
+    assert_eq!(report.count_of(ConstraintType::ActivityFixed), 0);
+}
+
+#[test]
+fn the_pin_rule_is_affected_only_by_the_occurrence_that_moved() {
+    let (problem, _) = two_sections();
+    let affected = evaluator_for(ConstraintType::ActivityFixed).affected(
+        &problem,
+        &CompiledConstraint::mandatory(ConstraintType::ActivityFixed),
+        a(0),
+    );
+    assert!(affected.contains(a(0)));
+    assert!(!affected.contains(a(1)), "a pin is about one occurrence");
+}
+
+#[test]
+fn the_pin_rule_explains_itself_by_naming_both_places() {
+    let (mut problem, _) = two_sections();
+    let slots = day(&problem, 1);
+    with_a_pin(&mut problem, Placement::in_room(slots[0], RoomIx::new(0)));
+    let mut assignment = nothing(&problem);
+    assignment.place(a(0), Placement::in_room(slots[1], RoomIx::new(0)));
+
+    let report = evaluate(&problem, &assignment, &rules());
+    let found = report
+        .violations
+        .iter()
+        .find(|v| v.constraint_type == ConstraintType::ActivityFixed)
+        .expect("the violation");
+    let said = evaluator_for(ConstraintType::ActivityFixed).explain(&problem, found);
+
+    assert!(said.message.contains("locked"), "{}", said.message);
+    assert!(said.message.contains("Day 1"), "{}", said.message);
+    assert!(
+        said.message.contains('1') && said.message.contains('2'),
+        "both periods are named: {}",
+        said.message
+    );
+    assert_eq!(
+        said.conflicting_activities,
+        vec![problem.activities[0].id],
+        "the occurrence a screen must highlight"
+    );
+}

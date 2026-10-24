@@ -1036,8 +1036,11 @@ timetable_entry (id, timetable_id -> timetable ON DELETE RESTRICT,
                  activity_id -> activity ON DELETE RESTRICT,
                  timeslot_id -> timeslot ON DELETE RESTRICT,   -- the START slot
                  room_id -> room NULL ON DELETE RESTRICT,
-                 is_locked BOOLEAN DEFAULT 0,       -- solver must preserve. Phase 8's
-                 is_manual BOOLEAN DEFAULT 0,       -- placed by a human. Phase 8's
+                 is_locked BOOLEAN DEFAULT 0,       -- solver must preserve. Written by M9A's
+                                                    -- editor; read into Problem::pinned by the
+                                                    -- caller, never by the loader (ADR 0045)
+                 is_manual BOOLEAN DEFAULT 0,       -- placed by a human. Written by M9A's
+                                                    -- editor, and not by set_lock
                  created_at, updated_at, rev,
                  UNIQUE(timetable_id, activity_id, timeslot_id),
                  UNIQUE(timetable_id, activity_id))  -- one placement per occurrence

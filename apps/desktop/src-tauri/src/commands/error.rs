@@ -198,6 +198,37 @@ pub enum SetupError {
         message: String,
     },
 
+    /// An edit was refused because the placement is locked.
+    ///
+    /// Its own kind rather than [`SetupError::Invalid`] because the response is specific and is
+    /// an offer: the screen shows **Unlock**. A lock is a decision the user already recorded, so
+    /// it is refused before any rule runs and is never reported as a constraint being broken —
+    /// routing it through the rule engine would make unlocking feel like overriding a clash
+    /// (ADR 0045 §5).
+    Locked {
+        /// Message to show.
+        message: String,
+    },
+
+    /// Another window changed the timetable being edited.
+    ///
+    /// Distinct from [`SetupError::Conflict`], which is about one row the screen had read, and
+    /// from [`SetupError::InputsChanged`], which is about the problem a timetable was built
+    /// against. This is about the **arrangement**: a second editing session moved a *different*
+    /// placement, so this session's target row still matches its revision and yet every verdict
+    /// it has shown the user — which cells are free, what a move would cost — was computed
+    /// against an arrangement that no longer exists.
+    ///
+    /// The remedy is specific and is not "retry": **reopen the timetable**, which recompiles the
+    /// problem and reseeds the session. Nothing was written, which is the first thing the message
+    /// says.
+    ArrangementChanged {
+        /// How many placements differ from what this window last saw.
+        entries_changed: i64,
+        /// Message to show.
+        message: String,
+    },
+
     /// Anything else.
     Failed {
         /// Message to show.
@@ -264,6 +295,18 @@ impl From<DbError> for SetupError {
             },
             // `reason` is the engine's own, and the two cases need different things said
             // about them, so it is forwarded rather than replaced.
+            // Nothing was written, and the remedy is to reopen rather than to retry: the
+            // session's compiled problem, its validation and its undo stack were all computed
+            // from one snapshot, so they are stale together and are replaced together.
+            DbError::ArrangementChanged { entries_changed } => Self::ArrangementChanged {
+                entries_changed,
+                message: format!(
+                    "{} placement{} in this timetable {} changed in another window since you                      opened it, so nothing was saved. Reopen the timetable to see what is now                      true.",
+                    entries_changed,
+                    if entries_changed == 1 { "" } else { "s" },
+                    if entries_changed == 1 { "was" } else { "were" }
+                ),
+            },
             DbError::NotSaveable { reason } => Self::NotSaveable {
                 message: format!("Nothing was saved: {reason}."),
             },

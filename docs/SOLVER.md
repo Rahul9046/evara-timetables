@@ -126,8 +126,10 @@ plus a third later for teacher selection when a class has interchangeable staff
 **Three things M1's decisions fix about this shape.** The types are implemented (M2) and the
 loader that fills them in is implemented (M4); nothing evaluates or searches yet. Two fields
 are deliberately still empty after a load: `overlap` is `Indeterminate` for every pair, because
-ADR 0035 §3's evaluator is M5's, and `pinned` is empty, because `activity.is_locked` does not
-exist.
+ADR 0035 §3's evaluator is M5's, and `pinned` is empty — not because no lock exists, but because
+**the loader does not compile one**: a lock is `timetable_entry.is_locked`, an output of a solve,
+and this module compiles inputs. M9A's editing session is what fills `pinned`
+([adr/0045](adr/0045-a-lock-is-a-property-of-a-placement.md) §3).
 
 - **An activity's value range is one bell schedule's slots, resolved before the solve.** The
   grid of a `(cycle, term)` may hold slots from several `period_structure` rows, and
@@ -297,9 +299,11 @@ candidate for one occurrence has an identical delta, so the first in a **seeded 
 wins and the order is where the spreading comes from. The minimisation arrives with the first
 soft rule and needs no change to the walk.
 
-Locks are honoured and nothing populates them: there is no `activity.is_locked` column at `V16`,
-so the pinned branch is unreachable today and is written because a pin honoured by accident later
-is a pin not honoured.
+Locks are honoured, and since **M9A** something populates them: a caller that opened a timetable
+hands its locked placements to `Problem::pinned`, so the pinned branch is reachable. It places the
+pin and tries nothing else, and `activity-fixed` is the registered rule judging the same thing —
+so a pin honoured here and a pin checked there cannot disagree. A pin the arrangement makes
+impossible is **reported**, through the same `probe`, rather than forced.
 
 **Phase B — Local search.** **Not built.**
 `SCHEDULING-ARCHITECTURE-DECISIONS.md` §6 keeps local search out of the MVP, so M6 constructs and
@@ -433,8 +437,10 @@ that catch most genuinely impossible setups, with actionable messages:
   availability entry
 - lines whose members exceed the number of rooms of the required type — **deferred**, there
   is no `line` table
-- pinned activities that already conflict with each other — **deferred**, there is no
-  `activity.is_locked` column
+- pinned activities that already conflict with each other — **still deferred**. Locks exist since
+  M9A, but as `timetable_entry.is_locked`; a *pre-solve* check over pins would need the caller's
+  timetable, and `Problem::pinned` is empty for every generation from scratch. The editor answers
+  the question the other way round, per candidate, through `IncrementalScorer::probe`
 
 Four of those six are implemented. Each carries its demand/capacity inequality and the
 direction it is sound in: demand is exact or under-estimated, capacity exact or

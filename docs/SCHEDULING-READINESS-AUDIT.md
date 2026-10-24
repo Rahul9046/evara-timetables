@@ -963,6 +963,16 @@ conflicting entries, and generation and the editor cannot disagree because both 
 registry.
 **Risks** The `CLAUDE.md` rule this milestone exists to honour. Any rule computed in
 TypeScript here is an architecture bug.
+
+> **Delivered as M9A, and this plan was right about the thing that mattered.** The DB line's
+> second option is what shipped — `timetable_entry.is_locked` alone, and no migration at all,
+> because `V17` already held it ([adr/0045](adr/0045-a-lock-is-a-property-of-a-placement.md)).
+> Two scope items were **not written** because they already existed: `validate_move` is
+> `IncrementalScorer::probe`, and the `affected()` scoping this plan names as the dependency is
+> what makes a whole candidate panel answerable in one call. The undo/redo stack is in the
+> **session, in Rust**, not in memory in the view layer — an inverse command's precondition is a
+> revision the database owns. One item is still outstanding: the violation inspector's
+> **entity links** into the grid. [TIMETABLE-EDITING.md](TIMETABLE-EDITING.md).
 **Excludes** Repair runs, `minimise-disruption`.
 
 ---

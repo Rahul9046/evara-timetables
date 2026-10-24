@@ -878,7 +878,7 @@ The brief's phase numbering differs from the repository's. Mapping to the real
 | 5 — Scorer, validator, diagnostics | not started | **New requirement:** a pre-solve diagnostic for incomplete calendar mapping when resources are shared (§10.2) |
 | 6 — Solver v1 | not started | **Largest impact.** The value domain is per-school `timeslot`. Cross-school sharing needs §10.3's decision. Phase 6 should ship **single-school solving only**, with cross-school deferred |
 | 7 — Timetable views | not started | Projections gain a school axis; a shared teacher's timetable spans schools and must say which school each lesson belongs to |
-| 8 — Manual editing | not started | `validate_move` must consult cross-school reservations for shared entities, or manual edits will create conflicts the solver would have refused |
+| 8 — Manual editing | **8A done (M9A)**, 8B not started | The requirement is **met for the case that exists**: the editor's verdicts come from `IncrementalScorer::probe`, so `room-clash` — a per-`room_id` rule for the whole project, per ADR 0019 — compares a shared room's bookings exactly as generation does. What neither does is cross-school *teacher* or *group* comparison, which ADR 0032 §4 defers for both; so an edit cannot create a conflict the solver would have refused, which is the property this row asked for. A cross-school reservation **view** is still absent |
 | 9 — Project transfer | not started | `.evara` export/import must carry multiple schools and the membership tables. Format version stays 1 only if nothing has shipped; otherwise a format migration |
 | 10 — Output, 11 — Packaging | not started | Per-school and combined report scoping |
 | Post-M1 — imports | not started | Excel templates gain a Schools reference sheet (§15) |

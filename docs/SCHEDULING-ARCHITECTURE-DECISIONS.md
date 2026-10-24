@@ -148,9 +148,16 @@ one bell schedule, which is most schools — nothing is paid for the general cas
 campus association, required room type) are a *domain*, and a domain the manual editor could
 bypass is a rule living in two places. `room-type-required` already covers the third;
 `is_bookable` and campus association need either their own registered `type_key` or a
-documented guarantee that M11's `validate_move` consults the same loader-built candidate set.
+documented guarantee that the manual editor consults the same loader-built candidate set.
 This is named here so M5 decides it rather than discovers it; it is not decided by this
 milestone.
+
+> **Discharged in M9A, by the second route.** `edit_candidates` offers the rooms in
+> `Problem::room_candidates`, which is the loader's record of `RoomFact::is_candidate_for` —
+> the one implementation of the domain, called rather than restated — and every drop verdict
+> comes from `IncrementalScorer::probe`, the same scorer the generator used. The editor has no
+> code path by which it could bypass the domain, so no second `type_key` was needed.
+> [TIMETABLE-EDITING.md](TIMETABLE-EDITING.md) §8.
 
 ### 3.2 Unknown and incomplete inputs, classified
 
@@ -288,6 +295,10 @@ database the workspace does not have.
 `duration-contiguous`, `no-teaching-in-period`, and `activity-fixed` once locks exist.
 **Medium — one:** `activity-scheduled`.
 
+> Eight of the nine arrived in M5 and `activity-fixed` arrived with M9A's locks, so this set is
+> implemented in full. The lock it reads is `timetable_entry.is_locked`, not `activity.is_locked`
+> — [ADR 0045](adr/0045-a-lock-is-a-property-of-a-placement.md).
+
 | Change from the audit | Why |
 | --- | --- |
 | `room-capacity` **removed** from the first set; `CONSTRAINTS.md` moves it `M1 → M2+` | D35. It has no evaluable left-hand side, so it could not pass `CLAUDE.md` §4's unit-test requirement |
@@ -298,6 +309,14 @@ database the workspace does not have.
 incremental scoring, manual editing and `validate_move`, locks, repair, lines, resource
 scheduling, room candidate lists, teacher as a planning variable (D7), cross-school
 coordinated generation, export, and the published/archived lifecycle.
+
+> Four of those have since shipped and are no longer deferred: **incremental scoring** in M6
+> ([ADR 0041](adr/0041-the-incremental-scorer-lives-with-the-evaluators.md)), **room candidate
+> lists** in M4, and **manual editing** with **locks** in M9A — the last through
+> `IncrementalScorer::probe` rather than through a `validate_move` of its own
+> ([TIMETABLE-EDITING.md](TIMETABLE-EDITING.md)). Local search, repair, lines, resource
+> scheduling, teacher as a planning variable, cross-school coordinated generation, export and
+> the lifecycle remain deferred.
 
 ### Implementation dependencies
 

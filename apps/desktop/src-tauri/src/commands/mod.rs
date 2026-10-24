@@ -15,12 +15,17 @@
 //! Stage D adds `import`, which is the spreadsheet roster import rather than the `io` row
 //! above: that one is `.evara`, Evara's own portable format, and is a different feature.
 //!
+//! Phase 8 splits the `validate` row above in two: `edit` is the manual-editing surface — place,
+//! move, unschedule, lock, undo — and `edit_session` is the state it needs between commands.
+//!
 //! Phase 1B added the project lifecycle. Phase 1E adds School Setup: `structure`,
 //! `time_model` and `grid`, which together are the `crud` row above for the Structure and
 //! Time Model groups.
 
 pub mod availability;
 pub mod curriculum;
+pub mod edit;
+pub mod edit_session;
 pub mod error;
 pub mod grid;
 pub mod import;
@@ -78,7 +83,7 @@ pub fn app_info() -> Result<AppInfo, String> {
     Ok(AppInfo {
         version: env!("CARGO_PKG_VERSION"),
         debug: cfg!(debug_assertions),
-        phase: "8 — timetable viewing and reporting",
+        phase: "8 — manual timetable editing and locking",
     })
 }
 
