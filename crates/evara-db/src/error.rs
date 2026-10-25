@@ -389,6 +389,38 @@ pub enum DbError {
         reason: String,
     },
 
+    /// A repair changed a placement it promised not to touch.
+    ///
+    /// The mandatory safeguard of M9B, repeated here. `evara-solver` already compared the
+    /// complete baseline and repaired arrangements before returning the outcome; this is the
+    /// same comparison inside the writing transaction, because an outcome that passed in memory
+    /// and is then persisted from a different arrangement would write a timetable nobody
+    /// checked. Never an applyable result, and never reported as a scheduling difficulty: a
+    /// frozen placement moving is a defect in Evara.
+    #[error(
+        "the repair changed {mismatches} placement(s) outside the scope it was given, so it          was not saved — this is a defect in Evara, not a problem with the timetable"
+    )]
+    ScopeViolated {
+        /// How many frozen occurrences differ from the baseline.
+        mismatches: i64,
+        /// The first few, each as `<key>: activity <index>`, for a bug report.
+        detail: String,
+    },
+
+    /// A timetable cannot be deleted because repaired timetables descend from it.
+    ///
+    /// `timetable.based_on_timetable_id` is `RESTRICT`, so the foreign key would refuse this
+    /// anyway — as an opaque driver failure. This is the same refusal with the count, because
+    /// "three repairs descend from this one" is an answer the user can act on and "an internal
+    /// error occurred" is not.
+    #[error(
+        "{timetables} repaired timetable(s) were made from this one, so it cannot be deleted          while they exist"
+    )]
+    HasDescendants {
+        /// How many timetables name this one as their source.
+        timetables: i64,
+    },
+
     /// A safety copy could not be taken before a migration that rebuilds a table.
     ///
     /// `V12` is the first migration to drop and recreate an existing table, and it does so

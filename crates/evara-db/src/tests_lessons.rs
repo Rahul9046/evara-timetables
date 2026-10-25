@@ -591,7 +591,7 @@ fn a_project_at_the_previous_schema_keeps_every_row_and_revision() {
                  ALTER TABLE student_group DROP COLUMN children_are_disjoint",
             )?;
             tx.execute(
-                "DELETE FROM refinery_schema_history WHERE version IN (15, 16, 17)",
+                "DELETE FROM refinery_schema_history WHERE version IN (15, 16, 17, 18)",
                 [],
             )?;
             Ok(())

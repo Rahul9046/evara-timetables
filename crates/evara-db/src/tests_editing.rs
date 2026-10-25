@@ -118,6 +118,8 @@ fn provenance() -> RunProvenance {
         settings: "{}".to_owned(),
         started_at: "2026-10-23T12:00:00.000Z".to_owned(),
         finished_at: "2026-10-23T12:00:01.000Z".to_owned(),
+        kind: crate::RUN_GENERATION.to_owned(),
+        scope: "{}".to_owned(),
     }
 }
 

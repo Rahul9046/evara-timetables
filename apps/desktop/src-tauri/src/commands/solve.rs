@@ -626,6 +626,10 @@ pub fn timetable_save(
 
     let config_seed = outcome.seed.get();
     let provenance = RunProvenance {
+        // A generation, and no scope: `V18`'s two columns, defaulted explicitly here rather
+        // than relying on the schema default, so a reader of this call sees what is recorded.
+        kind: evara_db::RUN_GENERATION.to_owned(),
+        scope: String::from("{}"),
         engine: "construction".to_owned(),
         settings: GenerateSettings::as_json(&SolveConfig::seeded(config_seed)),
         started_at: session.started_at.clone(),

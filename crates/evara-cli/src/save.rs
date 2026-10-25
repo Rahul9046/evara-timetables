@@ -155,6 +155,10 @@ fn save_new(
     let reference = evaluate(&assembly.problem, &outcome.assignment, &rules);
 
     let provenance = RunProvenance {
+        // A generation, and no scope: `V18`'s two columns, defaulted explicitly here rather
+        // than relying on the schema default, so a reader of this call sees what is recorded.
+        kind: evara_db::RUN_GENERATION.to_owned(),
+        scope: String::from("{}"),
         engine: ENGINE.to_owned(),
         settings: settings_json(limits),
         started_at: started,
