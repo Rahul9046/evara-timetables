@@ -46,9 +46,11 @@ import {
   renameTimetable,
   revalidateTimetable,
   timetableScope,
+  type Selection,
 } from "../../ipc/timetables";
 import { Banner, Loading } from "../ui/Shell";
 import { EditTimetable } from "./EditTimetable";
+import { RepairTimetable } from "./RepairTimetable";
 import {
   FindingsPanel,
   ScoringPanel,
@@ -75,6 +77,13 @@ export function Timetables(props: {
   // identifier rather than a flag so that closing one timetable and opening another cannot land
   // the user in an editor they did not ask for.
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [repairingId, setRepairingId] = useState<string | null>(null);
+  // The selection and the name the repair screen needs, captured when the user asks for it.
+  // The school is this screen's; the cycle and term are the timetable's own.
+  const [repairTarget, setRepairTarget] = useState<{
+    selection: Selection;
+    name: string;
+  } | null>(null);
 
   const refresh = useCallback(async () => {
     if (schoolId === null) {
@@ -111,6 +120,27 @@ export function Timetables(props: {
     );
   }
 
+  if (openId !== null && repairingId === openId && repairTarget !== null) {
+    return (
+      <RepairTimetable
+        key={`repair-${openId}`}
+        selection={repairTarget.selection}
+        timetableId={openId}
+        timetableName={repairTarget.name}
+        schoolName={schoolName}
+        onApplied={(written) => {
+          setRepairingId(null);
+          void refresh();
+          onOpen(written);
+        }}
+        onDone={() => {
+          setRepairingId(null);
+          void refresh();
+        }}
+      />
+    );
+  }
+
   if (openId !== null && editingId === openId) {
     return (
       <EditTimetable
@@ -130,6 +160,7 @@ export function Timetables(props: {
     return (
       <OpenTimetable
         id={openId}
+        schoolId={schoolId}
         schoolName={schoolName}
         onBack={() => {
           onOpen(null);
@@ -137,6 +168,10 @@ export function Timetables(props: {
           void refresh();
         }}
         onEdit={() => setEditingId(openId)}
+        onRepair={(selection, name) => {
+          setRepairTarget({ selection, name });
+          setRepairingId(openId);
+        }}
         onChanged={() => void refresh()}
       />
     );
@@ -227,9 +262,13 @@ function OpenTimetable(props: {
   onBack: () => void;
   /** Hands over to the editor, which opens a session of its own. */
   onEdit: () => void;
+  /** This screen's school, which a timetable row does not carry — it is `cycle.school_id`. */
+  schoolId: string;
+  /** Hands over to the repair screen, which opens a session of its own. */
+  onRepair: (selection: Selection, name: string) => void;
   onChanged: () => void;
 }) {
-  const { id, schoolName, onBack, onEdit, onChanged } = props;
+  const { id, schoolId, schoolName, onBack, onEdit, onRepair, onChanged } = props;
 
   const [view, setView] = useState<TimetableView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -391,10 +430,30 @@ function OpenTimetable(props: {
         >
           Edit this timetable
         </button>
+        {/*
+         * Repair needs the same compiled problem the editor does, and for the same reason: a
+         * repair that could check nothing would be writing placements nothing had verified.
+         */}
+        <button
+          type="button"
+          disabled={busy || view.projection === null}
+          onClick={() =>
+            onRepair(
+              {
+                schoolId,
+                cycleId: view.timetable.cycleId,
+                termId: view.timetable.termId,
+              },
+              view.timetable.name,
+            )
+          }
+        >
+          Repair this timetable
+        </button>
         {view.projection === null ? (
           <span className="ttDisabledWhy">
-            No grid could be built for this timetable, so there is nothing to check an edit
-            against.
+            No grid could be built for this timetable, so there is nothing to check an edit or a
+            repair against.
           </span>
         ) : null}
         {renaming ? null : (

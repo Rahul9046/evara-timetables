@@ -48,7 +48,7 @@ use evara_core::scheduling::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::findings::{FindingView, explain_all};
+use crate::findings::{FindingCounts, FindingView, explain_all};
 
 #[cfg(test)]
 mod tests;
@@ -242,6 +242,20 @@ pub struct RepairDiff {
     pub findings_before: Vec<FindingView>,
     /// Every finding in the repaired arrangement. The **whole** arrangement's.
     pub findings_after: Vec<FindingView>,
+    /// How many findings the baseline held, by level.
+    pub counts_before: FindingCounts,
+    /// How many the repaired arrangement holds, by level. The **whole** arrangement's.
+    ///
+    /// Counted here rather than in the interface, so the mapping from a level's spelling to a
+    /// tally exists once — `FindingCounts::of` is that one place.
+    pub counts_after: FindingCounts,
+    /// How many occurrences the repaired arrangement places, of how many the problem holds.
+    ///
+    /// Both figures, never a ratio: a partial timetable is an ordinary state and a reader
+    /// needs to know the denominator.
+    pub placed_after: usize,
+    /// How many the problem holds.
+    pub required: usize,
     /// How the hard violations divide.
     pub attribution: Attribution,
 }
@@ -412,6 +426,10 @@ pub fn diff(input: &RepairDiffInput<'_>) -> RepairDiff {
             .is_better_than(ScoreLine::of(input.before.score)),
         findings_before: explain_all(input.problem, &input.before.violations),
         findings_after: explain_all(input.problem, &input.after.violations),
+        counts_before: FindingCounts::of(&explain_all(input.problem, &input.before.violations)),
+        counts_after: FindingCounts::of(&explain_all(input.problem, &input.after.violations)),
+        placed_after: input.repaired.scheduled_count(),
+        required: input.problem.activities.len(),
         attribution: attribute(input),
     }
 }
