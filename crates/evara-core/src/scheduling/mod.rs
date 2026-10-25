@@ -67,6 +67,7 @@ pub mod overlap;
 pub mod placement;
 pub mod population;
 pub mod problem;
+pub mod repair;
 pub mod resolve;
 pub mod rng;
 pub mod span;
@@ -118,6 +119,10 @@ pub use population::{
 pub use problem::{
     ActivityFact, GroupFact, GroupKind, IntegrityError, OtherSchool, Problem, RoomFact,
     RoomTypeFact, SectionFact, TeacherFact, TimeslotFact,
+};
+pub use repair::{
+    FrozenMismatch, MovableSet, MovableSetError, frozen_differences, frozen_only,
+    locked_differences,
 };
 pub use resolve::{
     MaterialisedGrid, is_compatible, longest_teaching_run, only_campus, runs_on, teaching_slots,
