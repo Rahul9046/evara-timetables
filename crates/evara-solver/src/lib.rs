@@ -63,6 +63,9 @@ mod tests;
 #[cfg(test)]
 mod tests_repair;
 
+#[cfg(test)]
+mod repair_budget;
+
 use evara_constraints::{EvaluationReport, evaluate};
 use evara_core::scheduling::{
     Assignment, CompiledConstraint, ConstraintLevel, ConstraintType, DiagnosticReport,

@@ -40,8 +40,12 @@ const repairResult = vi.fn();
 const cancelRepair = vi.fn();
 const discardRepair = vi.fn();
 const applyRepair = vi.fn();
-const onRepairProgress = vi.fn(async () => () => undefined);
-const onRepairFinished = vi.fn(async () => () => undefined);
+// Typed with their parameters, so the mock has the same shape as what it replaces: a bare
+// `async () => ...` infers no arguments and then rejects the handler the screen passes.
+const onRepairProgress =
+  vi.fn<(runId: string, handler: (event: unknown) => void) => Promise<() => void>>();
+const onRepairFinished =
+  vi.fn<(runId: string, handler: (event: unknown) => void) => Promise<() => void>>();
 
 vi.mock("../../ipc/repair", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../ipc/repair")>()),
@@ -52,8 +56,10 @@ vi.mock("../../ipc/repair", async (importOriginal) => ({
   cancelRepair: (...args: unknown[]) => cancelRepair(...args),
   discardRepair: (...args: unknown[]) => discardRepair(...args),
   applyRepair: (...args: unknown[]) => applyRepair(...args),
-  onRepairProgress: (...args: unknown[]) => onRepairProgress(...args),
-  onRepairFinished: (...args: unknown[]) => onRepairFinished(...args),
+  onRepairProgress: (runId: string, handler: (event: unknown) => void) =>
+    onRepairProgress(runId, handler),
+  onRepairFinished: (runId: string, handler: (event: unknown) => void) =>
+    onRepairFinished(runId, handler),
 }));
 
 const { RepairTimetable } = await import("./RepairTimetable");
@@ -149,13 +155,32 @@ function mount(over: Partial<Parameters<typeof RepairTimetable>[0]> = {}) {
   );
 }
 
+/** One finding, with every field the generated type requires. */
+function finding(detail: string) {
+  return {
+    typeKey: "room-clash",
+    knownType: true,
+    level: "HARD",
+    penalty: -1,
+    message: detail,
+    detail,
+    cycleDayId: null,
+    startsAt: null,
+    endsAt: null,
+    subject: null,
+    related: [],
+    activities: [],
+    source: "evaluated",
+  } as unknown as import("@evara/domain").FindingView;
+}
+
 /** Finishes a run: start, then fire the finished listener the screen registered. */
 async function finishWith(found: RepairResult) {
   startRepair.mockResolvedValue({ runId: "run", movable: 12, frozen: 0 });
   repairResult.mockResolvedValue(found);
   let fire: (() => void) | null = null;
-  onRepairFinished.mockImplementation(async (_runId: unknown, handler: unknown) => {
-    fire = () => (handler as (e: unknown) => void)({ runId: "run", epoch: 0, hasResult: true });
+  onRepairFinished.mockImplementation(async (_runId, handler) => {
+    fire = () => handler({ runId: "run", epoch: 0, hasResult: true });
     return () => undefined;
   });
   await userEvent.click(screen.getByRole("button", { name: "Repair" }));
@@ -357,9 +382,7 @@ describe("the preview", () => {
         scoreAfter: { hard: -1, medium: 0, soft: 0 },
         countsAfter: { hard: 1, medium: 0, soft: 0, unknown: 0 },
         attribution: {
-          preExistingFrozen: [
-            { detail: "Room 3 is double-booked on Day 1 Period 2" },
-          ],
+          preExistingFrozen: [finding("Room 3 is double-booked on Day 1 Period 2")],
           newInvolvingMovable: [],
           eliminated: [],
         },
@@ -385,7 +408,7 @@ describe("the preview", () => {
     await finishWith(
       result({
         attribution: {
-          preExistingFrozen: [{ detail: "Room 3 is double-booked" }],
+          preExistingFrozen: [finding("Room 3 is double-booked")],
           newInvolvingMovable: [],
           eliminated: [],
         },

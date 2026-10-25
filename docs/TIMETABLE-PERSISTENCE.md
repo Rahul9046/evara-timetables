@@ -91,7 +91,8 @@ expression only in an index.
 
 `status` with `DRAFT`/`PUBLISHED`/`ARCHIVED` is the published-archived lifecycle, which
 `SCHEDULING-ARCHITECTURE-DECISIONS.md` §6 lists as **not in the MVP**. `based_on_timetable_id` is
-scenario lineage, which is what **repair** needs (`SOLVER.md` §7) and repair is not built. Both are
+scenario lineage, which is what **repair** needs (`SOLVER.md` §7) — added by `V18` in M9B
+([adr/0050](adr/0050-a-repair-produces-a-new-version.md)). Both are
 one additive column later; a `CHECK` with three values of which only one is ever written would be
 a column that lies about being used.
 
@@ -369,7 +370,7 @@ Named assertions worth knowing:
 | --- | --- | --- |
 | ~~**No manual editing.** `is_locked` and `is_manual` are columns the generator writes as 0~~ | ✅ **done in M9A**, with **no migration** — `V17` already held both columns, both uniqueness rules, the cross-cycle trigger, all three indexes and the change-log triggers. An edit carries an `ArrangementStamp` beside its `expectedRev`, because a second window moving a *different* entry passes a revision check ([adr/0047](adr/0047-a-cross-session-guard-is-an-exact-placement-list.md)) | [TIMETABLE-EDITING.md](TIMETABLE-EDITING.md) |
 | **No published/archived lifecycle** | out of the MVP (§6 of the M1 record) | a later `status` column |
-| **No scenario lineage.** `based_on_timetable_id` is not in `V17` | repair is what needs it | `SOLVER.md` §7 |
+| ~~**No scenario lineage.** `based_on_timetable_id` is not in `V17`~~ | **Paid by M9B.** `V18` adds it, `ON DELETE RESTRICT`, with a typed `DbError::HasDescendants` refusal rather than an opaque foreign-key failure | [adr/0050](adr/0050-a-repair-produces-a-new-version.md) |
 | **No export.** The contract is recorded, not built | Phase 9 | `PROJECT-FORMAT.md` §3 |
 | **A watermark refuses on an unrelated edit** | safe-by-default classification — §4 | narrowable later, with evidence |
 | **No "current timetable" pointer.** The UI lists by `generated_at` | that is a selection a screen remembers — and since M8 the Generate screen remembers it by opening what it just saved | settled; no pointer was added |

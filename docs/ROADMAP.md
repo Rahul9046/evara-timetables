@@ -780,7 +780,7 @@ rather than dynamically re-ranked; and `IncrementalScorer` lives in `evara-const
 
 ---
 
-## Phase 8 — Manual editing · 8A ✅ complete (M9A)
+## Phase 8 — Manual editing · 8A ✅ complete (M9A) · 8B ✅ complete (M9B)
 
 - ✅ Drag-and-drop in the grid, validating on hover: legal targets tinted, illegal targets
   showing the blocking reason — **in the refusing rule's own words**, and with a keyboard path
@@ -792,11 +792,16 @@ rather than dynamically re-ranked; and `IncrementalScorer` lives in `evara-const
 - Violation inspector listing every current violation with entity links. *Partly*: the editor
   renders the current findings with each rule's own sentence, as the read-only view does; the
   entity **links** into the grid are still additive over the same data.
-- Repair run: scope filter + `minimise-disruption`, offering a diff of what would change before
-  committing. **Not started** — this is 8B, and nothing in M9A implements repair, baseline-first
-  ordering, a scope filter or any change to the solver's `start` parameter.
+- ✅ Repair run, offering a diff of what would change before committing — **8B, shipped as
+  M9B**, and in two places not as this line described it. The scope is a **movable set**, not a
+  filter of pins: pinning out-of-scope placements drops them, because an impossible pin is
+  reported rather than forced. And `minimise-disruption` is **not** implemented — the baseline
+  is probed first instead, which gives "prefer the existing timetable" with no rule, no score
+  change and no claim of minimal disruption.
+  [adr/0048](adr/0048-repair-scope-is-a-movable-set.md),
+  [adr/0051](adr/0051-baseline-preference-is-candidate-ordering.md).
 
-**Closes M1-13. M1-14 waits on 8B's repair.**
+**Closes M1-13 and M1-14.**
 
 [TIMETABLE-EDITING.md](TIMETABLE-EDITING.md) is what shipped. Five things worth knowing:
 

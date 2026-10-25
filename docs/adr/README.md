@@ -53,6 +53,11 @@ tempted to undo it without knowing why.
 | [0045](0045-a-lock-is-a-property-of-a-placement.md) | A lock is `timetable_entry.is_locked` — per version, never `activity.is_locked`; and the loader compiles no pins | Accepted — corrects five records that said `activity.is_locked` |
 | [0046](0046-an-edit-changes-the-version-it-is-open-on.md) | An edit changes the version it is open on; duplicating first is the user's decision, and an undo is a new transaction rather than a rollback | Accepted — implements the guarantee [0042](0042-a-stored-timetable-is-a-version-and-a-save-refuses-stale-inputs.md) §5 was written for |
 | [0047](0047-a-cross-session-guard-is-an-exact-placement-list.md) | An editing write carries the exact `(entry id, rev)` list of the arrangement; a digest collides and a scoped watermark cannot see a deletion | Accepted |
+| [0048](0048-repair-scope-is-a-movable-set.md) | Repair scope is a movable set, never a set of pins — the scope limits what may move, not what is checked | Accepted — amends `SOLVER.md` §7's first mechanism |
+| [0049](0049-a-repairs-verification-is-scope-aware.md) | A repair verifies V0–V3 rather than whole-arrangement feasibility; a pre-existing violation outside the scope is not a defect | Accepted |
+| [0050](0050-a-repair-produces-a-new-version.md) | A repair inserts a new timetable and is never applied in place; `V18` is additive and lineage is `RESTRICT` with a typed refusal | Accepted — extends [0042](0042-a-stored-timetable-is-a-version-and-a-save-refuses-stale-inputs.md) |
+| [0051](0051-baseline-preference-is-candidate-ordering.md) | Baseline preference is candidate ordering, not a constraint; `minimise-disruption` waits for local search | Accepted — amends `SOLVER.md` §7's second mechanism |
+| [0052](0052-an-unexpressible-lock-blocks-a-repair.md) | An unexpressible lock blocks a repair and only warns an edit, because the compiled problem cannot represent it | Accepted |
 
 Statuses: **Proposed** (awaiting a decision), **Accepted**, **Superseded by NNNN**,
 **Deprecated**. Accepted records are not edited to reflect a change of mind — a new

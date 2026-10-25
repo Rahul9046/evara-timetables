@@ -249,7 +249,7 @@ Status: `M1` = Milestone 1, `M2+` = later, `R` = schema reserved only.
 
 | Key | Default | Semantics | Status |
 | --- | --- | --- | --- |
-| `minimise-disruption` | MEDIUM | Penalise placements that differ from a baseline timetable. Drives repair. (`OPS-001`) | M1 |
+| `minimise-disruption` | MEDIUM | Penalise placements that differ from a baseline timetable. **Not implemented, and deferred to local search** — M9B's repair prefers the baseline by probing it first, which needs no rule; a baseline-relative penalty would also make a repaired timetable's score incomparable with a generated one's. [adr/0051](adr/0051-baseline-preference-is-candidate-ordering.md). (`OPS-001`) | with local search |
 | `substitute-qualified` | SOFT | Prefer a qualified, free, under-loaded substitute. | R |
 | `substitute-fair-share` | SOFT | Spread cover duty. | R |
 | `absence-respected` | HARD | No teacher is scheduled during a recorded absence (dated layer). | R |
