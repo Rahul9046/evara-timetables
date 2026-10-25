@@ -33,6 +33,8 @@ pub mod lessons;
 pub mod membership;
 pub mod people;
 pub mod project;
+pub mod repair;
+pub mod repair_session;
 pub mod session;
 pub mod solve;
 pub mod structure;
@@ -83,7 +85,7 @@ pub fn app_info() -> Result<AppInfo, String> {
     Ok(AppInfo {
         version: env!("CARGO_PKG_VERSION"),
         debug: cfg!(debug_assertions),
-        phase: "8 — manual timetable editing and locking",
+        phase: "8B — automated timetable repair and partial regeneration",
     })
 }
 

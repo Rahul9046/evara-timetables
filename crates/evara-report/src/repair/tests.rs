@@ -305,7 +305,8 @@ fn the_totals_are_the_whole_arrangements_not_the_scopes() {
         "the fixture must really be clashing or this proves nothing"
     );
     assert_eq!(
-        d.score_after, reference.score,
+        d.score_after,
+        super::ScoreLine::of(reference.score),
         "the reported score is the whole arrangement's"
     );
     assert_eq!(d.findings_after.len(), reference.violations.len());
@@ -337,11 +338,11 @@ fn an_eliminated_violation_is_reported_as_fixed() {
     );
     assert_eq!(d.attribution.new_involving_movable, vec![]);
     assert!(
-        d.score_after > d.score_before,
+        d.improved,
         "and the score improved: {:?} -> {:?}",
-        d.score_before,
-        d.score_after
+        d.score_before, d.score_after
     );
+    assert!(d.score_after.is_better_than(d.score_before));
 }
 
 #[test]

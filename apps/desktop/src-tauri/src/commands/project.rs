@@ -53,6 +53,16 @@ pub struct AppState {
     /// Cleared when the project closes — see [`project_close`]. An undo stack whose rows are in
     /// a file that is no longer open is worse than no undo stack.
     pub edits: crate::commands::edit_session::EditSessions,
+    /// Every repair this process has started.
+    ///
+    /// Its own lock, for the reasons `generations` and `edits` have one: a repair session holds
+    /// a compiled problem, a baseline arrangement and **no** connection, it outlives the command
+    /// that started it, and polling its progress must not block behind a write.
+    ///
+    /// Cleared when the project closes — see [`project_close`]. A baseline and an arrangement
+    /// stamp describing a file that is no longer open are worse than nothing, because the stamp
+    /// would appear to guard something.
+    pub repairs: crate::commands::repair_session::RepairSessions,
     /// Which project is open, as a monotonic counter.
     ///
     /// Bumped on every create, open and close. A generation session records the value it
@@ -252,6 +262,7 @@ pub fn project_create(state: State<'_, AppState>, path: PathBuf) -> CommandResul
     // not leave a session pointing at a project that is no longer the open one.
     state.generations.clear();
     state.edits.clear();
+    state.repairs.clear();
     state.epoch.bump();
     let mut workspace = lock(&state)?;
     Ok(workspace.create_project(&path)?.into())
@@ -262,6 +273,7 @@ pub fn project_create(state: State<'_, AppState>, path: PathBuf) -> CommandResul
 pub fn project_open(state: State<'_, AppState>, path: PathBuf) -> CommandResult<ProjectView> {
     state.generations.clear();
     state.edits.clear();
+    state.repairs.clear();
     state.epoch.bump();
     let mut workspace = lock(&state)?;
     Ok(workspace.open_project(&path)?.into())
@@ -281,6 +293,7 @@ pub fn project_close(state: State<'_, AppState>) -> CommandResult<bool> {
     // an answer nothing can save.
     state.generations.clear();
     state.edits.clear();
+    state.repairs.clear();
     state.epoch.bump();
     let mut workspace = lock(&state)?;
     Ok(workspace.close_project())

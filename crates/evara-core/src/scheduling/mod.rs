@@ -121,8 +121,8 @@ pub use problem::{
     RoomTypeFact, SectionFact, TeacherFact, TimeslotFact,
 };
 pub use repair::{
-    FrozenMismatch, MovableSet, MovableSetError, frozen_differences, frozen_only,
-    locked_differences,
+    FrozenMismatch, MovableSet, MovableSetError, RepairScope, ScopeError, derive_movable,
+    frozen_differences, frozen_only, locked_differences,
 };
 pub use resolve::{
     MaterialisedGrid, is_compatible, longest_teaching_run, only_campus, runs_on, teaching_slots,

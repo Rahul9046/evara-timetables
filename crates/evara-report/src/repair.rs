@@ -146,6 +146,44 @@ pub struct OccurrenceChange {
     pub cause: Option<String>,
 }
 
+/// A score, at all three levels, flattened for the interface.
+///
+/// `Score` itself does not cross the IPC boundary -- M9A's `ScoreView` set the convention and
+/// the reason is the same: the interface renders three integers and must not be handed a type
+/// whose ordering semantics it would have to reimplement to compare two of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct ScoreLine {
+    /// Hard penalties. Negative-going, so zero is the best reachable.
+    pub hard: i64,
+    /// Medium penalties.
+    pub medium: i64,
+    /// Soft penalties.
+    pub soft: i64,
+}
+
+impl ScoreLine {
+    /// Flattens one score.
+    #[must_use]
+    pub const fn of(score: Score) -> Self {
+        Self {
+            hard: score.hard,
+            medium: score.medium,
+            soft: score.soft,
+        }
+    }
+
+    /// Whether this score is better than `other`, lexicographically.
+    ///
+    /// Computed in Rust so the interface never has to know the comparison is lexicographic
+    /// rather than a sum.
+    #[must_use]
+    pub fn is_better_than(&self, other: Self) -> bool {
+        (self.hard, self.medium, self.soft) > (other.hard, other.medium, other.soft)
+    }
+}
+
 /// Which planning variables a move changed.
 ///
 /// At least one is always `true`: a "move" that changed neither is an unchanged placement, and
@@ -191,9 +229,15 @@ pub struct RepairDiff {
     /// How many were frozen.
     pub frozen_count: usize,
     /// The baseline's score, at all three levels.
-    pub score_before: Score,
+    pub score_before: ScoreLine,
     /// The repaired arrangement's score. The **whole** arrangement's.
-    pub score_after: Score,
+    pub score_after: ScoreLine,
+    /// Whether the repaired arrangement scores better than the baseline.
+    ///
+    /// Decided here because the comparison is lexicographic over three levels, not a sum --
+    /// an interface that added them up would rank a timetable with one hard clash above one
+    /// with several soft ones.
+    pub improved: bool,
     /// Every finding in the baseline, with each rule's own sentence.
     pub findings_before: Vec<FindingView>,
     /// Every finding in the repaired arrangement. The **whole** arrangement's.
@@ -362,8 +406,10 @@ pub fn diff(input: &RepairDiffInput<'_>) -> RepairDiff {
         counts,
         movable_count: input.movable.len(),
         frozen_count: input.movable.frozen_count(),
-        score_before: input.before.score,
-        score_after: input.after.score,
+        score_before: ScoreLine::of(input.before.score),
+        score_after: ScoreLine::of(input.after.score),
+        improved: ScoreLine::of(input.after.score)
+            .is_better_than(ScoreLine::of(input.before.score)),
         findings_before: explain_all(input.problem, &input.before.violations),
         findings_after: explain_all(input.problem, &input.after.violations),
         attribution: attribute(input),

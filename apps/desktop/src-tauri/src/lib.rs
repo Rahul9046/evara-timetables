@@ -45,6 +45,7 @@ pub fn run() {
             imports: commands::import::ImportSessions::default(),
             generations: commands::session::GenerationSessions::default(),
             edits: commands::edit_session::EditSessions::default(),
+            repairs: commands::repair_session::RepairSessions::default(),
             epoch: commands::session::ProjectEpoch::default(),
         })
         .invoke_handler(tauri::generate_handler![
@@ -284,6 +285,15 @@ pub fn run() {
             commands::edit::edit_undo,
             commands::edit::edit_redo,
             commands::edit::edit_history,
+            // Automated repair and partial regeneration -- Phase 8B.
+            commands::repair::repair_scopes,
+            commands::repair::repair_preflight,
+            commands::repair::repair_start,
+            commands::repair::repair_status,
+            commands::repair::repair_result,
+            commands::repair::repair_cancel,
+            commands::repair::repair_apply,
+            commands::repair::repair_discard,
             commands::edit::timetable_duplicate,
             // Timetable grid — Phase 1E. `release_orphans` is the only destructive one.
             commands::grid::setup_grid_preview,
