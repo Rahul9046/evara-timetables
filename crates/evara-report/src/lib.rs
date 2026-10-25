@@ -46,6 +46,7 @@
 
 pub mod findings;
 pub mod projection;
+pub mod repair;
 
 pub use findings::{
     FindingCounts, FindingEntity, FindingSource, FindingView, StoredFinding, explain_all,
@@ -54,4 +55,8 @@ pub use projection::{
     CellContent, GridConflict, GridPanel, LessonFlags, PinReason, ProjectedCellRef, ProjectedDay,
     ProjectedLesson, ProjectedPeriod, ProjectionInput, ProjectionScope, ScheduleAxis, ScopeGrid,
     ScopeKind, TimetableCell, TimetableProjection, in_scope, lay_out, no_flags, project,
+};
+pub use repair::{
+    Attribution, ChangeCounts, ChangeKind, MovedParts, OccurrenceChange, PlacementView, RepairDiff,
+    RepairDiffInput, diff,
 };
