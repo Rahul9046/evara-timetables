@@ -349,6 +349,43 @@ disagree about whether a placement is legal, the product is broken.
   unschedule-then-place and a scoped change-log watermark cannot see a deletion
   ([adr/0047](docs/adr/0047-a-cross-session-guard-is-an-exact-placement-list.md)).
   [TIMETABLE-EDITING.md](docs/TIMETABLE-EDITING.md).
+- **A repair's scope says what may move, not what is checked.** The solver receives a baseline
+  and a **movable set**; everything else is **frozen** — in the arrangement, seen by every rule,
+  never a candidate. Pinning the out-of-scope placements instead *drops* them, because
+  `place_one` reports an impossible pin rather than forcing it, and a timetable being repaired
+  usually has clashes. The working arrangement holds the **frozen placements alone**: starting
+  from the full baseline makes a pre-existing movable-to-movable clash refuse both, since
+  `PlacementVerdict::allowed` is false whenever the result *carries* a hard violation naming the
+  occurrence. The set is derived **once** from the baseline, so an unplaced occurrence is in no
+  room and on no day and no positional scope can reach it; and it is **never widened**
+  automatically — a wider scope is a new session.
+  [adr/0048](docs/adr/0048-repair-scope-is-a-movable-set.md).
+- **A repair is verified against its scope, and never against whole-arrangement feasibility.**
+  `status_of` gates on `score.is_feasible()`, which is false for every timetable a repair exists
+  to fix — routing a repair through it reports each one as a defect in Evara and discards
+  correct work. Instead: the **complete** baseline-versus-repaired comparison over every frozen
+  occurrence (slot, room and unplaced state), the same narrowed to locks, readability, no hard
+  violation involving a movable occurrence, and the frozen-only hard set unchanged by
+  `ViolationKey`. The placement comparison is **not** inferred from the violation sets — a frozen
+  swap leaves them identical — and it runs **twice**, once in the solver and again inside
+  `save_repaired`'s transaction, from one implementation in `evara_core::scheduling::repair`
+  because `evara-db` may not depend on `evara-solver`. A pre-existing violation outside the scope
+  is attributed, not blamed on the repair, and never blocks applying it.
+  [adr/0049](docs/adr/0049-a-repairs-verification-is-scope-aware.md).
+- **A repair inserts a new version, prefers the baseline by probing it, and blocks on a lock it
+  cannot express.** Approving one *inserts*, so "a stale session cannot modify a saved timetable"
+  is structural; `is_manual` is carried on an unmoved occurrence and cleared on a moved one.
+  `V18` is additive — lineage plus `solve_run.{kind, scope}` — and stays additive because
+  `timetable_evaluation.kind` is **not** widened (a repair's scoring *is* a `GENERATION`) and no
+  eighth `UnplacedCause` is added; both would be a rebuild on a `STRICT` table. Baseline
+  preference is **candidate ordering**, not `minimise-disruption`, and promises no minimal
+  disruption. An **unexpressible** lock refuses the repair rather than warning, because the lock
+  is absent from `Problem::pinned` and a scope containing the occurrence would *move* it — and
+  nothing in the repair path ever writes or clears a lock.
+  [adr/0050](docs/adr/0050-a-repair-produces-a-new-version.md),
+  [adr/0051](docs/adr/0051-baseline-preference-is-candidate-ordering.md),
+  [adr/0052](docs/adr/0052-an-unexpressible-lock-blocks-a-repair.md),
+  [TIMETABLE-REPAIR.md](docs/TIMETABLE-REPAIR.md).
 
 ## 4. Definition of done for a constraint
 

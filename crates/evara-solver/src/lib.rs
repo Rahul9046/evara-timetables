@@ -55,9 +55,16 @@ mod candidates;
 mod config;
 mod construct;
 mod explain;
+mod repair;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod tests_repair;
+
+#[cfg(test)]
+mod repair_budget;
 
 use evara_constraints::{EvaluationReport, evaluate};
 use evara_core::scheduling::{
@@ -68,6 +75,10 @@ use evara_core::scheduling::{
 
 pub use config::{Cancel, NeverCancel, NoProgress, ProgressSink, SolveConfig, SolveLimits};
 pub use explain::unplaced_report;
+pub use repair::{
+    RepairDefect, RepairOutcome, RepairRequest, ViolationPartition, placement_change, repair,
+    repair_with,
+};
 
 /// One timetable generation engine.
 ///
@@ -141,7 +152,11 @@ impl SolverEngine for ConstructionSolver {
         // construction, which places what is missing and leaves what is there.
         let _ = start;
 
-        let finished = construct::construct(problem, constraints, config, cancel, progress);
+        // `None` for the repair scope, so this is M6's path unchanged. `construct` only returns
+        // `None` when a *starting arrangement* cannot be read against the problem, and there is
+        // no starting arrangement here -- hence the expectation rather than a fallback.
+        let finished = construct::construct(problem, constraints, config, cancel, progress, None)
+            .expect("a generation has no starting arrangement to be unreadable");
         Solution {
             assignment: finished.scorer.assignment(),
             termination: finished.termination,
@@ -321,7 +336,7 @@ fn refused(request: &GenerateRequest<'_>, unverified: UnverifiedCounts) -> Solve
 /// that accepts an infeasible intermediate state and cannot climb out of it ends there; a
 /// construction that refuses every illegal placement never does, because an occurrence it
 /// cannot place legally is left unplaced instead. That is the difference `MEDIUM` buys.
-fn status_of(solution: &Solution, report: &EvaluationReport) -> SolveStatus {
+pub(crate) fn status_of(solution: &Solution, report: &EvaluationReport) -> SolveStatus {
     if !report.is_readable() || !report.score.is_feasible() {
         return SolveStatus::Failed;
     }
@@ -340,7 +355,7 @@ fn status_of(solution: &Solution, report: &EvaluationReport) -> SolveStatus {
 /// Empty for a feasible result, and [`SolveOutcome`] documents that this and
 /// [`Score::is_feasible`](evara_core::scheduling::Score::is_feasible) must agree — so both are read from the same report rather than one
 /// being derived from the other.
-fn hard_counts(report: &EvaluationReport) -> Vec<HardViolationCount> {
+pub(crate) fn hard_counts(report: &EvaluationReport) -> Vec<HardViolationCount> {
     ConstraintType::all()
         .iter()
         .filter_map(|kind| {
@@ -376,7 +391,7 @@ fn hard_counts(report: &EvaluationReport) -> Vec<HardViolationCount> {
 ///
 /// The fourth, unenforced restrictions, is the caller's: only the loader knows how many stored
 /// availability rows named an entity kind nothing schedules.
-fn disclose(request: &GenerateRequest<'_>) -> UnverifiedCounts {
+pub(crate) fn disclose(request: &GenerateRequest<'_>) -> UnverifiedCounts {
     use evara_core::scheduling::{ExpectedAttendance, GroupIx, Overlap};
 
     let problem = request.problem;

@@ -201,6 +201,16 @@ pub struct GenerateSettings {
 
 impl GenerateSettings {
     /// The engine configuration these settings describe.
+    ///
+    /// Public because a repair takes the same seed and limits: the two commands differ in what
+    /// they start from, not in how the engine is configured, and a second settings type would
+    /// be a second place for a default to drift.
+    #[must_use]
+    pub fn solve_config(self) -> SolveConfig {
+        self.config()
+    }
+
+    /// The engine configuration these settings describe.
     fn config(self) -> SolveConfig {
         let mut limits = SolveLimits::DEFAULT;
         if let Some(candidates) = self.max_candidates {
@@ -416,20 +426,23 @@ pub fn timetable_generate_start(
         .name(format!("evara-solve-{run_id}"))
         .spawn(move || {
             let emitter = handle.clone();
-            let sink = CoalescingSink::new(Arc::clone(&life), move |progress: Progress| {
-                // A failed emit is not worth failing a solve over: the window may have gone.
-                let _ = emitter.emit(
-                    PROGRESS_EVENT,
-                    ProgressEvent {
-                        run_id,
-                        epoch,
-                        placed: progress.placed,
-                        total: progress.total,
-                        steps: progress.steps,
-                        elapsed_ms: elapsed_ms(started),
-                    },
-                );
-            });
+            let sink = CoalescingSink::new(
+                Arc::clone(&life) as Arc<dyn super::session::ProgressReporter>,
+                move |progress: Progress| {
+                    // A failed emit is not worth failing a solve over: the window may have gone.
+                    let _ = emitter.emit(
+                        PROGRESS_EVENT,
+                        ProgressEvent {
+                            run_id,
+                            epoch,
+                            placed: progress.placed,
+                            total: progress.total,
+                            steps: progress.steps,
+                            elapsed_ms: elapsed_ms(started),
+                        },
+                    );
+                },
+            );
 
             let outcome = generate_with(
                 &ConstructionSolver,
@@ -626,6 +639,10 @@ pub fn timetable_save(
 
     let config_seed = outcome.seed.get();
     let provenance = RunProvenance {
+        // A generation, and no scope: `V18`'s two columns, defaulted explicitly here rather
+        // than relying on the schema default, so a reader of this call sees what is recorded.
+        kind: evara_db::RUN_GENERATION.to_owned(),
+        scope: String::from("{}"),
         engine: "construction".to_owned(),
         settings: GenerateSettings::as_json(&SolveConfig::seeded(config_seed)),
         started_at: session.started_at.clone(),

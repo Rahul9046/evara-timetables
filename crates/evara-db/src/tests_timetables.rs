@@ -148,6 +148,8 @@ fn provenance() -> RunProvenance {
         settings: "{}".to_owned(),
         started_at: "2026-10-23T12:00:00.000Z".to_owned(),
         finished_at: "2026-10-23T12:00:01.000Z".to_owned(),
+        kind: crate::RUN_GENERATION.to_owned(),
+        scope: "{}".to_owned(),
     }
 }
 
@@ -1189,7 +1191,14 @@ fn a_v16_project_upgrades_to_v17_with_the_new_tables_empty() {
                  DROP TABLE IF EXISTS timetable_entry;
                  DROP TABLE IF EXISTS timetable",
             )?;
-            tx.execute("DELETE FROM refinery_schema_history WHERE version = 17", [])?;
+            // V18 only ADDS columns to `timetable` and `solve_run` and an index over one of
+            // them, so dropping those tables already removed its whole effect -- but its
+            // history row has to go too, or reopening would re-run V17 and skip V18, leaving
+            // `timetable` without the lineage column.
+            tx.execute(
+                "DELETE FROM refinery_schema_history WHERE version IN (17, 18)",
+                [],
+            )?;
             Ok(())
         })
         .expect("rewind to V16");

@@ -392,9 +392,12 @@ fn the_sink_emits_the_first_event_and_coalesces_the_flood_behind_it() {
     let life = Arc::new(Lifecycle::default());
     let emitted = Arc::new(AtomicUsize::new(0));
     let counter = Arc::clone(&emitted);
-    let sink = CoalescingSink::new(Arc::clone(&life), move |_| {
-        counter.fetch_add(1, Ordering::SeqCst);
-    });
+    let sink = CoalescingSink::new(
+        Arc::clone(&life) as Arc<dyn super::ProgressReporter>,
+        move |_| {
+            counter.fetch_add(1, Ordering::SeqCst);
+        },
+    );
 
     // 2 000 calls in a tight loop: the realistic upper end's flood.
     for n in 0..2_000 {

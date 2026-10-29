@@ -16,7 +16,7 @@
  * type guards, discriminated-union helpers and display formatting.
  *
  * Type generation was wired up in Phase 1E. `./generated/` now holds the whole IPC
- * contract — 185 types, written by `npm run types:generate` and verified by
+ * contract — 205 types, written by `npm run types:generate` and verified by
  * `npm run types:check`, which CI runs. See
  * [ADR 0009](../../../docs/adr/0009-typescript-type-generation.md) and
  * [ADR 0012](../../../docs/adr/0012-records-are-the-ipc-contract.md).
@@ -30,6 +30,7 @@ export type {
   AssignedTeacher,
   AssignmentEligibility,
   AttendingGroup,
+  Attribution,
   AvailabilityEntity,
   AvailabilityRule,
   AvailabilityRuleInput,
@@ -38,6 +39,8 @@ export type {
   BuildingInput,
   BuildingWithCampuses,
   CalendarDay,
+  ChangeCounts,
+  ChangeKind,
   CalendarDayInput,
   CalendarDayKind,
   Campus,
@@ -198,6 +201,23 @@ export type {
   TermInput,
   Timeslot,
   TimeslotInput,
+  MovedParts,
+  OccurrenceChange,
+  PlacementView,
+  PreflightFinding,
+  RepairApplied,
+  RepairDiff,
+  RepairFinishedEvent,
+  RepairPhase,
+  RepairPreflight,
+  RepairProgressEvent,
+  RepairResult,
+  RepairScope,
+  RepairScopes,
+  RepairStarted,
+  RepairStatus,
+  ScopeOption,
+  ScoreLine,
   TimetableCell,
   TimetableProjection,
   TimetableSummary,

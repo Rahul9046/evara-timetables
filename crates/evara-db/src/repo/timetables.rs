@@ -51,8 +51,8 @@
 //! stored identifier, which is the reverse of `Problem::integrity`.
 
 use evara_core::scheduling::{
-    Assignment, Placement, ProblemIdentity, Score, SolveOutcome, SolveStatus, Termination,
-    UnplacedCause, UnverifiedCounts, Violation,
+    Assignment, FrozenMismatch, MovableSet, Placement, ProblemIdentity, Score, SolveOutcome,
+    SolveStatus, Termination, UnplacedCause, UnverifiedCounts, Violation, frozen_differences,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction};
 use uuid::Uuid;
@@ -93,6 +93,12 @@ entity!(
         shared_entities: i64,
         /// Stored availability restrictions this engine does not enforce.
         unenforced_restrictions: i64,
+        /// The timetable this one was repaired from, where it was.
+        ///
+        /// `None` for a generated timetable. `V18`, and the edge is `RESTRICT`: a source with
+        /// repaired descendants cannot be deleted while they exist, and
+        /// [`Timetables::delete`] refuses it with a typed error rather than a driver failure.
+        based_on_timetable_id: Option<Uuid>,
     }
 );
 
@@ -154,6 +160,15 @@ entity!(
         finished_at: String,
         /// Which build ran it.
         app_version: String,
+        /// `GENERATION` or `REPAIR` — `V18`.
+        ///
+        /// The discriminator for how a timetable came to be. Deliberately not
+        /// `timetable_evaluation.kind`, which answers a different question over a different
+        /// value set: a repair's scoring is a `GENERATION`, because it is that version's
+        /// original immutable scoring (ADR 0042 §5).
+        kind: String,
+        /// What a repair was allowed to move, as a JSON object. `{}` for a generation.
+        scope: String,
     }
 );
 
@@ -251,6 +266,27 @@ pub struct RunProvenance {
     pub started_at: String,
     /// When the caller saw it finish.
     pub finished_at: String,
+    /// `GENERATION` or `REPAIR` — `V18`.
+    ///
+    /// On the provenance rather than inferred from the outcome, because an outcome's shape is
+    /// identical either way: the difference is which command produced it, and only the caller
+    /// knows that.
+    pub kind: String,
+    /// What a repair was allowed to move, as a JSON object. `{}` for a generation.
+    pub scope: String,
+}
+
+/// The `solve_run.kind` of a generation.
+pub const RUN_GENERATION: &str = "GENERATION";
+/// The `solve_run.kind` of a repair.
+pub const RUN_REPAIR: &str = "REPAIR";
+
+impl RunProvenance {
+    /// Whether this run repaired an existing timetable rather than generating one.
+    #[must_use]
+    pub fn is_repair(&self) -> bool {
+        self.kind == RUN_REPAIR
+    }
 }
 
 /// Everything one save writes.
@@ -350,7 +386,7 @@ impl Timetables<'_> {
             // check-then-act: nothing can move between the question and the answer.
             guard_freshness(tx, watermark)?;
 
-            let timetable = insert_timetable(tx, &selection, &name, counts, outcome)?;
+            let timetable = insert_timetable(tx, &selection, &name, counts, outcome, None)?;
             for (activity_id, placement) in &plan {
                 // A generated placement is neither locked nor hand-placed, and saying so
                 // explicitly is what makes M9A's two other writers readable beside it.
@@ -404,6 +440,7 @@ impl Timetables<'_> {
                 "SELECT t.id, t.cycle_id, t.term_id, t.name, t.generated_at,
                         t.indeterminate_student_pairs, t.unchecked_capacities,
                         t.shared_entities, t.unenforced_restrictions,
+                        t.based_on_timetable_id,
                         t.created_at, t.updated_at, t.rev
                  FROM timetable t
                  JOIN cycle c ON c.id = t.cycle_id
@@ -430,7 +467,7 @@ impl Timetables<'_> {
             let mut stmt = conn.prepare(
                 "SELECT id, cycle_id, term_id, name, generated_at,
                         indeterminate_student_pairs, unchecked_capacities,
-                        shared_entities, unenforced_restrictions,
+                        shared_entities, unenforced_restrictions, based_on_timetable_id,
                         created_at, updated_at, rev
                  FROM timetable
                  WHERE cycle_id = ?1 AND COALESCE(term_id, '') = COALESCE(?2, '')
@@ -475,33 +512,8 @@ impl Timetables<'_> {
     ///
     /// As [`Timetables::get`], plus any SQLite failure.
     pub fn arrangement(&self, id: Uuid, assembly: &Assembly) -> Result<StoredArrangement> {
-        let entries = self.entries(id)?;
-        let mut assignment = Assignment::empty(assembly.problem.activities.len());
-        let mut unknown = Vec::new();
-
-        for entry in &entries {
-            let (Some(activity), Some(timeslot)) = (
-                assembly.index.activity_index(entry.activity_id),
-                assembly.index.timeslot_index(entry.timeslot_id),
-            ) else {
-                unknown.push(entry.activity_id);
-                continue;
-            };
-            let room = entry
-                .room_id
-                .and_then(|room| assembly.index.room_index(room));
-            if entry.room_id.is_some() && room.is_none() {
-                unknown.push(entry.activity_id);
-                continue;
-            }
-            assignment.place(activity, Placement { timeslot, room });
-        }
-
-        Ok(StoredArrangement {
-            assignment,
-            entries: entries.len(),
-            not_in_problem: unknown,
-        })
+        // One body, shared with `repair_baseline`'s snapshot -- see [`Timetables::pins`].
+        Ok(project_arrangement(assembly, &self.entries(id)?))
     }
 
     /// The stored entries of one timetable, in a deterministic order.
@@ -519,7 +531,7 @@ impl Timetables<'_> {
                     "SELECT id, timetable_id, engine, seed, status, termination, settings,
                             inputs_watermark, candidate_evaluations, candidates_rejected,
                             placements_committed, placements_withdrawn, construction_steps,
-                            passes, started_at, finished_at, app_version,
+                            passes, started_at, finished_at, app_version, kind, scope,
                             created_at, updated_at, rev
                      FROM solve_run WHERE timetable_id = ?1",
                     [timetable_id.to_string()],
@@ -728,6 +740,13 @@ impl Timetables<'_> {
     /// [`DbError::Conflict`] if the timetable has moved since `expected`.
     pub fn delete(&mut self, id: Uuid, expected: i64) -> Result<DeletedTimetable> {
         self.db.write(|tx| {
+            // Repaired descendants first, BEFORE any child is removed. The `RESTRICT` edge on
+            // `based_on_timetable_id` would refuse this anyway, but only on the final statement
+            // and only as a driver failure wrapped in `InternalError` -- a useless message for
+            // a legitimate refusal. The foreign key stays as the backstop for a future writer
+            // that forgets this check. `idx_timetable_based_on` makes it an index lookup.
+            guard_no_descendants(tx, id)?;
+
             // The children go first, because every edge is RESTRICT and the parent cannot be
             // removed while one survives. The revision is checked by the **parent's own
             // delete**, last, rather than by a no-op update first: an update would consume the
@@ -1064,6 +1083,7 @@ fn insert_timetable(
     name: &str,
     counts: UnverifiedCounts,
     outcome: &SolveOutcome,
+    based_on: Option<Uuid>,
 ) -> Result<Timetable> {
     let stamp = Stamp::new();
     let generated_at = stamp.created_at.clone();
@@ -1072,8 +1092,8 @@ fn insert_timetable(
         "INSERT INTO timetable (
              id, cycle_id, term_id, name, generated_at,
              indeterminate_student_pairs, unchecked_capacities, shared_entities,
-             unenforced_restrictions, created_at, updated_at, rev)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+             unenforced_restrictions, based_on_timetable_id, created_at, updated_at, rev)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         rusqlite::params![
             stamp.id.to_string(),
             selection.cycle_id.to_string(),
@@ -1084,6 +1104,7 @@ fn insert_timetable(
             i64::from(counts.unchecked_capacities),
             i64::from(counts.shared_entities),
             i64::from(counts.unenforced_restrictions),
+            based_on.map(|id| id.to_string()),
             stamp.created_at,
             stamp.updated_at,
             stamp.rev,
@@ -1148,9 +1169,10 @@ fn insert_run(
              id, timetable_id, engine, seed, status, termination, settings, inputs_watermark,
              candidate_evaluations, candidates_rejected, placements_committed,
              placements_withdrawn, construction_steps, passes,
-             started_at, finished_at, app_version, created_at, updated_at, rev)
+             started_at, finished_at, app_version, kind, scope,
+             created_at, updated_at, rev)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-                 ?15, ?16, ?17, ?18, ?19, ?20)",
+                 ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
         rusqlite::params![
             stamp.id.to_string(),
             timetable_id.to_string(),
@@ -1169,6 +1191,8 @@ fn insert_run(
             run.started_at,
             run.finished_at,
             app_version,
+            run.kind,
+            run.scope,
             stamp.created_at,
             stamp.updated_at,
             stamp.rev,
@@ -1180,7 +1204,8 @@ fn insert_run(
         "SELECT id, timetable_id, engine, seed, status, termination, settings,
                 inputs_watermark, candidate_evaluations, candidates_rejected,
                 placements_committed, placements_withdrawn, construction_steps, passes,
-                started_at, finished_at, app_version, created_at, updated_at, rev
+                started_at, finished_at, app_version, kind, scope,
+                created_at, updated_at, rev
          FROM solve_run WHERE id = ?1",
         [stamp.id.to_string()],
         SolveRun::from_row,
@@ -1363,7 +1388,8 @@ fn read_timetable(conn: &Connection, id: Uuid) -> Result<Option<Timetable>> {
         .query_row(
             "SELECT id, cycle_id, term_id, name, generated_at,
                     indeterminate_student_pairs, unchecked_capacities, shared_entities,
-                    unenforced_restrictions, created_at, updated_at, rev
+                    unenforced_restrictions, based_on_timetable_id,
+                    created_at, updated_at, rev
              FROM timetable WHERE id = ?1",
             [id.to_string()],
             Timetable::from_row,
@@ -1812,13 +1838,18 @@ impl Timetables<'_> {
 
             let stamp = Stamp::new();
             tx.execute(
+                // `based_on_timetable_id` is copied, not set to the source: a duplicate of a
+                // repaired timetable descends from whatever that repair was made from, and
+                // pointing it at the row being copied would invent a lineage step that never
+                // happened. A duplicate of a generated timetable stays NULL.
                 "INSERT INTO timetable (
                      id, cycle_id, term_id, name, generated_at,
                      indeterminate_student_pairs, unchecked_capacities, shared_entities,
-                     unenforced_restrictions, created_at, updated_at, rev)
+                     unenforced_restrictions, based_on_timetable_id,
+                     created_at, updated_at, rev)
                  SELECT ?1, cycle_id, term_id, ?2, generated_at,
                         indeterminate_student_pairs, unchecked_capacities, shared_entities,
-                        unenforced_restrictions, ?3, ?4, ?5
+                        unenforced_restrictions, based_on_timetable_id, ?3, ?4, ?5
                  FROM timetable WHERE id = ?6",
                 rusqlite::params![
                     stamp.id.to_string(),
@@ -1865,9 +1896,11 @@ impl Timetables<'_> {
 /// A struct rather than two `bool` arguments, because two adjacent booleans at a call site are
 /// the shape a reader cannot check and a writer can transpose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct EntryFlags {
-    is_locked: bool,
-    is_manual: bool,
+pub struct EntryFlags {
+    /// Whether a repair must preserve this placement.
+    pub is_locked: bool,
+    /// Whether a human placed it, rather than a solve.
+    pub is_manual: bool,
 }
 
 /// Both guards, in the transaction that writes.
@@ -2067,7 +2100,65 @@ pub struct StoredPins {
     /// materialises. Reported rather than refused, for the same reason
     /// [`StoredArrangement::not_in_problem`] is: a timetable whose inputs moved is still worth
     /// opening, and a lock that cannot be expressed as a pin is a thing to tell the user about.
+    ///
+    /// The activity identifiers only. [`StoredPins::unexpressible`] carries the same locks with
+    /// the **cause**, which is what a screen needs to state a remedy; this field is kept
+    /// because M9A's editing session reports a count and nothing more.
     pub not_in_problem: Vec<Uuid>,
+    /// The same locks, each with why the compiled problem cannot represent it.
+    ///
+    /// A repair **refuses** on any of these (M9B §2.2.1): the lock is absent from
+    /// [`StoredPins::pinned`], so nothing would freeze it, and a repair whose scope included
+    /// the occurrence would *move* it. An editor only reports them, which is the deliberate
+    /// asymmetry — it is about to write one row, not a whole new version.
+    pub unexpressible: Vec<UnexpressibleLock>,
+}
+
+/// A lock the compiled problem cannot represent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnexpressibleLock {
+    /// The entry carrying the lock.
+    pub entry_id: Uuid,
+    /// The occurrence it locks.
+    pub activity_id: Uuid,
+    /// Which resolution failed, and what it named.
+    pub cause: UnexpressibleLockCause,
+}
+
+/// Why a lock cannot be expressed as a pin.
+///
+/// Every foreign key on `timetable_entry` is `ON DELETE RESTRICT`, so none of these means the
+/// referenced row was deleted — it still exists. What they mean is that the row is not part of
+/// *this* compiled problem, which is why each remedy names a different thing to change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnexpressibleLockCause {
+    /// The activity is not in this school, cycle and term's problem.
+    ActivityNotInProblem,
+    /// The slot is not in the materialised grid — the realistic case after a grid change.
+    ///
+    /// ADR 0011: materialisation never deletes, it reports orphan candidates and leaves them
+    /// alone, so the `timeslot` row survives while ceasing to be part of the selection's grid.
+    TimeslotNotInProblem {
+        /// The slot the lock names.
+        timeslot_id: Uuid,
+    },
+    /// The room is no longer available to this campus.
+    RoomNotInProblem {
+        /// The room the lock names.
+        room_id: Uuid,
+    },
+}
+
+impl UnexpressibleLockCause {
+    /// A stable key, for a message catalogue and a test that pins the vocabulary.
+    #[must_use]
+    pub const fn key(&self) -> &'static str {
+        match self {
+            Self::ActivityNotInProblem => "activity-not-in-problem",
+            Self::TimeslotNotInProblem { .. } => "timeslot-not-in-problem",
+            Self::RoomNotInProblem { .. } => "room-not-in-problem",
+        }
+    }
 }
 
 impl Timetables<'_> {
@@ -2086,39 +2177,441 @@ impl Timetables<'_> {
     ///
     /// Any SQLite failure, and [`DbError::CorruptIdentifier`] from reading the rows.
     pub fn pins(&self, timetable_id: Uuid, assembly: &Assembly) -> Result<StoredPins> {
-        let entries = self.entries(timetable_id)?;
-        let mut pinned: Vec<Option<Placement>> = Vec::new();
-        let mut locked = 0;
-        let mut not_in_problem = Vec::new();
+        // One body, shared with `repair_baseline`'s snapshot: an entry must never be readable
+        // as an arrangement and unreadable as a pin, and two copies of this resolution is
+        // exactly how that would happen.
+        Ok(project_pins(assembly, &self.entries(timetable_id)?))
+    }
+}
 
-        for entry in entries.iter().filter(|entry| entry.is_locked) {
-            locked += 1;
-            let (Some(activity), Some(timeslot)) = (
-                assembly.index.activity_index(entry.activity_id),
-                assembly.index.timeslot_index(entry.timeslot_id),
-            ) else {
-                not_in_problem.push(entry.activity_id);
-                continue;
-            };
-            let room = entry
-                .room_id
-                .and_then(|room| assembly.index.room_index(room));
-            if entry.room_id.is_some() && room.is_none() {
-                not_in_problem.push(entry.activity_id);
-                continue;
-            }
-            if pinned.is_empty() {
-                pinned = vec![None; assembly.problem.activities.len()];
-            }
-            if let Some(slot) = pinned.get_mut(activity.get()) {
-                *slot = Some(Placement { timeslot, room });
-            }
-        }
+// =======================================================================================
+// Repair: one read for the baseline, one write for the new version
+// =======================================================================================
 
-        Ok(StoredPins {
-            pinned,
-            locked,
-            not_in_problem,
+/// Everything a repair session needs about one timetable, from **one** read.
+///
+/// Composing this from [`Timetables::arrangement`], [`Timetables::pins`],
+/// [`Timetables::entries`] and [`Timetables::arrangement_stamp`] would open four transactions
+/// and read the entry rows three times, so the baseline, the flags and the stamp could describe
+/// three different moments — and the stamp would then be guarding an arrangement that is not
+/// the one the repair was computed from. That is the exact race [`ArrangementStamp`] exists to
+/// close, reintroduced by the way its inputs are gathered. M9B §2.10.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepairBaseline {
+    /// The arrangement, and what could not be read against the problem.
+    pub arrangement: StoredArrangement,
+    /// The locks, as pins, and the ones that cannot be expressed.
+    pub pins: StoredPins,
+    /// The exact `(entry id, rev)` list, for the cross-session guard.
+    pub stamp: ArrangementStamp,
+    /// The per-occurrence flags to carry into the new version, by activity identifier.
+    pub flags: Vec<(Uuid, EntryFlags)>,
+    /// The source timetable's own revision at the moment of this snapshot.
+    pub source_rev: i64,
+}
+
+/// What one repair save writes, beside the outcome.
+#[derive(Debug, Clone, Copy)]
+pub struct RepairSave<'a> {
+    /// The timetable this repair was computed from. Never modified.
+    pub source: Uuid,
+    /// Its revision when the baseline was read.
+    pub expected: i64,
+    /// The watermark and the arrangement stamp, both compared inside the transaction.
+    pub guard: EditGuard<'a>,
+    /// The repaired arrangement and its provenance.
+    pub outcome: &'a SolveOutcome,
+    /// Every violation the reference evaluator found in the **whole** arrangement.
+    pub violations: &'a [Violation],
+    /// The arrangement the repair started from, for the scope check.
+    pub baseline: &'a Assignment,
+    /// What the repair was allowed to move, for the scope check.
+    pub movable: &'a MovableSet,
+    /// The flags to preserve, by activity identifier.
+    pub flags: &'a [(Uuid, EntryFlags)],
+    /// Engine, settings, timings, `kind` and `scope`.
+    pub run: &'a RunProvenance,
+    /// What a human will call the new version.
+    pub name: &'a str,
+}
+
+impl Timetables<'_> {
+    /// Everything a repair needs about one timetable, in one transaction.
+    ///
+    /// # Errors
+    ///
+    /// - [`DbError::NotFound`] if the timetable does not exist.
+    /// - [`DbError::CorruptIdentifier`] if a stored identifier will not parse.
+    pub fn repair_baseline(
+        &self,
+        timetable_id: Uuid,
+        assembly: &Assembly,
+    ) -> Result<RepairBaseline> {
+        self.db.read(|conn| {
+            // ONE read of the entry rows, from which everything else is derived.
+            let entries = read_entries(conn, timetable_id)?;
+            let timetable = read_timetable(conn, timetable_id)?.ok_or(DbError::NotFound {
+                entity: "timetable",
+            })?;
+
+            let arrangement = project_arrangement(assembly, &entries);
+            let pins = project_pins(assembly, &entries);
+            let stamp = stamp_of(&entries);
+            let flags = entries
+                .iter()
+                .map(|entry| {
+                    (
+                        entry.activity_id,
+                        EntryFlags {
+                            is_locked: entry.is_locked,
+                            is_manual: entry.is_manual,
+                        },
+                    )
+                })
+                .collect();
+
+            Ok(RepairBaseline {
+                arrangement,
+                pins,
+                stamp,
+                flags,
+                source_rev: timetable.rev,
+            })
         })
     }
+
+    /// Writes a repaired arrangement as a **new** timetable, never touching the source.
+    ///
+    /// # The scope check, repeated here
+    ///
+    /// `evara-solver` already compared the complete baseline and repaired arrangements before
+    /// returning the outcome. This repeats it, because an outcome that passed in memory and is
+    /// then persisted from a different arrangement would write a timetable nobody checked. One
+    /// implementation — [`frozen_differences`] — called from both places.
+    ///
+    /// # Errors
+    ///
+    /// - [`DbError::NotSaveable`] if the outcome is not a timetable.
+    /// - [`DbError::ScopeViolated`] if any frozen placement differs from the baseline.
+    /// - [`DbError::Invalid`] if the outcome does not describe the assembly.
+    /// - [`DbError::InputsChanged`] if a scheduling input moved since the problem was compiled.
+    /// - [`DbError::ArrangementChanged`] if the baseline was edited since the repair began.
+    /// - [`DbError::Conflict`] if the source timetable's own revision moved.
+    /// - [`DbError::DuplicateValue`] if a timetable of that name already exists for the scope.
+    pub fn save_repaired(
+        &mut self,
+        assembly: &Assembly,
+        save: &RepairSave<'_>,
+    ) -> Result<SavedTimetable> {
+        let outcome = save.outcome;
+        refuse_unsaveable(outcome)?;
+        require_same_problem(assembly, outcome)?;
+        refuse_scope_violation(save.baseline, &outcome.assignment, save.movable)?;
+
+        let app_version = self
+            .db
+            .read(|conn| meta::get(conn, KEY_LAST_OPENED_WITH))?
+            .unwrap_or_else(|| String::from("unknown"));
+        let plan = project_entries(assembly, &outcome.assignment)?;
+        let unplaced = project_unscheduled(assembly, outcome)?;
+        let watermark = assembly.watermark;
+        let selection = assembly.selection;
+        let counts = outcome.unverified;
+        let score = outcome.score;
+        let placed = plan.len();
+        let required = assembly.problem.activities.len();
+        let name = save.name.trim().to_owned();
+        let source = save.source;
+        let expected = save.expected;
+        let guard = save.guard;
+        let flags = save.flags;
+        let run = save.run;
+        let violations = save.violations;
+        let baseline = save.baseline;
+
+        self.db.write(|tx| {
+            // All three preconditions, in the transaction that writes. The watermark and the
+            // stamp are `guard_edit`'s, reused unchanged; the source revision is a snapshot
+            // assertion rather than an ADR 0027 predicate, because a repair never updates the
+            // source row and so has no statement whose WHERE clause could carry it.
+            guard_edit(tx, source, guard.watermark, guard.stamp)?;
+            guard_source_rev(tx, source, expected)?;
+
+            let timetable = insert_timetable(tx, &selection, &name, counts, outcome, Some(source))?;
+            for (activity_id, placement) in &plan {
+                insert_entry(
+                    tx,
+                    timetable.id,
+                    *activity_id,
+                    placement,
+                    carried_flags(flags, *activity_id, baseline, &outcome.assignment, assembly),
+                )?;
+            }
+            let run_row = insert_run(tx, timetable.id, outcome, run, watermark, &app_version)?;
+            for record in &unplaced {
+                insert_unscheduled(tx, run_row.id, record)?;
+            }
+            // GENERATION, not a third kind. This IS the new version's original, immutable
+            // scoring — ADR 0042 §5's meaning — and `timetable_evaluation.kind`'s CHECK admits
+            // only GENERATION and REVALIDATION. `solve_run.kind = 'REPAIR'` is the
+            // discriminator; widening that CHECK would be a rebuild on a STRICT table.
+            let evaluation = insert_evaluation(
+                tx,
+                timetable.id,
+                KIND_GENERATION,
+                Some(run_row.id),
+                watermark,
+                score,
+                placed,
+                required,
+            )?;
+            for violation in violations {
+                insert_violation(tx, evaluation.id, assembly, violation)?;
+            }
+
+            Ok(SavedTimetable {
+                timetable,
+                run: run_row,
+                evaluation,
+                entries: plan.len(),
+                unscheduled: unplaced.len(),
+                violations: violations.len(),
+            })
+        })
+    }
+
+    /// How many timetables were repaired from this one.
+    ///
+    /// For a screen that wants to say so before offering a deletion that would be refused.
+    ///
+    /// # Errors
+    ///
+    /// Propagates any SQLite failure.
+    pub fn descendant_count(&self, timetable_id: Uuid) -> Result<i64> {
+        self.db.read(|conn| {
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM timetable WHERE based_on_timetable_id = ?1",
+                [timetable_id.to_string()],
+                |row| row.get(0),
+            )?)
+        })
+    }
+}
+
+/// The flags to write for one occurrence of a repaired timetable.
+///
+/// `is_locked` is carried across unchanged: a lock is frozen, so it cannot have moved.
+///
+/// `is_manual` is carried for an occurrence the repair left where it was, and **cleared** for
+/// one it moved — the solver chose that placement, not a person. That is the one flag
+/// transition a repair makes, and it is the honest one: M9A established `is_manual` as a record
+/// of who placed a lesson, and a lesson the solver has just re-placed is no longer the human's.
+///
+/// An occurrence the baseline did not hold is new to this version and carries neither flag.
+fn carried_flags(
+    flags: &[(Uuid, EntryFlags)],
+    activity_id: Uuid,
+    baseline: &Assignment,
+    repaired: &Assignment,
+    assembly: &Assembly,
+) -> EntryFlags {
+    let stored = flags
+        .iter()
+        .find(|(id, _)| *id == activity_id)
+        .map(|(_, flags)| *flags);
+    let Some(stored) = stored else {
+        return EntryFlags {
+            is_locked: false,
+            is_manual: false,
+        };
+    };
+    if !stored.is_manual {
+        return stored;
+    }
+    // Did it move? Resolved through the index, because the flags are by identifier and the
+    // arrangements are by dense index.
+    let moved = assembly
+        .index
+        .activity_index(activity_id)
+        .is_some_and(|at| baseline.placement(at) != repaired.placement(at));
+    EntryFlags {
+        is_locked: stored.is_locked,
+        is_manual: !moved,
+    }
+}
+
+/// The scope guarantee, as a precondition of the write.
+fn refuse_scope_violation(
+    baseline: &Assignment,
+    repaired: &Assignment,
+    movable: &MovableSet,
+) -> Result<()> {
+    let found = frozen_differences(baseline, repaired, movable);
+    if found.is_empty() {
+        return Ok(());
+    }
+    Err(DbError::ScopeViolated {
+        mismatches: i64::try_from(found.len()).unwrap_or(i64::MAX),
+        detail: describe_mismatches(&found),
+    })
+}
+
+/// The first few mismatches, for a bug report rather than for a user.
+fn describe_mismatches(found: &[FrozenMismatch]) -> String {
+    found
+        .iter()
+        .take(5)
+        .map(|m| format!("{}: activity {}", m.key(), m.activity().raw()))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// Refuses a deletion that would orphan a lineage edge.
+fn guard_no_descendants(tx: &Transaction<'_>, timetable_id: Uuid) -> Result<()> {
+    let descendants: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM timetable WHERE based_on_timetable_id = ?1",
+        [timetable_id.to_string()],
+        |row| row.get(0),
+    )?;
+    if descendants > 0 {
+        return Err(DbError::HasDescendants {
+            timetables: descendants,
+        });
+    }
+    Ok(())
+}
+
+/// The source timetable's revision, compared inside the writing transaction.
+///
+/// **Not** an ADR 0027 predicate, and the distinction matters enough to name: a repair writes a
+/// *new* timetable and never updates the source row, so there is no statement whose `WHERE`
+/// clause could carry `rev = ?`. What makes this sound is what makes [`guard_freshness`] and
+/// `read_stamp` sound — `Database` owns a single connection, `write` takes `&mut self`, and
+/// SQLite refuses to commit a write upgraded from a stale read. Labelling it honestly matters
+/// because a comment calling it a predicate would invite the pattern being copied to a real
+/// mutation, where it genuinely would be check-then-act.
+///
+/// What it catches is narrow: the source being renamed or deleted between the baseline read and
+/// the save. Its entries moving is the stamp's job, and its inputs moving is the watermark's.
+fn guard_source_rev(tx: &Transaction<'_>, timetable_id: Uuid, expected: i64) -> Result<()> {
+    let found: Option<i64> = tx
+        .query_row(
+            "SELECT rev FROM timetable WHERE id = ?1",
+            [timetable_id.to_string()],
+            |row| row.get(0),
+        )
+        .optional()?;
+    match found {
+        None => Err(DbError::NotFound {
+            entity: "timetable",
+        }),
+        Some(rev) if rev != expected => Err(DbError::Conflict {
+            entity: "timetable",
+            expected,
+            actual: rev,
+        }),
+        Some(_) => Ok(()),
+    }
+}
+
+/// The arrangement of one already-read entry list.
+fn project_arrangement(assembly: &Assembly, entries: &[TimetableEntry]) -> StoredArrangement {
+    let mut assignment = Assignment::empty(assembly.problem.activities.len());
+    let mut unknown = Vec::new();
+
+    for entry in entries {
+        match resolve_entry(assembly, entry) {
+            Some((activity, placement)) => {
+                assignment.place(activity, placement);
+            }
+            None => unknown.push(entry.activity_id),
+        }
+    }
+
+    StoredArrangement {
+        assignment,
+        entries: entries.len(),
+        not_in_problem: unknown,
+    }
+}
+
+/// The pins of one already-read entry list, with the cause of each unexpressible lock.
+fn project_pins(assembly: &Assembly, entries: &[TimetableEntry]) -> StoredPins {
+    let mut pinned: Vec<Option<Placement>> = Vec::new();
+    let mut locked = 0;
+    let mut not_in_problem = Vec::new();
+    let mut unexpressible = Vec::new();
+
+    for entry in entries.iter().filter(|entry| entry.is_locked) {
+        locked += 1;
+        match lock_cause(assembly, entry) {
+            Err(cause) => {
+                not_in_problem.push(entry.activity_id);
+                unexpressible.push(UnexpressibleLock {
+                    entry_id: entry.id,
+                    activity_id: entry.activity_id,
+                    cause,
+                });
+            }
+            Ok((activity, placement)) => {
+                if pinned.is_empty() {
+                    pinned = vec![None; assembly.problem.activities.len()];
+                }
+                if let Some(slot) = pinned.get_mut(activity.get()) {
+                    *slot = Some(placement);
+                }
+            }
+        }
+    }
+
+    StoredPins {
+        pinned,
+        locked,
+        not_in_problem,
+        unexpressible,
+    }
+}
+
+/// One entry as a dense placement, or `None` when the problem does not hold what it names.
+fn resolve_entry(
+    assembly: &Assembly,
+    entry: &TimetableEntry,
+) -> Option<(evara_core::scheduling::ActivityIx, Placement)> {
+    lock_cause(assembly, entry).ok()
+}
+
+/// One entry as a dense placement, or **why** the problem cannot express it.
+///
+/// The single resolution both [`project_arrangement`] and [`project_pins`] use, so an entry is
+/// never readable as an arrangement and unreadable as a pin.
+fn lock_cause(
+    assembly: &Assembly,
+    entry: &TimetableEntry,
+) -> std::result::Result<(evara_core::scheduling::ActivityIx, Placement), UnexpressibleLockCause> {
+    let activity = assembly
+        .index
+        .activity_index(entry.activity_id)
+        .ok_or(UnexpressibleLockCause::ActivityNotInProblem)?;
+    let timeslot = assembly.index.timeslot_index(entry.timeslot_id).ok_or(
+        UnexpressibleLockCause::TimeslotNotInProblem {
+            timeslot_id: entry.timeslot_id,
+        },
+    )?;
+    let room = match entry.room_id {
+        None => None,
+        Some(named) => Some(
+            assembly
+                .index
+                .room_index(named)
+                .ok_or(UnexpressibleLockCause::RoomNotInProblem { room_id: named })?,
+        ),
+    };
+    Ok((activity, Placement { timeslot, room }))
+}
+
+/// The `(entry id, rev)` stamp of one already-read entry list.
+fn stamp_of(entries: &[TimetableEntry]) -> ArrangementStamp {
+    let mut pairs: Vec<(Uuid, i64)> = entries.iter().map(|e| (e.id, e.rev)).collect();
+    pairs.sort_unstable_by_key(|(id, _)| *id);
+    ArrangementStamp { entries: pairs }
 }

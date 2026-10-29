@@ -147,6 +147,7 @@ fn write_all() -> (Vec<Generated>, Vec<String>) {
         time_model_and_interface(),
         spreadsheet_import(),
         timetables(),
+        repair(),
     ] {
         files.extend(more_files);
         errors.extend(more_errors);
@@ -663,5 +664,47 @@ fn timetables() -> (Vec<Generated>, Vec<String>, BTreeSet<(PathBuf, String)>) {
         // Shared with the solver's own vocabulary: never omitted from a timetable's
         // description, so never omitted from its type.
         UnverifiedCounts,
+    ]
+}
+
+/// Automated repair and partial regeneration — Phase 8B.
+///
+/// Its own group because the whole of M9B crosses the boundary together: the scope the user
+/// chose, the pre-flight that may refuse it, the session's phase, and the diff they approve
+/// before anything is written.
+///
+/// Note what is **not** here. `MovableSet` stays in Rust: it is dense activity indices, which
+/// are meaningful only inside the one problem that assigned them — the same reason the grid
+/// projection addresses everything by stored identifier. And `Score` does not cross either;
+/// [`ScoreLine`] is the flat three-integer view, so the interface never has to reimplement a
+/// lexicographic comparison to tell whether a repair improved anything.
+fn repair() -> (Vec<Generated>, Vec<String>, BTreeSet<(PathBuf, String)>) {
+    // Fully qualified rather than imported: `contract!` names each type inside a macro
+    // expansion, which clippy's unused-import analysis cannot see through.
+    use evara_desktop_lib::commands::repair as cmd;
+    use evara_report::repair as view;
+
+    contract![
+        evara_core::scheduling::RepairScope,
+        cmd::RepairScopes,
+        cmd::ScopeOption,
+        cmd::RepairPreflight,
+        cmd::PreflightFinding,
+        cmd::RepairStarted,
+        cmd::RepairStatus,
+        evara_desktop_lib::commands::repair_session::RepairPhase,
+        cmd::RepairResult,
+        cmd::RepairApplied,
+        cmd::RepairProgressEvent,
+        cmd::RepairFinishedEvent,
+        // The diff, which is a projection in the same sense the grid is.
+        view::RepairDiff,
+        view::ScoreLine,
+        view::OccurrenceChange,
+        view::ChangeKind,
+        view::ChangeCounts,
+        view::MovedParts,
+        view::PlacementView,
+        view::Attribution,
     ]
 }

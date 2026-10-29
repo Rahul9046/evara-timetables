@@ -53,7 +53,8 @@
 
 use evara_constraints::{IncrementalScorer, PlacementVerdict};
 use evara_core::scheduling::{
-    ActivityIx, CompiledConstraint, Placement, Problem, SolveStatistics, Termination, UnplacedCause,
+    ActivityIx, Assignment, CompiledConstraint, MovableSet, Placement, Problem, SolveStatistics,
+    Termination, UnplacedCause, repair::frozen_only,
 };
 
 use crate::candidates::{
@@ -72,8 +73,32 @@ pub(crate) struct Construction<'p> {
     pub(crate) statistics: SolveStatistics,
     /// Every occurrence that is not placed, and the most specific cause known for it.
     ///
-    /// In activity-index order, so a report is deterministic.
+    /// In activity-index order, so a report is deterministic. For a **repair** this covers the
+    /// movable set only — a frozen occurrence that was unplaced in the baseline is not this
+    /// run's failure and is not reported as one.
     pub(crate) unplaced: Vec<(ActivityIx, UnplacedCause)>,
+    /// How many frozen occurrences were placed when the run started.
+    ///
+    /// Zero for a generation. For a repair it is compared with the figure at the end, which is
+    /// the scope guarantee as an assertion rather than a promise.
+    pub(crate) frozen_placed_at_start: usize,
+    /// How many of the attempted occurrences ended placed.
+    pub(crate) attempted_placed: usize,
+    /// How many occurrences the run was allowed to attempt.
+    pub(crate) attempted_total: usize,
+}
+
+/// What a repair run may move, and what it must start from.
+///
+/// `baseline` is the arrangement as stored; the working arrangement is derived from it by
+/// [`frozen_only`] and is **not** the baseline itself. See `M9B-REPAIR-PROPOSAL.md` §2.8 for why
+/// starting from the full baseline is wrong three separate ways.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Repair<'a> {
+    /// The arrangement to preserve outside the scope, and to prefer inside it.
+    pub(crate) baseline: &'a Assignment,
+    /// The occurrences the run may place. Everything else is frozen.
+    pub(crate) movable: &'a MovableSet,
 }
 
 /// Everything precomputed per occurrence, once, before the first placement.
@@ -89,6 +114,140 @@ struct Prepared {
     duration: usize,
     /// Whether it is pinned, and so placed first and never moved.
     pinned: Option<Placement>,
+    /// Where it is in the baseline, for a repair run.
+    ///
+    /// Tried **first**, before the seeded walk, so an occurrence whose placement is still legal
+    /// does not move — `M9B-REPAIR-PROPOSAL.md` §2.3. `None` for a generation, and for a repair
+    /// of an occurrence the baseline left unplaced.
+    ///
+    /// There is deliberately no `frozen` flag beside it: a frozen occurrence never reaches
+    /// `Prepared`, because [`prepare`] filters the order to the movable set.
+    baseline: Option<Placement>,
+}
+
+/// What stays the same across every pass, bundled so [`run_pass`] takes five arguments.
+struct Pass<'a, 'p> {
+    problem: &'p Problem,
+    config: &'a SolveConfig,
+    cancel: &'a dyn Cancel,
+    progress: &'a dyn ProgressSink,
+    /// The problem's occurrence count, for the progress sink's denominator.
+    total: usize,
+}
+
+/// What one retry pass established.
+struct PassOutcome<'a> {
+    /// Occurrences to try again next pass.
+    still_pending: Vec<&'a Prepared>,
+    /// The most recent refusal of each, and `NotReached` for a tail a stop never reached.
+    refusals: Vec<(ActivityIx, UnplacedCause)>,
+    /// How many were placed, which is what decides whether another pass is worth running.
+    placed: usize,
+    /// Why the pass stopped early, where it did.
+    stopped: Option<Termination>,
+}
+
+/// One sweep over the pending occurrences.
+///
+/// Extracted from [`construct`] so each stays readable; the behaviour is M6's unchanged, and the
+/// repair's only contribution is that `queue` was filtered to the movable set by [`prepare`].
+fn run_pass<'a, 'p>(
+    ctx: &Pass<'_, 'p>,
+    cache: &mut RunCache,
+    scorer: &mut IncrementalScorer<'p>,
+    statistics: &mut SolveStatistics,
+    queue: &[&'a Prepared],
+) -> PassOutcome<'a> {
+    let mut out = PassOutcome {
+        still_pending: Vec::new(),
+        refusals: Vec::new(),
+        placed: 0,
+        stopped: None,
+    };
+
+    for (at, prepared) in queue.iter().copied().enumerate() {
+        if ctx.cancel.is_cancelled() {
+            out.stopped = Some(Termination::Cancelled);
+        } else if statistics.construction_steps >= ctx.config.limits.max_construction_steps {
+            out.stopped = Some(Termination::StepLimitReached);
+        } else {
+            statistics.construction_steps += 1;
+            match place_one(ctx.problem, cache, scorer, statistics, ctx.config, prepared) {
+                Attempt::Placed => {
+                    statistics.placements_committed += 1;
+                    out.placed += 1;
+                }
+                Attempt::Refused(cause) => {
+                    out.refusals.push((prepared.activity, cause));
+                    out.still_pending.push(prepared);
+                }
+                Attempt::OutOfBudget => out.stopped = Some(Termination::CandidateLimitReached),
+            }
+            ctx.progress.placed(
+                scorer.placed_count(),
+                ctx.total,
+                statistics.construction_steps,
+            );
+        }
+
+        if out.stopped.is_some() {
+            // This occurrence and **every one after it**. Nothing was established about any of
+            // them, and a report that silently omitted the tail would be the engine bounding
+            // its coverage without saying so.
+            out.refusals.extend(not_reached(&queue[at..]));
+            out.still_pending.extend(queue[at..].iter().copied());
+            break;
+        }
+    }
+
+    out
+}
+
+/// The accounting every run must satisfy, whatever it reached.
+///
+/// M6's invariant -- `unplaced.len() + placed_count() == total` -- is **false** for a repair
+/// whose frozen set contains an unplaced occurrence, which is an entirely ordinary state: an
+/// out-of-scope lesson the source timetable never scheduled is neither placed nor this run's
+/// failure. So the accounting is asserted over what the run was allowed to touch, and the scope
+/// guarantee is asserted beside it.
+///
+/// The full placement-by-placement comparison is
+/// `evara_core::scheduling::repair::frozen_differences`, which the caller runs and which is the
+/// authority; this is the cheap count that catches a gross failure here, at the source.
+fn assert_accounting(
+    unplaced: usize,
+    attempted_placed: usize,
+    attempted_total: usize,
+    placed_now: usize,
+    frozen_placed_at_start: usize,
+) {
+    debug_assert_eq!(
+        unplaced + attempted_placed,
+        attempted_total,
+        "every attempted occurrence is either placed or reported as unplaced"
+    );
+    debug_assert_eq!(
+        placed_now - attempted_placed,
+        frozen_placed_at_start,
+        "a repair placed or dropped a frozen occurrence"
+    );
+}
+
+/// The scorer a run begins with.
+///
+/// `Some(working)` is a repair, and a `None` from [`IncrementalScorer::of`] is a **refusal**
+/// rather than a fall back to `empty`: a repair that quietly started from an empty arrangement
+/// would regenerate the whole timetable while reporting itself as a repair, which is the most
+/// destructive thing this module could do.
+fn starting_scorer<'p>(
+    problem: &'p Problem,
+    constraints: &[CompiledConstraint],
+    working: Option<&Assignment>,
+) -> Option<IncrementalScorer<'p>> {
+    match working {
+        Some(start) => IncrementalScorer::of(problem, start, constraints),
+        None => Some(IncrementalScorer::empty(problem, constraints)),
+    }
 }
 
 /// Runs the construction phase.
@@ -102,13 +261,30 @@ pub(crate) fn construct<'p>(
     config: &SolveConfig,
     cancel: &dyn Cancel,
     progress: &dyn ProgressSink,
-) -> Construction<'p> {
+    repair: Option<&Repair<'_>>,
+) -> Option<Construction<'p>> {
     let mut cache = RunCache::default();
-    let mut scorer = IncrementalScorer::empty(problem, constraints);
-    let mut statistics = SolveStatistics::default();
     let total = problem.activities.len();
 
-    let order = prepare(problem, &mut cache, config);
+    // A repair starts from the FROZEN placements alone. Not from the baseline: every movable
+    // occurrence must be absent, or each one would be reconsidered against the stale positions
+    // of the others, and a pre-existing movable-to-movable clash would refuse both of them —
+    // `PlacementVerdict::allowed` is false whenever the result *carries* a hard violation
+    // naming the occurrence, not only when it adds one. `M9B-REPAIR-PROPOSAL.md` §2.8.
+    let working = repair.map(|r| frozen_only(r.baseline, r.movable));
+    let mut scorer = starting_scorer(problem, constraints, working.as_ref())?;
+    let frozen_placed_at_start = scorer.placed_count();
+    let mut statistics = SolveStatistics::default();
+
+    let ctx = Pass {
+        problem,
+        config,
+        cancel,
+        progress,
+        total,
+    };
+
+    let order = prepare(problem, &mut cache, config, repair);
     // Occurrences whose value range is empty cannot be placed by any arrangement, so they are
     // settled before the first candidate is tested and never retried. Keeping them in the retry
     // set would cost a sweep per pass to reach the same answer.
@@ -141,57 +317,18 @@ pub(crate) fn construct<'p>(
 
         // Taken rather than iterated in place, so a stop can put the untouched tail back.
         let queue = std::mem::take(&mut pending);
-        let mut still_pending: Vec<&Prepared> = Vec::new();
-        let mut placed_this_pass = 0_usize;
-        let mut stopped: Option<Termination> = None;
+        let pass = run_pass(&ctx, &mut cache, &mut scorer, &mut statistics, &queue);
 
-        for (at, prepared) in queue.iter().copied().enumerate() {
-            if cancel.is_cancelled() {
-                stopped = Some(Termination::Cancelled);
-            } else if statistics.construction_steps >= config.limits.max_construction_steps {
-                stopped = Some(Termination::StepLimitReached);
-            } else {
-                statistics.construction_steps += 1;
-                match place_one(
-                    problem,
-                    &mut cache,
-                    &mut scorer,
-                    &mut statistics,
-                    config,
-                    prepared,
-                ) {
-                    Attempt::Placed => {
-                        statistics.placements_committed += 1;
-                        placed_this_pass += 1;
-                    }
-                    Attempt::Refused(cause) => {
-                        refusals.push((prepared.activity, cause));
-                        still_pending.push(prepared);
-                    }
-                    Attempt::OutOfBudget => stopped = Some(Termination::CandidateLimitReached),
-                }
-                progress.placed(scorer.placed_count(), total, statistics.construction_steps);
-            }
-
-            if stopped.is_some() {
-                // This occurrence and **every one after it**. Nothing was established about any
-                // of them, and a report that silently omitted the tail would be the engine
-                // bounding its coverage without saying so.
-                refusals.extend(not_reached(&queue[at..]));
-                still_pending.extend(queue[at..].iter().copied());
-                break;
-            }
-        }
-
-        pending = still_pending;
-        if let Some(reason) = stopped {
+        refusals.extend(pass.refusals);
+        pending = pass.still_pending;
+        if let Some(reason) = pass.stopped {
             termination = reason;
             break;
         }
         // A pass that placed nothing cannot be improved on by repeating it: the arrangement is
         // unchanged and the candidate order is a pure function of the seed, so the next pass
         // would make the identical decisions. This is the fixed point that ends the loop.
-        if placed_this_pass == 0 {
+        if pass.placed == 0 {
             break;
         }
         refusals.clear();
@@ -209,22 +346,32 @@ pub(crate) fn construct<'p>(
     }
     unplaced.sort_by_key(|(at, _)| at.raw());
     unplaced.dedup_by_key(|(at, _)| *at);
-    debug_assert_eq!(
-        unplaced.len() + scorer.placed_count(),
-        total,
-        "every occurrence is either placed or reported as unplaced"
+
+    // How many occurrences this run was allowed to attempt, and how many of those it placed.
+    // For a generation that is the whole problem; for a repair it is the movable set.
+    let attempted_total = repair.map_or(total, |r| r.movable.len());
+    let attempted_placed = scorer.placed_count().saturating_sub(frozen_placed_at_start);
+    assert_accounting(
+        unplaced.len(),
+        attempted_placed,
+        attempted_total,
+        scorer.placed_count(),
+        frozen_placed_at_start,
     );
 
     if scorer.placed_count() == total {
         termination = Termination::Complete;
     }
 
-    Construction {
+    Some(Construction {
         scorer,
         termination,
         statistics,
         unplaced,
-    }
+        frozen_placed_at_start,
+        attempted_placed,
+        attempted_total,
+    })
 }
 
 /// How one attempt at one occurrence ended.
@@ -275,6 +422,25 @@ fn place_one(
             }
             verdict => Attempt::Refused(cause_of(&verdict)),
         };
+    }
+
+    // The baseline placement, tried before the seeded walk. If it is still legal the
+    // first-feasible rule takes it and the occurrence does not move -- which is the whole of
+    // "prefer existing placements", with no score change and no new rule
+    // (`M9B-REPAIR-PROPOSAL.md` §2.3).
+    //
+    // Deliberately NOT budget-checked, exactly as the pinned branch above is not: this is the
+    // one candidate the caller already chose, and refusing it for budget would displace a
+    // lesson that was legally where it already was. The cost is one evaluation per in-scope
+    // occurrence, which is why a repair's counters are not comparable to a generation's.
+    if let Some(at) = prepared.baseline {
+        statistics.candidate_evaluations += 1;
+        let verdict = scorer.probe(prepared.activity, at);
+        if verdict.allowed {
+            scorer.place(prepared.activity, at);
+            return Attempt::Placed;
+        }
+        statistics.candidates_rejected += 1;
     }
 
     let Some(fact) = problem.activities.get(prepared.activity.get()) else {
@@ -384,10 +550,20 @@ fn not_reached(pending: &[&Prepared]) -> Vec<(ActivityIx, UnplacedCause)> {
 }
 
 /// Measures every occurrence and sorts them hardest first.
-fn prepare(problem: &Problem, cache: &mut RunCache, config: &SolveConfig) -> Vec<Prepared> {
+fn prepare(
+    problem: &Problem,
+    cache: &mut RunCache,
+    config: &SolveConfig,
+    repair: Option<&Repair<'_>>,
+) -> Vec<Prepared> {
     let degrees = conflict_degrees(problem);
     let mut prepared: Vec<Prepared> = problem
         .activity_indices()
+        // A frozen occurrence is **absent** from the order rather than sorted to the front of
+        // it. It is already in the starting arrangement, every rule can see it, and it is never
+        // attempted -- so there is nothing for the walk to do with it. `constrainedness`' first
+        // key is therefore inert during a repair, because every pinned occurrence is frozen.
+        .filter(|activity| repair.is_none_or(|r| r.movable.contains(*activity)))
         .map(|activity| Prepared {
             activity,
             range: value_range(problem, cache, activity),
@@ -397,6 +573,7 @@ fn prepare(problem: &Problem, cache: &mut RunCache, config: &SolveConfig) -> Vec
                 .get(activity.get())
                 .map_or(1, |fact| fact.duration.as_usize()),
             pinned: problem.pinned.get(activity.get()).copied().flatten(),
+            baseline: repair.and_then(|r| r.baseline.placement(activity)),
         })
         .collect();
 

@@ -612,6 +612,17 @@ fn unsaveable_reason(outcome: &SolveOutcome) -> Option<&'static str> {
 #[derive(Debug, Clone)]
 pub struct CancelFlag(Arc<AtomicBool>);
 
+impl CancelFlag {
+    /// Wraps an existing flag.
+    ///
+    /// For the repair session, which has its own lifecycle but the same cancellation contract:
+    /// a request that sets a flag and changes no state.
+    #[must_use]
+    pub const fn from_flag(flag: Arc<AtomicBool>) -> Self {
+        Self(flag)
+    }
+}
+
 impl Cancel for CancelFlag {
     fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::SeqCst)
@@ -631,17 +642,33 @@ impl Cancel for CancelFlag {
 /// The clock read here is the *caller's*, which is the division `SOLVER.md` §5 requires: the
 /// engine reads no clock, so the same seed still stops in the same place.
 pub struct CoalescingSink<F> {
-    life: Arc<Lifecycle>,
+    life: Arc<dyn ProgressReporter>,
     emit: F,
     last: Mutex<Option<std::time::Instant>>,
+}
+
+/// Somewhere a sink can record progress.
+///
+/// A trait rather than a concrete lifecycle so the coalescing logic -- which is the part worth
+/// getting right once -- is shared by the generation and the repair sessions. A second copy of
+/// the interval arithmetic is exactly the kind of duplication `CLAUDE.md` §2 is about.
+pub trait ProgressReporter: Send + Sync {
+    /// Records the latest progress.
+    fn report(&self, progress: Progress);
+}
+
+impl ProgressReporter for Lifecycle {
+    fn report(&self, progress: Progress) {
+        Self::report(self, progress);
+    }
 }
 
 impl<F: Fn(Progress)> CoalescingSink<F> {
     /// The shortest gap between two emitted progress events.
     pub const INTERVAL_MS: u128 = 50;
 
-    /// Wraps a lifecycle and an emitter.
-    pub fn new(life: Arc<Lifecycle>, emit: F) -> Self {
+    /// Wraps a reporter and an emitter.
+    pub fn new(life: Arc<dyn ProgressReporter>, emit: F) -> Self {
         Self {
             life,
             emit,

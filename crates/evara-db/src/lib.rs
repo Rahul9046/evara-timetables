@@ -118,10 +118,11 @@ pub use crate::repo::time_model::{
     TimeslotInput, WeeklyCycleDay,
 };
 pub use crate::repo::timetables::{
-    AppliedEdit, ArrangementStamp, DeletedTimetable, DuplicatedTimetable, EditGuard,
-    EntryPlacement, KIND_GENERATION, KIND_REVALIDATION, RunProvenance, SavedTimetable, Scoring,
-    SolveRun, StoredArrangement, StoredPins, StoredViolation, StoredViolationRef, Timetable,
-    TimetableEntry, TimetableEvaluation, Timetables, UnscheduledRecord,
+    AppliedEdit, ArrangementStamp, DeletedTimetable, DuplicatedTimetable, EditGuard, EntryFlags,
+    EntryPlacement, KIND_GENERATION, KIND_REVALIDATION, RUN_GENERATION, RUN_REPAIR, RepairBaseline,
+    RepairSave, RunProvenance, SavedTimetable, Scoring, SolveRun, StoredArrangement, StoredPins,
+    StoredViolation, StoredViolationRef, Timetable, TimetableEntry, TimetableEvaluation,
+    Timetables, UnexpressibleLock, UnexpressibleLockCause, UnscheduledRecord,
 };
 pub use crate::repo::{Expected, Stamp};
 pub use crate::scheduling::{
@@ -623,6 +624,9 @@ mod tests_views;
 /// Manual editing: place, move, unschedule, lock, duplicate, and the three guards.
 #[cfg(test)]
 mod tests_editing;
+
+#[cfg(test)]
+mod tests_repair;
 
 #[cfg(test)]
 mod tests_setup;

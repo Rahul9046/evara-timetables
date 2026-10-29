@@ -338,12 +338,19 @@ describe("this screen stays read-only", () => {
     expect(document.querySelectorAll("[aria-dropeffect]")).toHaveLength(0);
   });
 
-  it("offers no move, lock or repair action of its own", async () => {
+  it("performs no scheduling action of its own", async () => {
     renderList("tt-1");
     await screen.findByText("As generated");
-    for (const forbidden of [/move/i, /lock/i, /repair/i, /drag/i]) {
+    // Still read-only: nothing here moves a lesson, locks one or drags one. Since M9B it
+    // hands over to a *repair session* as it already hands over to the editor -- which is
+    // the opposite of becoming writable, because the session compiles its own problem and
+    // takes its own baseline snapshot.
+    for (const forbidden of [/^move/i, /lock/i, /drag/i]) {
       expect(screen.queryByRole("button", { name: forbidden })).toBeNull();
     }
+    expect(
+      screen.getByRole("button", { name: "Repair this timetable" }),
+    ).toBeTruthy();
   });
 });
 
@@ -383,8 +390,13 @@ describe("the hand-over to the editor", () => {
       "disabled",
       true,
     );
+    // Repair needs the same compiled problem, and is refused for the same reason.
+    expect(screen.getByRole("button", { name: "Repair this timetable" })).toHaveProperty(
+      "disabled",
+      true,
+    );
     expect(
-      screen.getByText(/there is nothing to check an edit against/),
+      screen.getByText(/there is nothing to check an edit or a\s+repair against/),
     ).toBeTruthy();
   });
 });

@@ -404,19 +404,64 @@ The frontend renders and localises; it does not author the reason.
 
 ## 7. Repair and partial regeneration
 
-Both are the same mechanism: solve with `start = Some(current)` plus two extras.
+> **Amended by M9B.** This section's sketch was wrong in three places, each corrected by an
+> accepted record. What is below is what shipped —
+> [TIMETABLE-REPAIR.md](TIMETABLE-REPAIR.md) is the full account, and
+> [adr/0048](adr/0048-repair-scope-is-a-movable-set.md),
+> [adr/0049](adr/0049-a-repairs-verification-is-scope-aware.md) and
+> [adr/0051](adr/0051-baseline-preference-is-candidate-ordering.md) are the decisions.
 
-1. **A scope filter.** Only activities in the selected scope (a term, a year level, a
-   teacher's load, an explicit selection) are movable; everything else is treated as
-   pinned for this run. That *is* partial regeneration.
-2. **A disruption penalty.** A built-in `MEDIUM`-level constraint (`OPS-001`,
-   `minimise-disruption`) penalises every activity whose placement differs from the
-   baseline, weighted higher for already-published timetables. The solver then prefers
-   the smallest edit that fixes the problem rather than a different-but-equally-good
-   timetable, which is what makes repair acceptable to a school mid-term.
+Both are the same mechanism: a solve that starts from an existing arrangement, with a scope and
+a preference.
 
-Disruption weight is user-facing: "keep the current timetable as much as possible" ↔
-"find the best timetable".
+1. **A movable set, not a scope filter of pins.** The solver receives the baseline and the set
+   of activities it may place; everything else is **frozen** — in the arrangement, visible to
+   every constraint, never a candidate. *The scope limits what may move; it does not limit what
+   is checked.*
+
+   The original wording — *"everything else is treated as pinned for this run"* — cannot work.
+   `place_one`'s pinned branch reports an impossible pin rather than forcing it, which is right
+   for a lock and fatal for a scope: two out-of-scope placements that already clash make the
+   second probe fail, and the repair drops a placement it promised not to touch. Since a
+   timetable being repaired usually *has* clashes, that is the common case.
+   [adr/0048](adr/0048-repair-scope-is-a-movable-set.md).
+
+   The six scopes are whole-timetable, class section, teacher, room, cycle day and an explicit
+   selection. A **term** is not among them: a timetable is already per `(cycle, term)`, so a
+   term is either the whole timetable or a different one. A **year level** is a derived set and
+   was not included.
+
+   Only the whole-timetable scope is closed under the constraints. For the others, fixing an
+   in-scope occurrence may need an out-of-scope one moved, and the repair reports the in-scope
+   occurrence as unplaced rather than reaching outside its scope — never widening the set the
+   user chose.
+
+2. **The baseline is tried first, not penalised against.** For each in-scope occurrence with a
+   baseline placement, that placement is probed **before** the seeded walk. Because the walk is
+   first-feasible, an occurrence whose placement is still legal does not move — which is the
+   whole of "prefer the existing timetable", with no score change and no new rule.
+
+   `minimise-disruption` (`OPS-001`) is **not** implemented, and waits for local search: a
+   baseline is problem-sized per-activity data with nowhere to live in `params`, a
+   baseline-relative penalty would make a repaired timetable's score incomparable with a
+   generated one's, and first-feasible greedy does not consult `delta` anyway.
+   [adr/0051](adr/0051-baseline-preference-is-candidate-ordering.md).
+
+   **This gives no minimal-disruption guarantee**, and cannot: once an occurrence is displaced,
+   the ones placed after it see a different timetable and greedy construction cannot reconsider.
+   Every record and every screen says so.
+
+3. **The verification is scope-aware.** A repair does **not** go through `status_of`, whose
+   first line gates on whole-arrangement feasibility — which is false for every timetable a
+   repair exists to fix, and would have reported each one as an internal defect. In its place:
+   the complete baseline-versus-repaired comparison over every frozen occurrence, the same
+   narrowed to locks, readability, no hard violation involving a movable occurrence, and the
+   frozen-only hard set unchanged.
+   [adr/0049](adr/0049-a-repairs-verification-is-scope-aware.md).
+
+A disruption *weight* — "keep the current timetable as much as possible" ↔ "find the best
+timetable" — remains a reasonable user-facing control, and arrives with the local search that
+can honour it.
 
 ---
 

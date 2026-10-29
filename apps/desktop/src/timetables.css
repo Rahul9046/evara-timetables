@@ -781,3 +781,195 @@
     flex: 1 1 160px;
   }
 }
+
+/* ---------------------------------------------------------------- repair (M9B)
+ *
+ * The scope picker is a real radio group, so the selected state is carried by the input's
+ * own :checked rather than by a class the keyboard cannot reach. Every count is text before
+ * it is a colour, and the change column carries its word as well as its tint -- a row a
+ * screen reader meets must not depend on the tint to be understood.
+ */
+
+.ttRepairHead {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ttRepairLead {
+  margin: 0;
+  max-width: 76ch;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.ttRepairScopes {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.ttRepairScopes legend {
+  padding: 0 6px;
+  font-weight: 600;
+}
+
+.ttRepairScopeList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 22rem;
+  overflow-y: auto;
+}
+
+.ttRepairScope {
+  display: grid;
+  grid-template-columns: auto 10rem 1fr auto;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.ttRepairScope:hover {
+  background: var(--surface-hover);
+}
+
+/* The selected row, driven by the input rather than by a class: a keyboard arrow-key move
+ * changes :checked, and styling off the class would have left the highlight behind. */
+.ttRepairScope:has(input:checked) {
+  background: var(--surface-selected, var(--surface-hover));
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.ttRepairScopeKind {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.ttRepairScopeLabel {
+  font-size: 13px;
+}
+
+.ttRepairScopeCounts {
+  font-size: 12px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.ttRepairWarnings,
+.ttRepairFindings {
+  margin: 0;
+  padding-left: 1.2rem;
+  max-width: 82ch;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.ttRepairFindingRemedy {
+  color: var(--text-muted);
+}
+
+.ttRepairActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.ttRepairProgress {
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 6px;
+}
+
+.ttRepairHint {
+  margin: 0;
+  max-width: 76ch;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.ttRepairCounts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+
+.ttRepairCounts dt {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ttRepairCounts dd {
+  margin: 0;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ttRepairScore,
+.ttRepairChanges {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.ttRepairScore th,
+.ttRepairScore td,
+.ttRepairChanges th,
+.ttRepairChanges td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border-faint, var(--border));
+  text-align: left;
+  vertical-align: baseline;
+}
+
+.ttRepairScore td,
+.ttRepairChanges td {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Wide content scrolls inside its own container, so the page body never scrolls sideways. */
+.ttRepairTableWrap {
+  overflow-x: auto;
+}
+
+.ttRepairChanges {
+  width: 100%;
+  min-width: 44rem;
+}
+
+/* A tint, never the only signal: the Change column says the word too. */
+.ttRepairChange--moved {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.ttRepairChange--newlyScheduled {
+  background: color-mix(in srgb, var(--ok, green) 7%, transparent);
+}
+
+.ttRepairChange--unscheduled {
+  background: color-mix(in srgb, var(--warn, orange) 9%, transparent);
+}
+
+.ttRepairLocked {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.ttRepairName {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 32rem;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
