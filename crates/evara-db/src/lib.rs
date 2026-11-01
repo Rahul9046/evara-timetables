@@ -63,6 +63,7 @@ mod migrations;
 pub mod repo;
 pub mod scheduling;
 pub mod settings;
+pub mod transfer;
 pub mod workspace;
 
 use std::path::{Path, PathBuf};
@@ -596,6 +597,9 @@ mod tests_support;
 mod tests;
 
 #[cfg(test)]
+mod tests_backup;
+
+#[cfg(test)]
 mod tests_concurrency;
 
 #[cfg(test)]
@@ -630,6 +634,9 @@ mod tests_repair;
 
 #[cfg(test)]
 mod tests_setup;
+
+#[cfg(test)]
+mod tests_site_id_function;
 
 #[cfg(test)]
 mod tests_walkthrough;

@@ -19,6 +19,7 @@ use uuid::Uuid;
 use crate::connection;
 use crate::error::{DbError, Result};
 use crate::meta::now_iso8601;
+use crate::transfer::replacement::{PendingReplacement, ReplacementPhase};
 
 mod embedded {
     refinery::embed_migrations!("settings-migrations");
@@ -202,6 +203,159 @@ impl Settings {
             [path_key(path)],
         )?;
         Ok(removed > 0)
+    }
+
+    // ---------------------------------------------- the replacement recovery journal (V2)
+
+    /// Opens a replacement journal row at [`ReplacementPhase::Staged`].
+    ///
+    /// Committed **before** the protocol touches anything outside its staging directory, so
+    /// a crash from this point on is recoverable rather than mysterious.
+    ///
+    /// # Errors
+    ///
+    /// [`DbError::DuplicateValue`] if a replacement of the same destination is already in
+    /// flight. Two concurrent replacements of one file is not a state the protocol has an
+    /// answer for, so the uniqueness index turns it into a refusal instead of a race.
+    pub fn begin_replacement(
+        &mut self,
+        destination: &Path,
+        staging_dir: &Path,
+    ) -> Result<PendingReplacement> {
+        let now = now_iso8601();
+        let row = PendingReplacement {
+            id: Uuid::now_v7(),
+            phase: ReplacementPhase::Staged,
+            destination: destination.to_path_buf(),
+            staging_dir: staging_dir.to_path_buf(),
+            keep_name: None,
+            started_at: now.clone(),
+            updated_at: now,
+        };
+
+        self.conn
+            .execute(
+                "INSERT INTO pending_replacement
+                     (id, phase, destination, staging_dir, keep_name, started_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6)",
+                (
+                    row.id.to_string(),
+                    row.phase.as_str(),
+                    row.destination.to_string_lossy().as_ref(),
+                    row.staging_dir.to_string_lossy().as_ref(),
+                    &row.started_at,
+                    &row.updated_at,
+                ),
+            )
+            .map_err(|source| match source {
+                rusqlite::Error::SqliteFailure(error, _)
+                    if error.code == rusqlite::ErrorCode::ConstraintViolation =>
+                {
+                    DbError::DuplicateValue {
+                        entity: "replacement",
+                        field: "destination",
+                    }
+                }
+                other => DbError::from(other),
+            })?;
+
+        Ok(row)
+    }
+
+    /// Advances a journal row to `phase`, optionally recording the keep-name.
+    ///
+    /// `keep_name` is written when supplied and left alone when not, so advancing to
+    /// `PLACED` does not erase the name recorded at `ASIDE`.
+    ///
+    /// # Errors
+    ///
+    /// [`DbError::NotFound`] if the row is gone — which means another process finished or
+    /// abandoned this replacement, and the caller must not continue acting on it.
+    pub fn advance_replacement(
+        &mut self,
+        id: Uuid,
+        phase: ReplacementPhase,
+        keep_name: Option<&Path>,
+    ) -> Result<()> {
+        let changed = self.conn.execute(
+            "UPDATE pending_replacement
+                SET phase = ?2,
+                    keep_name = COALESCE(?3, keep_name),
+                    updated_at = ?4
+              WHERE id = ?1",
+            (
+                id.to_string(),
+                phase.as_str(),
+                keep_name.map(|path| path.to_string_lossy().into_owned()),
+                now_iso8601(),
+            ),
+        )?;
+
+        if changed == 0 {
+            return Err(DbError::NotFound {
+                entity: "replacement",
+            });
+        }
+        Ok(())
+    }
+
+    /// Removes a journal row. The protocol is finished, or recovery has resolved it.
+    ///
+    /// Returns whether a row was there. Idempotent on purpose: recovery may be asked to
+    /// clear a row another process already cleared, and that is success, not a conflict.
+    ///
+    /// # Errors
+    ///
+    /// Propagates any SQLite failure.
+    pub fn clear_replacement(&mut self, id: Uuid) -> Result<bool> {
+        let removed = self.conn.execute(
+            "DELETE FROM pending_replacement WHERE id = ?1",
+            [id.to_string()],
+        )?;
+        Ok(removed > 0)
+    }
+
+    /// Every in-flight replacement, oldest first.
+    ///
+    /// Read at startup. An unrecognised `phase` is carried through as `None` by
+    /// [`ReplacementPhase::parse`] and reported by [`reconcile`](crate::transfer::reconcile)
+    /// rather than guessed at — a row written by a newer build describes a protocol this one
+    /// cannot see.
+    ///
+    /// # Errors
+    ///
+    /// Propagates any SQLite failure.
+    pub fn pending_replacements(&self) -> Result<Vec<(PendingReplacement, bool)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, phase, destination, staging_dir, keep_name, started_at, updated_at
+               FROM pending_replacement
+              ORDER BY started_at ASC, id ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let id: String = row.get(0)?;
+            let phase: String = row.get(1)?;
+            let destination: String = row.get(2)?;
+            let staging_dir: String = row.get(3)?;
+            let keep_name: Option<String> = row.get(4)?;
+            let parsed = ReplacementPhase::parse(&phase);
+            Ok((
+                PendingReplacement {
+                    // A journal row whose id will not parse is corruption, not input. It is
+                    // carried as nil here rather than failing the whole listing, and the
+                    // `recognised` flag below is what stops it being acted on — reporting
+                    // one damaged row is better than refusing to list the sound ones.
+                    id: Uuid::parse_str(&id).unwrap_or(Uuid::nil()),
+                    phase: parsed.unwrap_or(ReplacementPhase::Staged),
+                    destination: PathBuf::from(destination),
+                    staging_dir: PathBuf::from(staging_dir),
+                    keep_name: keep_name.map(PathBuf::from),
+                    started_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                },
+                parsed.is_some() && Uuid::parse_str(&id).is_ok(),
+            ))
+        })?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 }
 
