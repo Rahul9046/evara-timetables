@@ -77,7 +77,15 @@ directories = "6"
 # exists to refuse. One well-licensed dependency is a better price than that risk, and
 # `chrono` never leaves `evara-import`: a date is rendered to `YYYY-MM-DD` at the parser's
 # edge and travels as text, so it is not named in any signature. MIT OR Apache-2.0.
-calamine = { version = "0.36", features = ["dates"] }
+#
+# Held at 0.37 or later deliberately: 0.36 required `zip ^8.6`, and `zip 8.6.0` carries
+# RUSTSEC-2026-0367, -0368 and -0369 — three extraction vulnerabilities, all patched in
+# `zip >= 9.0`. 0.37 is the first calamine release that requires `zip ^9.0`, so this bound
+# is a security floor and not a preference: do not relax it below 0.37 to avoid an API
+# change. Evara never calls the affected `extract` paths — `evara-import` is given bytes
+# and a name — but an unreachable vulnerability is still one `cargo deny` fails on, and
+# M10's Stage 2 will link a ZIP reader for real.
+calamine = { version = "0.37", features = ["dates"] }
 # CSV, with the quoting and embedded-newline handling that hand-rolled splitting gets
 # wrong. Unlicense OR MIT.
 csv = "1"
@@ -85,7 +93,11 @@ csv = "1"
 # or Excel helpfully turns `00124` into `124` the moment the school saves it -- the exact
 # fidelity failure the import then has to cope with, created by our own template. MIT OR
 # Apache-2.0.
-rust_xlsxwriter = { version = "0.99", default-features = false }
+#
+# Held at 0.100 or later for the same security reason as `calamine` above: 0.99 required
+# `zip ^8.3` and so resolved to the advisory-carrying `zip 8.6.0`. 0.100 is the first
+# release requiring `zip ^9.0`.
+rust_xlsxwriter = { version = "0.102", default-features = false }
 # Base64, for the one place binary data crosses the IPC boundary: a school logo. JSON has
 # no byte-array type, and serde would otherwise write a 2 MiB image as ~12 MB of decimal
 # numbers. Already in the tree as a transitive dependency of tauri, so this adds no new
