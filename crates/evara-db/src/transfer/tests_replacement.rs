@@ -26,7 +26,7 @@ use crate::transfer::replacement::{
     Ambiguity, DestinationState, DestinationVerdict, DiskFacts, PendingReplacement, RecoveryAction,
     ReplacementPhase, classify_destination, reconcile,
 };
-use crate::transfer::sidecars::{SidecarState, sidecar_path};
+use crate::transfer::sidecars::{SidecarState, refuse_if_sidecars_present, sidecar_path};
 use crate::{Database, PROJECT_EXTENSION, Settings};
 
 const APP_VERSION: &str = "0.1.0-test";
@@ -371,8 +371,17 @@ fn t87_every_row_of_the_reconciliation_table() {
 
 #[test]
 fn t88_the_old_set_is_released_only_with_a_good_destination() {
-    // The dominating invariant, asserted over *every* combination rather than over the rows
-    // somebody remembered to write down. 3 destination states x 2 x 2 x 2 x 4 phases.
+    // The dominating invariant, asserted over the whole cross-product rather than over the
+    // rows somebody remembered to write down: 4 destination states x staged x aside x
+    // keep-name x 4 phases = **128** combinations.
+    //
+    // Two fields are held at "no sidecars" throughout, deliberately rather than by omission:
+    // `DestinationState::Project` *means* "no sidecar beside it" (`DiskFacts::observe` applies
+    // that conjunction once), so a fabricated project-with-a-`-wal` is a state that cannot be
+    // observed, and asserting over it would be asserting about nothing. The sidecar-bearing
+    // destinations are covered by the T-89 tests, and the one combination this sweep reaches
+    // without flagging -- an absent main file with a stray sidecar -- is pinned by
+    // `an_absent_destination_with_a_stray_sidecar_still_blocks_the_rename`.
     let mut released = 0;
 
     for destination in [
@@ -419,6 +428,57 @@ fn t88_the_old_set_is_released_only_with_a_good_destination() {
     assert!(
         released > 0,
         "the invariant must be exercised, not vacuously true"
+    );
+}
+
+#[test]
+fn an_absent_destination_with_a_stray_sidecar_still_blocks_the_rename() {
+    // The one gap in `reconcile`'s own reading of S3, pinned rather than left implicit.
+    //
+    // The sidecar guard is written for a destination that is *present*: a stray `-wal` beside
+    // something that is otherwise a project is reported rather than displaced. With the main
+    // file **absent** the guard does not apply, and the facts route to `RestoreAside` -- which
+    // is correct, because there is an old project to put back and refusing would leave the
+    // user with nothing.
+    //
+    // What makes that safe is S3 step 4, not the decision function: whoever executes the
+    // action calls `refuse_if_sidecars_present` immediately before the rename, so a restore
+    // cannot land a main file beside a log belonging to a different database. Both halves are
+    // asserted here so a later change that drops the call has a red test rather than a
+    // corruption shape with no symptom.
+    let dir = TempDir::new().expect("temp dir");
+    let destination = dir.path().join(format!("school.{PROJECT_EXTENSION}"));
+
+    let facts = DiskFacts {
+        aside_present: true,
+        destination_sidecars: SidecarState {
+            wal: true,
+            ..SidecarState::default()
+        },
+        ..nothing()
+    };
+    assert_eq!(
+        reconcile(facts, Some(ReplacementPhase::Aside)),
+        RecoveryAction::RestoreAside {
+            then_delete_staging: false
+        },
+        "with the main file gone there is an old project to put back, and the sidecar guard \
+         is not what decides that"
+    );
+
+    std::fs::write(sidecar_path(&destination, "-wal"), b"stale")
+        .expect("a stray log at the destination's name");
+    let error = refuse_if_sidecars_present(&destination)
+        .expect_err("and the rename that would execute the restore must refuse");
+    assert!(
+        matches!(
+            error,
+            DbError::RenameBlocked {
+                sidecar: "-wal",
+                ..
+            }
+        ),
+        "expected RenameBlocked naming -wal, got {error:?}"
     );
 }
 
