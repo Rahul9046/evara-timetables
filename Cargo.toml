@@ -53,7 +53,34 @@ ts-rs = { version = "12", features = ["uuid-impl", "no-serde-warnings"] }
 # Persistence. SQLite is statically bundled rather than taken from the host so every
 # install runs an identical, known engine version — a desktop app cannot rely on
 # whatever SQLite happens to sit on a user's machine.
-rusqlite = { version = "0.37", features = ["bundled", "functions"] }
+#
+# Every one of these is load-bearing rather than a convenience:
+#
+# - `functions` registers `evara_site_id()`, which every change-log trigger calls.
+# - `backup` is the online backup API. M10 needs it because `VACUUM INTO` is *refused* on a
+#   connection carrying `PRAGMA query_only = ON`, which is exactly how a project opened for
+#   inspection is configured — so the read-only snapshot path cannot use `VACUUM INTO` at
+#   all. It is also the only mechanism that returns control between pages, which is what
+#   lets a long copy report progress and observe a cancellation.
+# - `limits` caps what a *staged, untrusted* payload can ask the engine for — above all
+#   `SQLITE_LIMIT_ATTACHED = 0`, so an `ATTACH` is impossible rather than merely refused.
+#
+# `hooks` — `progress_handler` — is deliberately **not** enabled. It was the interrupt point
+# for a `VACUUM INTO` snapshot, and that mechanism is not on the snapshot path: rusqlite
+# requires the handler's closure to be `Send + 'static`, which a borrowed `&dyn Cancel` is
+# not, so the stepped backup API carries cancellation instead. A feature nothing calls is a
+# compiled surface nobody is testing; it is removed rather than left as a leftover, and the
+# reason it is absent is recorded here so re-enabling it is a decision.
+#
+# All three are no-dependency feature flags in rusqlite's own manifest, so enabling them
+# widens the compiled surface and adds nothing to the dependency graph: `cargo deny check`
+# is unchanged by this line.
+rusqlite = { version = "0.37", features = [
+    "bundled",
+    "functions",
+    "backup",
+    "limits",
+] }
 refinery = { version = "0.10", features = ["rusqlite-bundled"] }
 tempfile = "3"
 # Platform application-data directories for the settings database.

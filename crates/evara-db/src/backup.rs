@@ -22,9 +22,22 @@
 //!
 //! `VACUUM INTO` runs inside a read transaction and writes a **fully checkpointed, complete
 //! copy** of the database to a new file: WAL content included, no sidecars needed, readable
-//! on its own. SQLite refuses to write it if the target exists, which is also exactly the
-//! "do not overwrite an existing backup" rule, enforced by the engine rather than by a
-//! `try_exists` race.
+//! on its own.
+//!
+//! # The engine is *not* the "do not overwrite a backup" guard
+//!
+//! This header used to claim that SQLite refuses to write the target if it exists, "enforced
+//! by the engine rather than by a `try_exists` race". That is true of a target holding a
+//! database — *"output file already exists"* — and **false of a zero-length one**, which
+//! SQLite adopts and writes into without complaint. `transfer::tests_engine`'s T-78 proves
+//! all three outcomes.
+//!
+//! The distinction matters here because a *refused* `VACUUM INTO` leaves exactly such a
+//! zero-length file (T-75). So [`choose_path`]'s existence check is load-bearing rather
+//! than belt-and-braces, and [`before_schema_rebuild`] removes its target on **every**
+//! failure path — otherwise a failed upgrade leaves a dead 0-byte file that permanently
+//! consumes a backup name, and sixteen of those turn the next upgrade into a
+//! [`DbError::BackupRefused`] about nothing.
 //!
 //! The copy is not byte-identical to the original — `VACUUM` defragments as it goes — but it
 //! is *logically* identical, which is what a recovery needs. The original file is never
@@ -79,15 +92,22 @@ pub(crate) fn before_schema_rebuild(
     let target = choose_path(path, applied)?;
 
     // `VACUUM INTO` takes a read lock for the duration, so the snapshot is consistent even
-    // if something else is mid-write, and it fails rather than clobbering an existing file.
-    conn.execute("VACUUM INTO ?", [path_arg(&target)?])
-        .map_err(|source| refused(path, InternalError::wrap(source)))?;
+    // if something else is mid-write.
+    //
+    // A refusal still creates the target, zero length (T-75), so the file is taken away on
+    // this path too. Without it the dead file survives, `choose_path` steps past the name
+    // on every later attempt, and after `MAX_ATTEMPTS` the upgrade is refused for a reason
+    // that has nothing to do with the project.
+    if let Err(source) = conn.execute("VACUUM INTO ?", [path_arg(&target)?]) {
+        remove_quietly(&target);
+        return Err(refused(path, InternalError::wrap(source)));
+    }
 
     // A backup nobody has opened is a guess. Verify before letting the migration proceed,
     // and take the bad copy away if it is not sound — leaving a broken file named "backup"
     // is how someone comes to trust one.
     if let Err(error) = verify(&target, conn) {
-        let _ = std::fs::remove_file(&target);
+        remove_quietly(&target);
         return Err(error);
     }
 
@@ -178,6 +198,16 @@ fn verify(target: &Path, source: &Connection) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Removes a failed copy, ignoring whether it was there.
+///
+/// Deliberately silent. This runs on a path that is already returning an error, and the
+/// caller's refusal names the real problem — reporting that the cleanup also failed would
+/// replace a useful message with a confusing one. A sidecar is never removed here because
+/// `VACUUM INTO` writes a single file and creates none.
+fn remove_quietly(target: &Path) {
+    let _ = std::fs::remove_file(target);
 }
 
 /// Binds a path for SQLite, which takes it as text.
