@@ -17,8 +17,10 @@
   [OPEN-DECISIONS.md](OPEN-DECISIONS.md), ADRs 0001–0052, and the code in `crates/evara-db`,
   `crates/evara-import`, `crates/evara-project`, `crates/evara-cli`,
   `apps/desktop/src-tauri`.
-- Revision 2 adds twenty-two **measured or code-proven facts**. Every one is listed with its
-  evidence in [Part C §C.2](#c2-evidence-log--what-is-proven-and-what-still-needs-an-experiment),
+- Revision 2 adds twenty-two **measured or code-proven facts**; 2.1 and 2.2 bring the log to
+  **thirty-two**, one of which (E-04) corrects a revision 2 entry that was wrong. Every one is
+  listed with its evidence in
+  [Part C §C.2](#c2-evidence-log--what-is-proven-and-what-still-needs-an-experiment),
   and nothing below is asserted without being marked proven, inferred, or pending.
 
 **Revision history**
@@ -28,6 +30,7 @@
 | 1 | 2026-10-28 | First architecture proposal. Seven findings returned by review. |
 | 2 | 2026-10-29 | All seven findings resolved (Part C). **Approved for implementation**: A1–A5 granted, A6–A7 deferred, three mandatory safeguards attached ([§0.2](#02-mandatory-safeguards-from-the-second-review)). D11's three known-wrong passages annotated as superseded in place. |
 | 2.1 | 2026-11-01 | **Documentation only — no design change.** Stage P recorded as complete (PR #35, `0faff47`): §C.8 rewritten as delivered, all three RUSTSEC advisories named and resolved, E-23…E-26 added, finding 6's last pending experiment closed, D12 and §1.4.9 corrected to say `evara-project` has no `zip` dependency *yet*, §8 and the appendix risks updated, and S3 extended to state recovery across the individual sidecar moves explicitly. **No decision was reopened and no superseded D11 text was reinstated.** |
+| 2.2 | 2026-11-02 | **Stage 1 folded in** (PR #37, `cc025e2`…`ff695f0`). One **correction** — E-04 was wrong, and was cited as confirming shipped code (§C.2, §C.6, and `backup.rs` on the branch). One **deviation accepted** — D8's two snapshot mechanisms became one, with the free-page cost stated (§C.6, D8, §7.2). One fact the record did not state — **a read-only open creates WAL sidecars** (§6.1). Six additions, **E-27…E-32**. The discharged experiments moved out of the pending list, and **T-60 and T-83 moved to Stage 2**: neither can be measured without a project with real edit history, and Stage 2's round-trip fixtures are the first to build one. `hooks` removed from the `rusqlite` feature list. **No other decision was reopened** — S1, S2 and S3 stand exactly as §0.2 specifies them, and no superseded D11 text was reinstated. |
 
 > **Reading order for an implementer.** [§0.1](#01-approval-status-of-a1a7) is the
 > authoritative approval status and [§0.2](#02-mandatory-safeguards-from-the-second-review) the
@@ -66,12 +69,12 @@ Granted 2026-10-29 at the second architecture review.
 
 | # | Decision | Status |
 | --- | --- | --- |
-| **A1** | `Cancel` moves to `evara-core`, re-exported by `evara-solver` | ✅ **Approved** — build in Stage 1 |
-| **A2** | `evara_site_id` marked `SQLITE_INNOCUOUS`; `trusted_schema = OFF` through phase V1 | ✅ **Approved** — Stage 1, with a test asserting change-log triggers still fire |
+| **A1** | `Cancel` moves to `evara-core`, re-exported by `evara-solver` | ✅ **Delivered — Stage 1.** Every existing import compiles unchanged, and one test satisfies both paths with a single impl, so there is provably one trait rather than two that look alike |
+| **A2** | `evara_site_id` marked `SQLITE_INNOCUOUS`; `trusted_schema = OFF` through phase V1 | ✅ **Delivered — Stage 1** (E-31). The flag is additive as predicted, and the test that matters turns `trusted_schema` **off** before asserting all three triggers fire — with it on, the bundled default, the flag changes nothing observable and a test would pass either way |
 | **A3** | The replaced copy is **never** deleted by Evara | ✅ **Approved** — Stage 2 |
-| **A4** | One **settings** migration, `V2__pending_replacement.sql` | ✅ **Approved** — Stage 1. No project migration |
-| **A5** | `backup.rs`'s 0-byte leftover fixed inside Stage 1 | ✅ **Approved** — Stage 1 |
-| **A6** | A `--without-history` export option | ⏸ **Deferred.** Not in M10. T-60 still measures the feed's share; the figure is reported, not acted on |
+| **A4** | One **settings** migration, `V2__pending_replacement.sql` | ✅ **Delivered — Stage 1.** No project migration; the one-way-door cost of advancing the settings chain is written in the migration file itself, not only in the PR |
+| **A5** | `backup.rs`'s 0-byte leftover fixed inside Stage 1 | ✅ **Delivered — Stage 1.** The target is removed on the `VACUUM INTO` failure path too, so seventeen failed upgrades no longer exhaust the sixteen backup names. E-04's correction is why that mattered more than it looked (§C.6) |
+| **A6** | A `--without-history` export option | ⏸ **Deferred.** Not in M10. T-60 still measures the feed's share — in **Stage 2** since revision 2.2 — and the figure is reported, not acted on |
 | **A7** | Scoped per-school export, and merge-into-existing | ⏸ **Deferred.** Neither in M10. OPEN-DECISIONS D38 |
 
 A6 and A7 being deferred changes nothing already specified: M10 carries the complete feed and
@@ -221,14 +224,15 @@ Parts A and B.
 | **1** | Fix checksum architecture | ✅ **Resolved** | Cycle was real and is removed. One root, one digest per fact, a fixed verification order, and an explicit corruption-vs-authenticity statement. | [§C.3](#c3-finding-1--checksum-architecture-resolved), [§3.3](#33-integrity-model), [§6.2](#62-what-is-not-guaranteed) |
 | **2** | Strengthen destination replacement | ✅ **Resolved** | Non-destructive journalled protocol. The old project is *never* deleted, even on success. Crash recovery is deterministic from a journal in the settings database. Windows/macOS asymmetry stated, not papered over. | [§C.4](#c4-finding-2--destination-replacement-resolved), [D11](#d11--replacement-is-journalled-non-destructive-and-recoverable) |
 | **3** | Harden untrusted SQLite handling | ✅ **Resolved** | Three-phase boundary with eight `DBCONFIG` flags and seven SQLite limits, all proven available in rusqlite 0.37. `sqlite_master` conformance is explicitly *not* claimed as a sandbox; two experiments show why it and `integrity_check` are each insufficient alone. | [§C.5](#c5-finding-3--untrusted-sqlite-handling-resolved), [§6.1](#61-the-three-phase-boundary) |
-| **4** | Prove snapshot consistency | ✅ **Resolved experimentally** | `VACUUM INTO` under `query_only` is **refused** (E-01). Two working mechanisms proven (E-02, E-03). Manifest facts now read **from the snapshot**, not the source. Lock duration and cancellation defined. Five Stage 1 re-proof tests named against the bundled engine. | [§C.6](#c6-finding-4--snapshot-consistency-resolved-experimentally), [D8](#d8--export-never-mutates-the-source-and-the-lock-is-held-for-one-statement) |
+| **4** | Prove snapshot consistency | ✅ **Resolved, and now built** | `VACUUM INTO` under `query_only` is **refused** (E-01). Manifest facts read **from the snapshot**, not the source. Stage 1 re-proved E-01…E-08 against the bundled engine, **corrected E-04**, and settled on **one** mechanism — a stepped backup inside a pinned read transaction (E-27) — because `progress_handler` cannot take a borrowed `&dyn Cancel` (E-32). The cost is a payload that is not compacted (§7.2). Lock duration (T-83) is measured in Stage 2. | [§C.6](#c6-finding-4--snapshot-consistency-resolved-experimentally), [D8](#d8--export-never-mutates-the-source-and-the-lock-is-held-for-one-statement) |
 | **5** | Duplicate project identity | ✅ **Resolved** | Identity always preserved. Ambiguity made visible in the recent list, warned before import, refused when the twin is open. Messages and five tests specified. | [§C.7](#c7-finding-5--duplicate-project-identity-resolved), [D13](#d13--identity-is-preserved-and-duplication-is-disclosed) |
 | **6** | Confirm dependency upgrade feasibility | ✅ **Resolved, and now delivered** | Not merely feasible — **done**. `calamine 0.36.1 → 0.37.0`, `rust_xlsxwriter 0.99.1 → 0.102.0`, `zip 8.6.0 → 9.1.3` transitively with `8.6.0` out of the tree. **RUSTSEC-2026-0367, -0368 and -0369 all resolved**, with no `[advisories] ignore` and `deny.toml` untouched. Merged as **PR #35**, 2026-11-01. | [§C.8](#c8-finding-6--dependency-upgrade-feasibility-resolved-and-delivered), [Stage P](#8-implementation-stages-and-dependencies) |
 | **7** | Reconcile API and command contracts | ✅ **Resolved** | Thirteen discrepancies found in revision 1 and fixed, including one that contradicted D8's own lock rule and one false claim about migrations. | [§C.9](#c9-finding-7--api-and-command-reconciliation-resolved), [§4](#4-public-rust-apis-and-tauri-command-contracts) |
 
-**Deferred** (carried, with reasons, not resolved): a `--without-history` export option, pending
-Stage 1's measurement ([§10 A6](#10-remaining-decisions-requiring-approval)); scoped per-school
-export and merge-into-existing ([§10 A7](#10-remaining-decisions-requiring-approval)).
+**Deferred** (carried, with reasons, not resolved): a `--without-history` export option,
+pending **Stage 2's** measurement — T-60 moved there in revision 2.2
+([§10 A6](#10-remaining-decisions-requiring-approval)); scoped per-school export and
+merge-into-existing ([§10 A7](#10-remaining-decisions-requiring-approval)).
 
 **Blocked**: nothing.
 
@@ -245,7 +249,7 @@ design depends on CLI-only behaviour.
 | **E-01** | `VACUUM INTO` is refused under `PRAGMA query_only = ON` — *"attempt to write a readonly database (8)"* — **and leaves a 0-byte target file behind** | Experiment | **Proven** |
 | **E-02** | The online backup API works from a `query_only` connection, including inside an explicit `BEGIN DEFERRED` read transaction, producing a complete copy | Experiment | **Proven** |
 | **E-03** | `VACUUM INTO` works from a connection opened `SQLITE_OPEN_READ_ONLY` (file-level read-only, no `query_only` pragma) | Experiment | **Proven** |
-| **E-04** | `VACUUM INTO` refuses an existing target — *"output file already exists"* | Experiment; confirms `backup.rs`'s comment | **Proven** |
+| **E-04** | `VACUUM INTO`'s treatment of an existing target **depends on its content**: an existing *database* is refused (*"output file already exists"*), *non-database bytes* are refused differently (*"file is not a database"*), and a **zero-length file is adopted** and written into | Re-proven against the bundled engine — `transfer::tests_engine::t78_…` | **Corrected in 2.2.** Revision 2's wording was wrong, and it did **not** confirm `backup.rs`'s comment. See E-28 and §C.6 |
 | **E-05** | `PRAGMA integrity_check` returns `ok` on a database carrying a hostile `AFTER INSERT` trigger and an extra table — so it is **not** a schema check | Experiment | **Proven** |
 | **E-06** | `PRAGMA foreign_key_check` reports a violation that `integrity_check` still calls `ok` — so **both** are needed, answering different questions | Experiment | **Proven** |
 | **E-07** | `PRAGMA writable_schema = ON` succeeds by default, which is what `SQLITE_DBCONFIG_DEFENSIVE` exists to block | Experiment | **Proven** |
@@ -253,7 +257,7 @@ design depends on CLI-only behaviour.
 | **E-09** | `rusqlite 0.37` exposes `FunctionFlags::SQLITE_INNOCUOUS` | `rusqlite-0.37.0/src/functions.rs:399` | **Proven** |
 | **E-10** | `rusqlite 0.37` exposes `DEFENSIVE`, `WRITABLE_SCHEMA`, `TRUSTED_SCHEMA`, `ENABLE_VIEW`, `ENABLE_ATTACH_CREATE`, `ENABLE_ATTACH_WRITE`, `ENABLE_TRIGGER`, `ENABLE_FKEY` via `set_db_config` / `db_config` | `rusqlite-0.37.0/src/config.rs:19–131` | **Proven** |
 | **E-11** | `rusqlite 0.37` exposes `Limit::SQLITE_LIMIT_ATTACHED` and ten other limits (`limits` feature) | `rusqlite-0.37.0/src/limits.rs:18–45` | **Proven** |
-| **E-12** | `Connection::progress_handler` exists behind the `hooks` feature | `rusqlite-0.37.0/src/hooks/mod.rs:426` | **Proven** |
+| **E-12** | `Connection::progress_handler` exists behind the `hooks` feature | `rusqlite-0.37.0/src/hooks/mod.rs:426` | **Proven** — and **not used**: E-32 is why, and the feature is not enabled (§7.4) |
 | **E-13** | `Connection::backup`, `Backup::step(num_pages)`, `Backup::run_to_completion` exist behind the `backup` feature | `rusqlite-0.37.0/src/backup.rs:64,262,291` | **Proven** |
 | **E-14** | The bundled build sets `-DSQLITE_ENABLE_LOAD_EXTENSION=1`, `-DSQLITE_USE_URI`, `-DSQLITE_DEFAULT_FOREIGN_KEYS=1`, `-DSQLITE_ENABLE_API_ARMOR`, and compiles in FTS3/FTS5/RTREE/STAT4/DBSTAT | `libsqlite3-sys-0.35.0/build.rs:124–143` | **Proven** |
 | **E-15** | The bundled build sets **no** `-DSQLITE_TRUSTED_SCHEMA` flag, so `trusted_schema` defaults **ON** in Evara (the CLI shows `0` only because the shell turns it off) | `build.rs` absence + CLI reading | **Proven** |
@@ -268,16 +272,36 @@ design depends on CLI-only behaviour.
 | **E-24** | `develop`'s lockfile carried **three** ZIP advisories, not the two the triage note recorded: **RUSTSEC-2026-0367** (SUID/SGID bits preserved during extraction), **-0368** (`ZipArchive::extract` follows attacker-controlled symlinks out of the destination), **-0369** (`extract()` applies Unix permissions through symlinks without confining the target). All three are patched in `zip >= 9.0` and all three are now **absent** | `cargo deny check advisories` before and after PR #35 | **Proven** |
 | **E-25** | Exactly **one** `zip` resolves in the tree, at `9.1.3`; `8.6.0` appears nowhere in `Cargo.lock`. So there is no dual-major `zip` for Stage 2 to link against | `Cargo.lock` on `0faff47` | **Proven** |
 | **E-26** | The upgrade needed **no source change**: E-19's eight third-party types did not move, and `cargo test --workspace --all-features` passed 1 709 / 0, including the two `evara-import` round trips that write with `rust_xlsxwriter` (compressing through `zip`) and read back with `calamine`, one of which asserts `00124` survives as text | PR #35, verified on Windows | **Proven** |
+| **E-27** | A stepped backup inside an explicit `BEGIN DEFERRED`, **whose first read pins the WAL snapshot**, does not observe a writer that commits on another connection during the copy. This is the fact the whole snapshot design rests on | `t77_a_stepped_backup_in_a_read_transaction_does_not_see_a_concurrent_write`, and again through the real API in `a_concurrent_write_does_not_reach_the_snapshot`, where the interleaving is driven from the progress callback rather than from a sleep | **Proven** (T-77) |
+| **E-28** | `VACUUM INTO` adopts a zero-length target; refuses an existing database; refuses non-database bytes with a *different* message | `t78_vacuum_into_refuses_a_non_empty_target_but_adopts_a_zero_length_one` | **Proven** — supersedes E-04 as written |
+| **E-29** | Opening a WAL-mode database with `SQLITE_OPEN_READ_ONLY` **creates `-wal` and `-shm` beside it**; the main file's own bytes are unchanged | `auditing_a_payload_leaves_its_bytes_identical` + `an_audited_payload_can_still_be_reduced_to_a_single_file` | **Proven** — §6.1 records what it costs |
+| **E-30** | `PRAGMA wal_checkpoint(TRUNCATE)` cannot release the log while another connection holds the database, and the refusal arrives **before anything has moved** | `t90_a_checkpoint_refuses_while_the_database_is_still_open` | **Proven** — S3's refusal point, not a hypothetical |
+| **E-31** | `evara_site_id` marked `SQLITE_INNOCUOUS` lets all three change-log triggers fire with `trusted_schema = OFF`; a connection **without** the function still cannot write a tracked row | five tests in `evara_db::tests_site_id_function` | **Proven** (A2 delivered) |
+| **E-32** | `rusqlite 0.37`'s `progress_handler` requires `F: FnMut() -> bool + Send + 'static`, so a borrowed `&dyn Cancel` cannot drive it | `rusqlite-0.37.0/src/hooks/mod.rs:426–429` | **Proven** — the cause of §C.6's one-mechanism deviation |
+
+**Discharged in Stage 1.** These were the pending experiments, and they ran:
+
+| Was pending | Outcome |
+| --- | --- |
+| E-01…E-08 against the **bundled** 3.50.2 engine through `rusqlite` | ✅ **Done** — T-75…T-82. E-01, E-02, E-03, E-05, E-06, E-07 and E-08 hold exactly as the CLI reported them. **E-04 does not**, and is corrected above |
+| Whether a stepped backup inside a `BEGIN DEFERRED` holds the read snapshot for the whole copy under `rusqlite` | ✅ **Done — it does.** E-27, asserted twice |
+| `cargo deny check licenses` with `zip 9`'s tree | ✅ Recorded as E-23 in revision 2.1 |
 
 **Still requiring an experiment**, and scheduled:
 
 | Pending | Why it cannot be settled on paper | Stage |
 | --- | --- | --- |
-| E-01…E-08 against the **bundled** 3.50.2 engine through `rusqlite` | Version and binding differences are small but real; the design branches on E-01 | 1 (T-75…T-82) |
-| Whether `Backup::step(-1)` inside a `BEGIN DEFERRED` holds a read lock for the whole copy under `rusqlite` | The CLI's `.backup` does; the Rust binding's transaction interaction must be observed | 1 (T-77) |
-| Workspace-lock duration for a `VACUUM INTO` at the realistic upper end | Depends on page count, disk and platform | 1 (T-83) |
-| `change_log`'s share of the payload for a project with real edit history | Decides whether A6's `--without-history` option is needed | 1 (T-60) |
+| Workspace-lock duration for a **stepped backup** at the realistic upper end — total hold time, and whether the per-step overhead is material | Depends on page count, disk and platform. Reshaped in 2.2: `VACUUM INTO` is no longer on the snapshot path, and a copy made of many short steps is a different shape from one long statement | **2** (T-83) |
+| `change_log`'s share of the payload for a project with real edit history | Decides whether A6's `--without-history` option is needed | **2** (T-60) |
 | Windows rename behaviour under a live antivirus scan | Environmental; needs CI plus a manual pass | 4 (T-70) |
+
+**Why T-60 and T-83 moved from Stage 1 to Stage 2.** Both need a project with **real edit
+history and realistic size**, and Stage 1 builds no such fixture — its projects are a handful
+of rows created inside a test. Measuring either against one would have produced a figure with
+no relationship to the budget it is supposed to test, which is worse than an honest gap.
+Stage 2's round-trip fixtures are the first in M10 to build a project at the §7.3 scale, so
+that is where both belong. T-60 still decides **A6**, so deferring the measurement defers that
+decision too — consistent, since A6 was already deferred out of M10 entirely.
 
 **Settled since revision 2 was written:** *"whether `cargo deny check licenses` passes with
 `zip 9`'s new transitive crates (`typed-path`, `nix`)"* was the one pending item in finding 6.
@@ -423,24 +447,54 @@ Malicious and malformed payload cases are T-29, T-30, T-68…T-74.
   file before failing**. E-08 shows this is specific to the refused-write case. E-22 shows
   `backup.rs` does not clean up on that path and `choose_path` then skips the name — so a
   pre-existing code path can leave a zero-byte file called `school.pre-v11.evaraproj`, which
-  is precisely what that module's header says must never happen. Fixing it is Stage 1 work
-  ([§10 A5](#10-remaining-decisions-requiring-approval)), because M10 shares the primitive.
+  is precisely what that module's header says must never happen. **Fixed in Stage 1**
+  ([§10 A5](#10-remaining-decisions-requiring-approval)), because M10 shares the primitive:
+  the target is now removed on the `VACUUM INTO` failure path too.
+- **E-04 was wrong, and the way it was wrong mattered.** Its provenance read *"confirms
+  `backup.rs`'s comment"*, and that module's header duly asserted SQLite's refusal **was** the
+  "do not overwrite an existing backup" rule, *"enforced by the engine rather than by a
+  `try_exists` race"* — which invited a later reader to delete `choose_path`'s existence check
+  as redundant. **E-28** proves the engine *adopts* a zero-length target. Combined with E-01,
+  which leaves exactly such a file, the two describe a real sequence: a failed backup leaves a
+  0-byte file, and the next `VACUUM INTO` aimed at that name writes into it rather than
+  refusing. The header is corrected on the Stage 1 branch and `choose_path`'s check is
+  load-bearing, not belt-and-braces.
 - **E-02: the online backup API works from a `query_only` connection**, including inside an
   explicit `BEGIN DEFERRED` read transaction, producing a complete copy.
 - **E-03: `VACUUM INTO` works from a `SQLITE_OPEN_READ_ONLY` connection.** File-level
   read-only does not block it; only the `query_only` pragma does.
 
-**Mechanism per path**, therefore:
+**One mechanism, both paths** — amended in revision 2.2, after Stage 1 built it:
 
 | Path | Mechanism | Consistency comes from |
 | --- | --- | --- |
-| Desktop export (live writable connection, under the workspace lock) | `VACUUM INTO` — today's `backup.rs` path, known-good | `VACUUM INTO`'s own read transaction |
-| Headless `evara export --project` (`open_for_inspection`, `query_only`) | `BEGIN DEFERRED` + `Backup::step(-1)` (E-02, E-13) | the explicit read transaction, held for a single-shot copy |
-| Fallback if `Backup::step(-1)` disappoints under rusqlite | a second `SQLITE_OPEN_READ_ONLY` connection + `VACUUM INTO` (E-03) | `VACUUM INTO`'s read transaction |
+| Desktop export (live writable connection, under the workspace lock) | `BEGIN DEFERRED` + a **stepped** `Backup` | the pinned read snapshot (E-27) |
+| Headless `evara export --project` (`open_for_inspection`, `query_only`) | the same (E-02, E-13) | the same |
+| Named contingency, **not** needed | a second `SQLITE_OPEN_READ_ONLY` connection + `VACUUM INTO` (E-03) | `VACUUM INTO`'s read transaction |
 
-The fallback's one limitation is named: a read-only connection cannot recover a hot `-wal`,
-so a project left dirty by a crash would be refused with a message telling the user to open it
-once in the application. That is the correct refusal rather than a silent partial read.
+**Why revision 2's two mechanisms became one.** `VACUUM INTO` is a single opaque statement, so
+its only interrupt point is SQLite's progress handler — and **E-32** proves rusqlite requires
+that closure to be `Send + 'static`, which a borrowed `&dyn Cancel` is not. Implementing the
+split literally would therefore have shipped a **desktop export that cannot be cancelled**, on
+the one path where a user is most likely to want to, while this proposal asks for consistency
+*and* cancellation together. Two alternatives were weighed and rejected: widening the public
+signature to `&(dyn Cancel + Sync)` and spawning a watcher thread to call `interrupt()` — a
+thread and a poll interval bought to preserve a mechanism split that buys nothing else — and
+shipping the uncancellable path, which would be a silent downgrade of what was approved.
+
+**What that costs, stated rather than absorbed.** `VACUUM INTO` compacts as it copies and the
+backup API does not: it reproduces the source page for page, free pages included. A snapshot of
+a heavily edited project is therefore **larger** than a vacuumed one would be. It is still a
+valid, complete, single-file database — the cost is bytes, and `.evara` compresses them. This
+bears on [§7.2](#72-disk), which was written assuming a vacuumed payload, and §7.2 now says so.
+**No second compaction pass is introduced**: snapshotting and then `VACUUM INTO`-ing our own
+snapshot would work and needs no cancellation, but it costs a second full write of the file and
+there is no figure yet to justify it. Stage 2 measures the real inflation first.
+
+The contingency's one limitation is named, in case it is ever needed: a read-only connection
+cannot recover a hot `-wal`, so a project left dirty by a crash would be refused with a message
+telling the user to open it once in the application. That is the correct refusal rather than a
+silent partial read.
 
 **All manifest facts now come from the exact exported snapshot.** Revision 1 read them from
 the live project under the lock, which meant the manifest could describe a state the snapshot
@@ -450,14 +504,19 @@ under the lock, Evara does the snapshot plus **one** cheap agreement check (`bac
 read from the snapshot file through a hardened read-only connection.
 
 **Source-lock duration and cancellation**, both defined in D8: the workspace mutex is held for
-exactly the `VACUUM INTO` and one `COUNT(*)`. Budget ≤ 500 ms at the realistic upper end, to
-be measured (T-83) — and if it exceeds that, the remedy is a second read-only connection
-(E-03), not a longer lock. Cancellation during the snapshot uses
-`Connection::progress_handler` returning `true` (E-12), which aborts the statement; the
-aborted run's 0-byte target is removed, which is the same fix E-22 needs.
+exactly the snapshot and one `COUNT(*)`. Budget ≤ 500 ms at the realistic upper end, to
+be measured (T-83, **Stage 2** — §C.2 says why it moved) — and if it exceeds that, the remedy
+is a second read-only connection (E-03), not a longer lock. **Cancellation is the backup's own
+step boundary**, not `progress_handler`: `cancel` is asked before the first page and between
+every batch of 256, which is what the one-mechanism decision above buys. A cancelled or failed
+snapshot removes its partial file and any sidecar beside it — structurally, in `Snapshot`'s
+`Drop`, rather than remembered at each call site, which is the same defect E-22 found in
+`backup.rs`.
 
-Five proof tests, T-75…T-82, re-establish E-01…E-08 against the bundled 3.50.2 engine through
-`rusqlite` in Stage 1, before any container code exists.
+The proof tests T-75…T-82 re-established E-01…E-08 against the bundled 3.50.2 engine through
+`rusqlite` in Stage 1, before any container code existed. **Seven of the eight claims held;
+E-04 did not** (above). Their implemented numbering differs from the draft matrix in
+[§9](#snapshot-mechanism--the-stage-1-proof-tests), which records the mapping.
 
 ## C.7 Finding 5 — duplicate project identity: resolved
 
@@ -897,21 +956,33 @@ worker thread:    open the SNAPSHOT hardened-read-only; read every manifest fact
                   delete the snapshot
 ```
 
+> **Amended in revision 2.2.** The heading's *"one statement"* is kept so existing links
+> still resolve, but the mechanism is **one pinned read transaction made of many steps**, not
+> one statement: §C.6 records why the two mechanisms became one and what it costs. The
+> duration claim below is unchanged — the lock still covers the whole copy and one `COUNT`.
+
 - **No write to the source.** The snapshot reads; nothing re-opens the project.
-- **Consistency.** From the snapshot mechanism's own read transaction (§C.6), per path.
+- **One mechanism, both paths.** `BEGIN DEFERRED`, whose first read pins the WAL snapshot, then
+  a stepped `Backup` to completion (§C.6, E-27). `VACUUM INTO` is not on this path.
+- **Consistency.** From the pinned read snapshot the first read takes (E-27), identically on
+  both paths.
+- **The payload is not compacted.** The backup API copies page for page, free pages included,
+  so a heavily edited project's snapshot is larger than a vacuumed one would be — §7.2.
 - **All manifest facts come from the snapshot**, read on the worker thread after the lock is
   released. Finding 4.
 - **The lock covers exactly the snapshot plus one `COUNT`.** Budget ≤ 500 ms at the realistic
-  upper end (T-83). If it exceeds that, the remedy is a second `SQLITE_OPEN_READ_ONLY`
-  connection (E-03), not a longer lock.
+  upper end (T-83, measured in **Stage 2**). If it exceeds that, the remedy is a second
+  `SQLITE_OPEN_READ_ONLY` connection (E-03), not a longer lock.
 - **Atomic finalise.** `<dest>.evara.part` beside the destination, then rename — ADR 0004's
   clause, kept. Evara never writes over an existing `.evara` directly, so a failure mid-write
   leaves the previous archive intact (T-47).
-- **Cancellation.** An `AtomicBool`, read by the ZIP writer between buffers and by SQLite
-  itself through `Connection::progress_handler` returning `true` (E-12). On cancel or failure:
-  the snapshot, the staging directory and the `.part` file are removed and the destination is
-  never created. **E-01's 0-byte leftover is removed explicitly** — the same gap E-22 found in
-  `backup.rs`. A cancel after the finalise returns `false` and changes nothing.
+- **Cancellation.** An `AtomicBool` behind `Cancel`, read by the ZIP writer between buffers and
+  by the snapshot **between page batches** — not through `progress_handler`, which E-32 rules
+  out for a borrowed `&dyn Cancel`. On cancel or failure: the snapshot, the staging directory
+  and the `.part` file are removed and the destination is never created. **E-01's 0-byte
+  leftover is removed explicitly**, in `Snapshot`'s `Drop` so no call site has to remember —
+  the same gap E-22 found in `backup.rs`. A cancel after the finalise returns `false` and
+  changes nothing.
 - **`Snapshot` is `Send`** and owns its path and facts, holding no connection — the property
   that lets it cross to the worker, asserted by a `send_assertions` test mirroring
   `evara_db::scheduling`'s.
@@ -1340,6 +1411,36 @@ with no `formatVersion` bump; a changed **algorithm** bumps it.
 
 ### 4.1 `evara_db::transfer`
 
+> **This block is the design sketch, and Stage 1 is now the authority on the shape** — added
+> in revision 2.2, with no decision reopened. The sketch predates both the four Q answers and
+> the §C.6 deviation, so four things below read differently in the tree:
+>
+> - **Progress is a plain callback**, `&mut dyn FnMut(SnapshotProgress)` reporting *pages*, not
+>   a `Progress` trait reporting bytes. That was **Q1's approved answer**: a page copy is not a
+>   solve's shape, and `evara-solver`'s `ProgressSink` stays where it is rather than widening
+>   `evara-core` for one caller.
+> - **`snapshot_into` takes a directory and names the file itself**, and the `Snapshot` it
+>   returns **removes its own file on drop** unless `keep()` is called, rather than offering a
+>   `discard()` a failure path has to remember. The facts are accessors on `Snapshot` —
+>   `identity()`, `schema_version()`, `census()`, `watermark()`, `byte_len()` — rather than a
+>   `SnapshotFacts` struct; the manifest-shaped summary is assembled in `evara-project`, which
+>   is the crate that needs it.
+> - **One mechanism, and cancellation is the step boundary**, not `progress_handler` (§C.6,
+>   E-32).
+> - **`stage` and the free-function `table_census` are not here yet.** `stage` is phase V1 and
+>   needs a staging lifecycle to migrate into; `table_census(path)` reads a *destination* for
+>   the round-trip assertion. Both are Stage 2, which §8 now says. What Stage 1 provides
+>   instead is `UntrustedPayload` + `audit()` + `conformance::check` — phase V0 complete — and
+>   a census carried on the `Snapshot`.
+>
+> The `DbError` table below is likewise the sketch: Stage 1 added `SnapshotCancelled`,
+> `UnknownSchemaVersion`, `SchemaDoesNotConform` and `RenameBlocked`, reused the existing
+> `BackupRefused` where the sketch said `SnapshotRefused`, and reports corruption and
+> referential damage as **audit findings** rather than errors, because V0 reads them and the
+> caller composing the protocol is what refuses. The remaining names —
+> `DestinationIsOpen`, `DestinationPathUnsafe`, `InsufficientSpace` — belong to the protocol
+> and so to Stage 2.
+
 ```rust
 pub mod transfer {
     /// Cancellation, as a request the engine reads. Pending A1 this is
@@ -1638,10 +1739,26 @@ Every control below is proven available — E-09 through E-14.
 | `journal_mode` | **not set** | `open_plain`'s WAL pragma writes to the file header; the hardened path must skip `configure` entirely |
 | `evara_site_id()` | **not registered** | an unattributable write is impossible even if the pragma were lifted |
 
+**V0 does not write the payload, and is not directory-inert** — added in revision 2.2, because
+the paragraph above says "nothing is written" and that is true of the *file* and false of its
+*folder*. Opening a WAL-mode database with `SQLITE_OPEN_READ_ONLY` makes SQLite **create a
+`-wal` and a `-shm` beside it**, because read-only WAL access still needs the shared-memory
+file to locate the log. The payload's own bytes are byte-identical before and after an audit —
+that is the guarantee, and **E-29** is the test that asserts it — but the directory is not
+untouched. Handled rather than ignored: the payload sits in staging, and S3's
+`checkpoint_to_single_file` reduces it to one file before any rename, which is asserted
+separately. `?immutable=1` would suppress the sidecars and was **rejected**: it tells SQLite
+the file cannot change and makes concurrent modification undefined behaviour, which is not a
+property to assume about a file from somewhere else.
+
 Then, in this order, **touching no domain table**:
 
-1. `PRAGMA integrity_check`, cancellable through `progress_handler`. A **corruption** check
-   only — E-05 proves it returns `ok` on a database carrying a hostile trigger.
+1. `PRAGMA integrity_check`. A **corruption** check only — E-05 proves it returns `ok` on a
+   database carrying a hostile trigger. **Not cancellable today** — revision 2.2: E-32 rules
+   `progress_handler` out for a borrowed `&dyn Cancel`, and `hooks` is no longer enabled, so
+   the statement runs to completion. It is bounded by the staged payload's declared byte
+   length, which the container caps, and making the audit interruptible is a **Stage 2**
+   question to answer with a figure rather than a guess (§7.4).
 2. **`sqlite_master` conformance** against `expected(declared schemaVersion)`, built in a temp
    file by `run_up_to` (D10). This is what catches the hostile trigger, the extra table, the
    virtual table and the shadow table that step 1 misses.
@@ -1694,8 +1811,16 @@ fixture is checked in.
 
 ## 7. Performance and resource budgets
 
-Every figure is a **budget to be measured in Stages 1 and 2 and reported**, in the style the
-M6 and M8 records set. None is a measurement; nothing has been built.
+Every figure is a **budget to be measured and reported**, in the style the M6 and M8 records
+set. None of the figures below is a measurement.
+
+> **Where the measurements now happen — revision 2.2.** Stage 1 is built and measured **none**
+> of them. Every §7 figure needs a project of realistic size with real edit history, and
+> Stage 1 builds no such fixture: its projects are a handful of rows created inside a test.
+> **T-60, T-83 and the snapshot-inflation figure §7.2 now asks for are all Stage 2**, where the
+> round-trip fixtures first build a project at §7.3's scale. What Stage 1 *did* establish is in
+> [§C.2](#c2-evidence-log--what-is-proven-and-what-still-needs-an-experiment): behavioural
+> facts proven by tests, not performance figures.
 
 ### 7.1 Memory
 
@@ -1709,9 +1834,24 @@ M6 and M8 records set. None is a measurement; nothing has been built.
 
 | Phase | Peak extra | Where |
 | --- | --- | --- |
-| Export | ≈ 1 × project size (snapshot) + archive size | staging beside the destination; `.part` beside the destination |
+| Export | ≈ 1 × project size (snapshot) **+ its free pages** + archive size | staging beside the destination; `.part` beside the destination |
 | Import, Create mode | ≈ 1 × payload | staging beside the destination |
 | Import, Replace mode | ≈ 2 × payload (staged + aside) **and the kept copy is permanent** | staging, then `<stem>.replaced-<stamp>.evaraproj` |
+
+**The snapshot is not compacted** — revision 2.2. This table was written assuming
+`VACUUM INTO`, which defragments as it copies; the stepped backup §C.6 settled on reproduces
+the source page for page, free pages included. So "≈ 1 × project size" is now *the project
+file's size on disk*, not its live-data size, and a heavily edited project — one that has had
+timetables deleted, say — carries its free list into the snapshot. The archive absorbs most of
+it: free pages are mostly zeroes and deflate well, so the figure with a user-visible
+consequence (`.evara` size) moves far less than the staging figure does.
+
+**No compaction pass is added on that account, deliberately.** Snapshotting and then
+`VACUUM INTO`-ing our own snapshot is cheap to write, needs no cancellation — nobody else holds
+that file — and costs a second full write of it. Adding it now would be paying for a problem
+with no measurement. **Stage 2 measures the real inflation** (alongside T-60 and T-83, which
+moved there for the same want of a realistic fixture), and that figure, not this paragraph,
+decides whether the second pass is worth its cost.
 
 **No pre-flight free-space check** (§C.4): there is no free-space API in the tree and
 `unsafe_code` is forbidden, so it would need a dependency to do what D11's structure already
@@ -1729,6 +1869,7 @@ sections, ~300 timeslots, three saved timetables). **Ten times** is a synthetic
 | Measure | Realistic upper end | Ten times |
 | --- | --- | --- |
 | Project file size | 5–15 MiB | 60–150 MiB |
+| Snapshot size over the project file (free pages, §7.2) | to be measured — Stage 2 | — |
 | Archive size | to be measured — SQLite deflates well | — |
 | **Workspace lock held** (the figure with a user-visible consequence) | **≤ 500 ms** | ≤ 3 s |
 | Export, end to end | ≤ 1.5 s | ≤ 15 s |
@@ -1743,15 +1884,22 @@ is a second `SQLITE_OPEN_READ_ONLY` connection (E-03), not a longer lock.
 
 - ⚠ **`change_log` size** (D4) — the one component that grows with *use* rather than with
   school size. T-60 reports its share for a project with real edit history, and that
-  measurement decides A6.
+  measurement decides A6. **Stage 2** since revision 2.2.
+- ⚠ **The snapshot's free pages** (§C.6, §7.2) — new in revision 2.2, and the reason §7.2's
+  export row is no longer "≈ 1 × project size" of live data.
 - ⚠ **Replace mode's permanent kept copy** — §7.2.
 - ⚠ **Windows `MAX_PATH`** with a long destination plus a 45-character staging directory.
 - ⚠ **Antivirus holding a newly written file open** — D11's bounded rename retry, and T-70
   needs a manual pass as well as CI.
-- ⚠ **`integrity_check` on a very large payload** is unbounded in time; `progress_handler`
-  makes it cancellable but does not make it fast.
-- New feature flags on an existing dependency, no new crate: `rusqlite`'s `backup` (E-13),
-  `hooks` (E-12) and `limits` (E-11).
+- ⚠ **`integrity_check` on a very large payload** is unbounded in time, and since revision
+  2.2 it is **not interruptible either** — E-32 and the `hooks` removal. The payload's declared
+  byte length is the only bound; Stage 2 measures the audit on the ten-times project and
+  decides whether an interrupt mechanism is worth a `Send + 'static` cancellation path.
+- New feature flags on an existing dependency, no new crate: `rusqlite`'s `backup` (E-13) and
+  `limits` (E-11). **`hooks` is not enabled** — revision 2.2. It is `progress_handler`'s
+  feature, and E-32 is why that API is not on the snapshot path; a feature nothing calls is
+  compiled surface nobody tests, so Stage 1 removed it and recorded in `Cargo.toml` why it is
+  absent.
 
 ---
 
@@ -1760,11 +1908,13 @@ is a second `SQLITE_OPEN_READ_ONLY` connection (E-03), not a longer lock.
 ```
 Stage P  zip >= 9 upgrade   ✅ DONE — PR #35, 0faff47, 2026-11-01
    │
-Stage 1  evara-db::transfer  +  E-01…E-08 re-proven  +  fixtures feature   ◄── NEXT
+Stage 1  evara-db::transfer  +  E-01…E-08 re-proven                        ◄── DONE
    │        ├── settings migration V2 (replacement journal)
    │        └── S1 / S2 / S3 primitives the Stage 2 protocol is built from
    │
-Stage 2  evara-project container  ◄──── Stage P (satisfied)
+Stage 2  evara-project container  ◄──── Stage P (satisfied)                ◄── NEXT
+   │        ├── the fixtures feature, with its only consumer
+   │        ├── §7's measurements: T-60, T-83, snapshot inflation
    │        └── D11 as amended by §0.2 S1 + S2 + S3 — never D11's superseded text
    │
    ├── Stage 3  CLI + the generated historical-version matrix
@@ -1778,8 +1928,8 @@ Stage 2  evara-project container  ◄──── Stage P (satisfied)
 | Stage | Scope | Depends on | Done when |
 | --- | --- | --- | --- |
 | **P** | `calamine 0.36.1 → 0.37.0`, `rust_xlsxwriter 0.99.1 → 0.102.0`, converging `zip` on `9.1.3` and removing `8.6.0` from the tree. **Its own PR.** | — | ✅ **Done — PR #35, merged 2026-11-01 as `0faff47`.** Five gates green (`cargo deny check` all four sections, `rust:fmt`, `rust:lint`, `cargo test -p evara-import` 38, `cargo test --workspace --all-features` 1 709/0), CI on `windows-latest` + `macos-latest`. `typed-path` and `nix` licences **confirmed** (E-23). All three advisories resolved (E-24). The sixth gate, full `npm run check`, **did not pass** — two pre-existing jsdom timeouts unrelated to the change, reported not suppressed (§C.8). |
-| **1** | `evara-db::transfer`: the hardened V0 constructor, `snapshot_into` (both mechanisms) returning an owned `Snapshot`, `stage`, `table_census`, conformance against a generated reference, the eight new `DbError` variants. The replacement journal and `settings-migrations/V2`. `evara-db` gains a `fixtures` feature (§1.4.8). Fix the `backup.rs` 0-byte leftover (E-22). `evara_site_id` marked `SQLITE_INNOCUOUS` (A2). **Re-prove E-01…E-08 against the bundled engine** (T-75…T-82). Measure T-60 and T-83. **Build the S1/S2/S3 primitives** the Stage 2 protocol composes — safe destination claiming, filesystem-truth reconciliation, single-file-per-side sidecar handling — with T-84…T-90. | P (satisfied) | Those tests green; both measurements reported. |
-| **2** | `evara-project`: manifest, `checksums.json`, the acyclic verification order, ZIP writer and reader, entry policy, byte caps, staging lifecycle, **D11's protocol as amended by [§0.2](#02-mandatory-safeguards-from-the-second-review) S1/S2/S3 — never its superseded text** — and recovery, `seal` / `inspect` / `import` / `recover_pending`, `TransferError`. Container migration chain, empty, at `formatVersion 1`. Takes the direct `zip 9.1.3` dependency. | 1, P | Round-trip, corruption, replacement and recovery tests green, **T-84…T-90 included**; §7 budgets measured. Replacement support is **not** complete until all three safeguards are implemented and covered. |
+| **1** | `evara-db::transfer`: the hardened V0 constructor, `snapshot_into` returning an owned `Snapshot` that carries its own census, conformance against a generated reference, the new `DbError` variants. The replacement journal and `settings-migrations/V2`. Fix the `backup.rs` 0-byte leftover (E-22). `evara_site_id` marked `SQLITE_INNOCUOUS` (A2). **Re-prove E-01…E-08 against the bundled engine** (T-75…T-82). **Build the S1/S2/S3 primitives** the Stage 2 protocol composes — safe destination claiming, filesystem-truth reconciliation, single-file-per-side sidecar handling — with T-84…T-90. | P (satisfied) | ✅ **Done — PR #37.** `cargo deny check` four sections ok, `rust:fmt` and `rust:lint` clean, `cargo test --workspace --all-features` **1 794 / 0**, `npm run check` green, CI green on `windows-latest` and `macos-latest`. T-75…T-82 and T-84…T-90 green; E-27…E-32 added; **E-04 corrected**. **One deviation**: one snapshot mechanism, not two (§C.6, E-32). **Three items moved out**: the `fixtures` feature to Stage 2 with its only consumer, and T-60 and T-83 to Stage 2 for want of a realistic fixture (§C.2). **No ZIP, manifest, CLI command, Tauri command or screen**, and no project migration. |
+| **2** | `evara-project`: manifest, `checksums.json`, the acyclic verification order, ZIP writer and reader, entry policy, byte caps, staging lifecycle, **D11's protocol as amended by [§0.2](#02-mandatory-safeguards-from-the-second-review) S1/S2/S3 — never its superseded text** — and recovery, `seal` / `inspect` / `import` / `recover_pending`, `TransferError`. Container migration chain, empty, at `formatVersion 1`. Takes the direct `zip 9.1.3` dependency. **Plus, moved here from Stage 1:** `evara-db`'s `fixtures` feature (§1.4.8), whose only consumer is this stage's round-trip tests; `transfer::stage` — phase V1, which needs the staging lifecycle to migrate *into* — and the free-function `table_census(path)` the round-trip assertion reads a *destination* with; and the §7 measurements — **T-60, T-83 and the snapshot-inflation figure** — which need the realistic fixture this stage is the first to build. | 1, P | Round-trip, corruption, replacement and recovery tests green; §7 budgets **measured**, including T-60, T-83 and §7.2's inflation figure, and the §7.2 compaction question answered from them. Replacement support is **not** complete until all three safeguards are composed on Stage 1's primitives and covered end to end. |
 | **3** | `evara export` / `import` / `inspect`; move them from `PLANNED` to `IMPLEMENTED`. T-41's generated matrix in CI on both platforms. | 2 | Matrix green for V1…V18 on Windows and macOS. |
 | **4** | Eleven Tauri commands, `TransferSessions` in `AppState` cleared on create/open/close, generalised `CoalescingSink`, `transfer://` events, extended `ProjectError`, `Workspace::remember_imported_project`, `Settings::projects_with_identity`, `RecentProject::duplicate_identity`, typegen. | 2 | `npm run check` green; command tests green. |
 | **5** | Export and Import screens: native dialogs, inspect-then-confirm, the identity warnings of D13 verbatim, destination conflict with Replace and the keep-name named, progress with cancel, the synced-folder advisory, the recovery report, the recent-list entry with "Open now", and a keyboard path to all of it. | 4 | vitest green; the GUI smoke-test gap M9A left is not widened. |
@@ -1859,17 +2009,25 @@ or in any CI artefact.
 
 ### Snapshot mechanism — the Stage 1 proof tests
 
-| # | Test | Where |
-| --- | --- | --- |
-| T-75 | `VACUUM INTO` under `PRAGMA query_only = ON` is refused (re-proves E-01 on the bundled engine) | `evara-db` |
-| T-76 | …and the 0-byte target it leaves is removed by `snapshot_into` (E-01 + E-22) | `evara-db` |
-| T-77 | The backup API inside `BEGIN DEFERRED` on a `query_only` connection produces a complete, consistent copy (E-02), and `step(-1)` holds the read lock for the whole copy | `evara-db` |
-| T-78 | `VACUUM INTO` from a `SQLITE_OPEN_READ_ONLY` connection works (E-03) — the documented fallback | `evara-db` |
-| T-79 | `VACUUM INTO` refuses an existing target (E-04) | `evara-db` |
-| T-80 | `integrity_check` returns `ok` on a database with a hostile trigger — the test that justifies conformance existing (E-05) | `evara-db` |
-| T-81 | `foreign_key_check` reports what `integrity_check` calls `ok` (E-06) | `evara-db` |
-| T-82 | `Snapshot` is `Send` and holds no connection — `send_assertions`, mirroring `evara_db::scheduling`'s | `evara-db` |
-| T-83 | The workspace lock is held for ≤ 500 ms at the realistic upper end; the figure is reported | `evara-db` |
+**As implemented in Stage 1.** The numbering below is the one in the code, and it is
+authoritative: revision 2's draft assigned T-78…T-82 to different claims, and the mapping was
+reconciled in revision 2.2 rather than leaving the record pointing at identifiers that mean
+something else in the tree. Every claim the draft listed is covered; two of the eight are
+covered by a named test rather than a `T-` number, which is noted.
+
+| # | Test | Claim | Where |
+| --- | --- | --- | --- |
+| T-75 | `t75_vacuum_into_is_refused_under_query_only_and_leaves_a_zero_byte_target` | E-01, both halves | `evara-db` ✅ |
+| T-76 | `t76_the_backup_api_works_from_a_query_only_connection` | E-02 | `evara-db` ✅ |
+| T-77 | `t77_a_stepped_backup_in_a_read_transaction_does_not_see_a_concurrent_write` | **E-27** — the pinned read snapshot, the fact the design rests on | `evara-db` ✅ |
+| T-78 | `t78_vacuum_into_refuses_a_non_empty_target_but_adopts_a_zero_length_one` | **E-28**, which corrects E-04 | `evara-db` ✅ |
+| T-79 | `t79_integrity_check_is_ok_on_a_database_carrying_a_hostile_trigger` | E-05 — the test that justifies conformance existing | `evara-db` ✅ |
+| T-80 | `t80_foreign_key_check_reports_a_violation_integrity_check_calls_ok` | E-06 | `evara-db` ✅ |
+| T-81 | `t81_writable_schema_succeeds_by_default_and_defensive_blocks_it` | E-07 | `evara-db` ✅ |
+| T-82 | `t82_a_vacuum_into_to_a_missing_directory_leaves_nothing_behind` | E-08 — so E-01's leftover is specific to the refused write | `evara-db` ✅ |
+| — | `a_read_only_open_flag_is_not_the_same_as_the_query_only_pragma` | E-03, the draft's T-78 | `evara-db` ✅ |
+| — | `send_assertions::a_snapshot_can_be_moved_to_a_worker` | `Snapshot` is `Send`, the draft's T-82 | `evara-db` ✅ |
+| T-83 | Lock duration for a **stepped backup** at the realistic upper end — total hold and per-step overhead | ≤ 500 ms (§7.3) | **Stage 2** — §C.2 says why |
 
 ### Versions and compatibility
 
@@ -1905,13 +2063,23 @@ or in any CI artefact.
 | T-66 | Replacing the destination whose project is **currently open** → `DestinationIsOpen`, and the file is untouched | `src-tauri` |
 | T-67 | Each of D13's three sentences is produced verbatim for its case | `src-tauri`, vitest |
 | T-70 | **Crash recovery**, one test per phase: kill between each journal commit and the rename that follows, then run `recover_pending` and assert the state is exactly `{old intact}` or `{new in place, old kept}` — never a partial destination. Plus a bounded-retry test with the destination held open | `evara-project` |
-| T-84 | **§0.2 S1**: a destination that does not exist is claimed by `create_new(true)`; a **zero-length** destination with no journal row is **occupied**, is refused without `Replace`, and is kept as a `.replaced-` copy when Replace is used — never adopted and never overwritten | `evara-project` |
-| T-85 | **§0.2 S1**: the TOCTOU window is closed — a second claim of the same destination between the first claim and its rename fails, and the first import's destination is unharmed | `evara-project` |
-| T-86 | **§0.2 S2**: journal `PLACED` with the destination **absent** (crash between the commit and the rename) → recovery restores the old project to the destination and **does not** move it to the keep-name. This is the data-loss case revision 2's table got wrong | `evara-project` |
-| T-87 | **§0.2 S2**: every row of the reconciliation table, driven by fabricated on-disk states rather than by the journal, including the two **ambiguous** combinations, which must report and change nothing | `evara-project` |
-| T-88 | **§0.2 S2**: the dominating invariant, asserted directly — no code path releases the aside set unless a destination satisfying `looks_like_a_project` has been observed | `evara-project` |
-| T-89 | **§0.2 S3**: both sides are a **single file** before they move — the destination is checkpointed and its `-wal`/`-shm` are gone before the aside rename, and a sidecar that cannot be removed refuses the replacement **before anything has moved** | `evara-db`, `evara-project` |
-| T-90 | **§0.2 S3**: interrupt at each individual sidecar step and assert that **no reachable state pairs a main file with a sidecar belonging to a different database** — including the pre-rename assertion that no `-wal`, `-shm` or `-journal` exists at the destination | `evara-project` |
+| T-84 | **§0.2 S1**: a destination that does not exist is claimed by `create_new(true)`; a **zero-length** destination with no journal row is **occupied**, is refused without `Replace`, and is kept as a `.replaced-` copy when Replace is used — never adopted and never overwritten | `evara-db` ✅ · `evara-project` |
+| T-85 | **§0.2 S1**: the TOCTOU window is closed — a second claim of the same destination between the first claim and its rename fails, and the first import's destination is unharmed | `evara-db` ✅ · `evara-project` |
+| T-86 | **§0.2 S2**: journal `PLACED` with the destination **absent** (crash between the commit and the rename) → recovery restores the old project to the destination and **does not** move it to the keep-name. This is the data-loss case revision 2's table got wrong | `evara-db` ✅ · `evara-project` |
+| T-87 | **§0.2 S2**: every row of the reconciliation table, driven by fabricated on-disk states rather than by the journal, including the two **ambiguous** combinations, which must report and change nothing | `evara-db` ✅ · `evara-project` |
+| T-88 | **§0.2 S2**: the dominating invariant, asserted directly — no code path releases the aside set unless a destination satisfying `looks_like_a_project` has been observed | `evara-db` ✅ · `evara-project` |
+| T-89 | **§0.2 S3**: both sides are a **single file** before they move — the destination is checkpointed and its `-wal`/`-shm` are gone before the aside rename, and a sidecar that cannot be removed refuses the replacement **before anything has moved** | `evara-db` ✅ · `evara-project` |
+| T-90 | **§0.2 S3**: interrupt at each individual sidecar step and assert that **no reachable state pairs a main file with a sidecar belonging to a different database** — including the pre-rename assertion that no `-wal`, `-shm` or `-journal` exists at the destination | `evara-db` ✅ · `evara-project` |
+
+**T-84…T-90 are owed twice, and the first half is paid** — revision 2.2. Revision 2 listed them
+against `evara-project`, but §8 put the S1/S2/S3 *primitives* in Stage 1, which is where the
+decisions they assert actually live. Stage 1 therefore asserts each one against the primitive:
+✅ in `evara-db`, including **T-87 over all 192 reachable fact combinations** rather than only
+the twelve rows written down, **T-86** as the data-loss case directly, and **T-90** against a
+child process that is genuinely killed (`std::process::abort`) at each journal-commit-to-rename
+window, whose real disk state is then fed to the same `reconcile`. The `evara-project` half —
+the same assertions against the **composed protocol**, with the `.replaced-` keep-name and the
+bounded rename retry — is Stage 2's, and Stage 2 is not done until they are green there too.
 
 ### Portability, scale and hygiene
 
@@ -1921,7 +2089,7 @@ or in any CI artefact.
 | T-57 | The full suite runs on `windows-latest` and `macos-latest` | CI |
 | T-58 | An archive produced on Windows imports on macOS and vice versa, identical census — by passing the archive as a CI artefact between jobs | CI |
 | T-59 | The ten-times project exports and imports inside §7's budgets, with peak RSS asserted | `evara-project` |
-| T-60 | The change log's share of the payload, reported for a project with realistic edit history — the D4/A6 measurement | `evara-db` |
+| T-60 | The change log's share of the payload, reported for a project with realistic edit history — the D4/A6 measurement. **Stage 2** since revision 2.2: Stage 1 builds no project with real edit history, and a figure measured against a handful of test rows would not have tested the budget | `evara-project` |
 | T-61 | No checked-in `.evara` or `.evaraproj` fixture exists; the matrix generates every one | CI |
 | T-62 | `evara-project`'s public API exposes no `rusqlite` and no `zip` type — asserted by not having the dev-dependency, as `evara-db` does | `evara-project` |
 
@@ -2011,8 +2179,8 @@ migration chain is the one already shipped (D1). Two version axes, one refusal e
 `capabilities` computed from data (D3). The change log travels complete (D4). Every
 evaluation, finding, lock and lineage edge travels (D5). Nothing is extracted to a path from
 the archive (D6). Import stages, verifies, migrates, then renames, and rebuilds nothing (D7).
-Export holds the workspace lock for one statement, and every manifest fact comes from the
-snapshot (D8). The session is the generation session's state machine, and an import does not
+Export holds the workspace lock for the snapshot alone — one pinned read transaction since
+revision 2.2, not one statement — and every manifest fact comes from the snapshot (D8). The session is the generation session's state machine, and an import does not
 open what it imported (D9). Conformance against a generated reference, before any write (D10).
 Replacement is journalled, non-destructive and deterministically recoverable (D11). The engine
 is in `evara-db`, the format in `evara-project` (D12). Identity is preserved and duplication is
@@ -2028,8 +2196,10 @@ disclosed (D13).
    `fsync`.
 3. **macOS lets a rename over an open file succeed.** A second installation holding the
    replaced project cannot be detected. R12; the kept copy is the mitigation.
-4. **`change_log` size is still unmeasured.** T-60 decides A6, and it is the one component
-   that grows with use rather than with school size.
+4. **`change_log` size is still unmeasured**, and so is the snapshot's free-page inflation
+   (§7.2). T-60 decides A6, and it is the one component that grows with use rather than with
+   school size. Both are **Stage 2** since revision 2.2, which is also the first stage with a
+   fixture either figure can honestly be measured against.
 5. ~~**Stage P is a breaking dependency bump across two 0.x crates.**~~ **Retired — it
    happened.** PR #35 landed it with **no source change** (E-26), the licence question came
    out clean (E-23), and all three advisories are resolved (E-24). What remains of this risk
