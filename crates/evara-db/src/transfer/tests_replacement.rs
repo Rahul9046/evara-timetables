@@ -40,7 +40,7 @@ const CHILD_DIR: &str = "EVARA_TEST_REPLACEMENT_DIR";
 fn row(destination: &Path, staging: &Path, phase: ReplacementPhase) -> PendingReplacement {
     PendingReplacement {
         id: Uuid::now_v7(),
-        phase,
+        phase: Some(phase),
         destination: destination.to_path_buf(),
         staging_dir: staging.to_path_buf(),
         keep_name: Some(destination.with_extension("replaced-stamp.evaraproj")),
@@ -679,7 +679,7 @@ fn a_journal_row_is_written_advanced_and_cleared() {
         .begin_replacement(&destination, &staging)
         .expect("begin");
 
-    assert_eq!(opened.phase, ReplacementPhase::Staged);
+    assert_eq!(opened.phase, Some(ReplacementPhase::Staged));
     assert_eq!(opened.keep_name, None, "there is no keep-name yet");
 
     let keep = dir.path().join("school.replaced-2026.evaraproj");
@@ -692,9 +692,12 @@ fn a_journal_row_is_written_advanced_and_cleared() {
 
     let pending = settings.pending_replacements().expect("list");
     assert_eq!(pending.len(), 1);
-    let (stored, recognised) = &pending[0];
-    assert!(recognised, "the row must be recognised");
-    assert_eq!(stored.phase, ReplacementPhase::Placed);
+    let stored = &pending[0];
+    assert_eq!(
+        stored.phase,
+        Some(ReplacementPhase::Placed),
+        "a phase this build knows reaches the caller as itself"
+    );
     assert_eq!(
         stored.keep_name.as_deref(),
         Some(keep.as_path()),
@@ -779,6 +782,90 @@ fn a_fourth_phase_is_refused_by_the_schema() {
     assert!(
         error.to_string().contains("CHECK"),
         "expected a CHECK violation, got: {error}"
+    );
+}
+
+#[test]
+fn a_phase_a_newer_build_wrote_is_carried_as_unknown() {
+    // The CHECK above closes the vocabulary *this* build writes. A later release that adds a
+    // phase would widen it, and that row then reaches this build. It must arrive as `None`
+    // and never as one of the three -- acting on a fabricated STAGED would delete the
+    // staging directory of a protocol this build cannot see.
+    let dir = TempDir::new().expect("temp dir");
+    let path = dir.path().join("settings.sqlite");
+    let mut settings = Settings::open_at(&path).expect("open");
+    let opened = settings
+        .begin_replacement(
+            &dir.path().join(format!("school.{PROJECT_EXTENSION}")),
+            &dir.path().join(".evara-import-1"),
+        )
+        .expect("begin");
+
+    {
+        // Written past the CHECK, which is the only way to stand in for a newer build.
+        let conn = crate::connection::open_plain(&path).expect("reopen plainly");
+        conn.execute("PRAGMA writable_schema = ON", []).expect("on");
+        conn.execute(
+            "UPDATE sqlite_master
+                SET sql = replace(sql, '''PLACED''', '''PLACED'', ''VERIFIED''')
+              WHERE type = 'table' AND name = 'pending_replacement'",
+            [],
+        )
+        .expect("widen the CHECK");
+        conn.execute("PRAGMA writable_schema = OFF", [])
+            .expect("off");
+        drop(conn);
+
+        let conn = crate::connection::open_plain(&path).expect("reopen for the write");
+        conn.execute(
+            "UPDATE pending_replacement SET phase = 'VERIFIED' WHERE id = ?1",
+            [opened.id.to_string()],
+        )
+        .expect("a newer build's phase");
+    }
+
+    let pending = settings.pending_replacements().expect("list");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(
+        pending[0].phase, None,
+        "a phase this build does not know must arrive as unknown, not as a default"
+    );
+    assert_eq!(
+        reconcile(nothing(), pending[0].phase),
+        RecoveryAction::Report(Ambiguity::UnknownPhase),
+        "and must be reported rather than acted on"
+    );
+}
+
+#[test]
+fn a_journal_row_whose_id_will_not_parse_is_corruption() {
+    // `CLAUDE.md`: a persisted identifier that will not parse is corruption, not input. A
+    // nil-UUID fallback would make every damaged row compare equal to every other, and
+    // `clear_replacement` would then never match the row it was asked to clear.
+    let dir = TempDir::new().expect("temp dir");
+    let path = dir.path().join("settings.sqlite");
+    let settings = Settings::open_at(&path).expect("open");
+
+    let conn = crate::connection::open_plain(&path).expect("reopen plainly");
+    conn.execute(
+        "INSERT INTO pending_replacement
+             (id, phase, destination, staging_dir, started_at, updated_at)
+         VALUES ('not-a-uuid', 'STAGED', '/a', '/b', 'now', 'now')",
+        [],
+    )
+    .expect("the id column has no format check, so this is reachable");
+    drop(conn);
+
+    let error = settings
+        .pending_replacements()
+        .expect_err("a damaged identifier must be refused, not substituted");
+    assert!(
+        matches!(
+            error,
+            DbError::CorruptIdentifier { ref column, ref value }
+                if column == "pending_replacement.id" && value == "not-a-uuid"
+        ),
+        "expected CorruptIdentifier naming the column and the value, got {error:?}"
     );
 }
 

@@ -93,8 +93,15 @@ impl ReplacementPhase {
 pub struct PendingReplacement {
     /// Row identity, UUIDv7.
     pub id: Uuid,
-    /// How far the protocol intended to have got.
-    pub phase: ReplacementPhase,
+    /// How far the protocol intended to have got, or `None` for a stored phase this build
+    /// does not recognise.
+    ///
+    /// An `Option` rather than a value with a default, because a row written by a newer
+    /// build describes a protocol this one cannot see and the only safe reading of it is
+    /// "unknown". It is passed straight to [`reconcile`], which reports
+    /// [`Ambiguity::UnknownPhase`] and touches nothing — whereas substituting any of the
+    /// three known phases would have recovery act on an intent nobody recorded.
+    pub phase: Option<ReplacementPhase>,
     /// The project file being replaced.
     pub destination: PathBuf,
     /// The staging directory, a sibling of the destination.

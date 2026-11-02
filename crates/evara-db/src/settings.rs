@@ -225,7 +225,7 @@ impl Settings {
         let now = now_iso8601();
         let row = PendingReplacement {
             id: Uuid::now_v7(),
-            phase: ReplacementPhase::Staged,
+            phase: Some(ReplacementPhase::Staged),
             destination: destination.to_path_buf(),
             staging_dir: staging_dir.to_path_buf(),
             keep_name: None,
@@ -240,7 +240,7 @@ impl Settings {
                  VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6)",
                 (
                     row.id.to_string(),
-                    row.phase.as_str(),
+                    ReplacementPhase::Staged.as_str(),
                     row.destination.to_string_lossy().as_ref(),
                     row.staging_dir.to_string_lossy().as_ref(),
                     &row.started_at,
@@ -317,45 +317,71 @@ impl Settings {
 
     /// Every in-flight replacement, oldest first.
     ///
-    /// Read at startup. An unrecognised `phase` is carried through as `None` by
-    /// [`ReplacementPhase::parse`] and reported by [`reconcile`](crate::transfer::reconcile)
-    /// rather than guessed at — a row written by a newer build describes a protocol this one
-    /// cannot see.
+    /// Read at startup. An unrecognised `phase` reaches the caller as
+    /// [`PendingReplacement::phase`] `== None` and is reported by
+    /// [`reconcile`](crate::transfer::reconcile) rather than guessed at — a row written by a
+    /// newer build describes a protocol this one cannot see.
     ///
     /// # Errors
     ///
-    /// Propagates any SQLite failure.
-    pub fn pending_replacements(&self) -> Result<Vec<(PendingReplacement, bool)>> {
+    /// - [`DbError::CorruptIdentifier`] if a stored `id` will not parse. `CLAUDE.md`'s rule,
+    ///   and `repo::row::parse_id`'s: a nil-UUID fallback would make every damaged row
+    ///   compare equal to every other, and `clear_replacement` would then never match the
+    ///   row it was asked to clear. The whole listing fails, which is the right answer — a
+    ///   settings database somebody has edited by hand is not a file recovery should act on.
+    /// - Any SQLite failure.
+    pub fn pending_replacements(&self) -> Result<Vec<PendingReplacement>> {
+        /// One journal row exactly as stored, before anything is parsed.
+        type StoredRow = (
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            String,
+            String,
+        );
+
         let mut stmt = self.conn.prepare(
             "SELECT id, phase, destination, staging_dir, keep_name, started_at, updated_at
                FROM pending_replacement
               ORDER BY started_at ASC, id ASC",
         )?;
-        let rows = stmt.query_map([], |row| {
-            let id: String = row.get(0)?;
-            let phase: String = row.get(1)?;
-            let destination: String = row.get(2)?;
-            let staging_dir: String = row.get(3)?;
-            let keep_name: Option<String> = row.get(4)?;
-            let parsed = ReplacementPhase::parse(&phase);
-            Ok((
-                PendingReplacement {
-                    // A journal row whose id will not parse is corruption, not input. It is
-                    // carried as nil here rather than failing the whole listing, and the
-                    // `recognised` flag below is what stops it being acted on — reporting
-                    // one damaged row is better than refusing to list the sound ones.
-                    id: Uuid::parse_str(&id).unwrap_or(Uuid::nil()),
-                    phase: parsed.unwrap_or(ReplacementPhase::Staged),
-                    destination: PathBuf::from(destination),
-                    staging_dir: PathBuf::from(staging_dir),
-                    keep_name: keep_name.map(PathBuf::from),
-                    started_at: row.get(5)?,
-                    updated_at: row.get(6)?,
+        // Collected as text first, so the identifier can be refused with a typed error:
+        // row decoding runs inside a `rusqlite::Result` closure and cannot return one.
+        let stored: Vec<StoredRow> = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            })?
+            .collect::<std::result::Result<_, _>>()?;
+
+        stored
+            .into_iter()
+            .map(
+                |(id, phase, destination, staging_dir, keep_name, started_at, updated_at)| {
+                    Ok(PendingReplacement {
+                        id: Uuid::parse_str(&id).map_err(|_| DbError::CorruptIdentifier {
+                            column: "pending_replacement.id".to_owned(),
+                            value: id.clone(),
+                        })?,
+                        phase: ReplacementPhase::parse(&phase),
+                        destination: PathBuf::from(destination),
+                        staging_dir: PathBuf::from(staging_dir),
+                        keep_name: keep_name.map(PathBuf::from),
+                        started_at,
+                        updated_at,
+                    })
                 },
-                parsed.is_some() && Uuid::parse_str(&id).is_ok(),
-            ))
-        })?;
-        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+            )
+            .collect()
     }
 }
 
