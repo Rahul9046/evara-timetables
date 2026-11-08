@@ -30,7 +30,7 @@
 | 1 | 2026-10-28 | First architecture proposal. Seven findings returned by review. |
 | 2 | 2026-10-29 | All seven findings resolved (Part C). **Approved for implementation**: A1–A5 granted, A6–A7 deferred, three mandatory safeguards attached ([§0.2](#02-mandatory-safeguards-from-the-second-review)). D11's three known-wrong passages annotated as superseded in place. |
 | 2.1 | 2026-11-01 | **Documentation only — no design change.** Stage P recorded as complete (PR #35, `0faff47`): §C.8 rewritten as delivered, all three RUSTSEC advisories named and resolved, E-23…E-26 added, finding 6's last pending experiment closed, D12 and §1.4.9 corrected to say `evara-project` has no `zip` dependency *yet*, §8 and the appendix risks updated, and S3 extended to state recovery across the individual sidecar moves explicitly. **No decision was reopened and no superseded D11 text was reinstated.** |
-| 2.2 | 2026-11-02 | **Stage 1 folded in** (PR #37, `cc025e2`…`ff695f0`). One **correction** — E-04 was wrong, and was cited as confirming shipped code (§C.2, §C.6, and `backup.rs` on the branch). One **deviation accepted** — D8's two snapshot mechanisms became one, with the free-page cost stated (§C.6, D8, §7.2). One fact the record did not state — **a read-only open creates WAL sidecars** (§6.1). Six additions, **E-27…E-32**. The discharged experiments moved out of the pending list, and **T-60 and T-83 moved to Stage 2**: neither can be measured without a project with real edit history, and Stage 2's round-trip fixtures are the first to build one. `hooks` removed from the `rusqlite` feature list. **No other decision was reopened** — S1, S2 and S3 stand exactly as §0.2 specifies them, and no superseded D11 text was reinstated. |
+| 2.2 | 2026-11-02 | **Stage 1 folded in** (PR #37, `cc025e2`…`ff695f0`). One **correction** — E-04 was wrong, and was cited as confirming shipped code (§C.2, §C.6, and `backup.rs` on the branch). One **deviation accepted** — D8's two snapshot mechanisms became one, with the free-page cost stated (§C.6, D8, §7.2). One fact the record did not state — **a read-only open creates WAL sidecars** (§6.1). Six additions, **E-27…E-32**. The discharged experiments moved out of the pending list, and **T-60 and T-83 moved to Stage 2**: neither can be measured without a project with real edit history, and Stage 2's round-trip fixtures are the first to build one. `hooks` removed from the `rusqlite` feature list. **No other decision was reopened** — S1, S2 and S3 stand exactly as §0.2 specifies them, and no superseded D11 text was reinstated. Three later corrections, from the branch's own review commits (`ff695f0`, `2b30105`), which landed after this revision was first drafted: the invariant sweep is **T-88's and is 128 combinations**, not T-87's and not 192 (§9); D11's journal block now carries the **uniqueness index** and the `CHECK`s the migration actually ships; and D11 states what happens when a journal row is **damaged or written by a newer build**. |
 
 > **Reading order for an implementer.** [§0.1](#01-approval-status-of-a1a7) is the
 > authoritative approval status and [§0.2](#02-mandatory-safeguards-from-the-second-review) the
@@ -1043,20 +1043,44 @@ A settings-database table — **not** a project migration (E-21):
 
 ```sql
 CREATE TABLE pending_replacement (
-    id           TEXT PRIMARY KEY NOT NULL,            -- UUIDv7
-    phase        TEXT NOT NULL CHECK (phase IN ('STAGED', 'ASIDE', 'PLACED')),
-    destination  TEXT NOT NULL,
-    staging_dir  TEXT NOT NULL,
-    keep_name    TEXT,                                 -- where the old set will be kept
-    started_at   TEXT NOT NULL,
-    updated_at   TEXT NOT NULL
+    id           TEXT    PRIMARY KEY NOT NULL,         -- UUIDv7
+    phase        TEXT    NOT NULL CHECK (phase IN ('STAGED', 'ASIDE', 'PLACED')),
+    destination  TEXT    NOT NULL CHECK (length(trim(destination)) > 0),
+    staging_dir  TEXT    NOT NULL CHECK (length(trim(staging_dir)) > 0),
+    keep_name    TEXT             CHECK (keep_name IS NULL OR length(trim(keep_name)) > 0),
+    started_at   TEXT    NOT NULL,
+    updated_at   TEXT    NOT NULL
 ) STRICT;
+
+-- At most one in-flight replacement per destination: two concurrent replacements of one
+-- file is not a state the protocol has an answer for, so uniqueness turns a race into a
+-- refusal. `destination` is NOT NULL, so this needs no COALESCE.
+CREATE UNIQUE INDEX pending_replacement_destination_unique
+    ON pending_replacement (destination);
+
+-- Recovery reads every row at startup, oldest first.
+CREATE INDEX idx_pending_replacement_started ON pending_replacement (started_at);
 ```
 
 The settings database is the right home: Evara owns it, it is transactional, it is WAL, and
 it is the only store that is reachable at startup without knowing which project to look at.
 **Every phase row is committed before the rename that advances it**, which is what makes
 recovery deterministic rather than a guess.
+
+**Reading a damaged row** — revision 2.2, from Stage 1's review. Two cases the first draft of
+this section did not state, both now decided and tested:
+
+- An `id` that will not parse as a UUID is **`DbError::CorruptIdentifier`**, never a
+  substituted `Uuid::nil()`. `CLAUDE.md`'s rule is general, and it bites hardest here: a nil
+  fallback would make every damaged row compare equal to every other, and recovery compares
+  rows. `a_journal_row_whose_id_will_not_parse_is_corruption`.
+- A `phase` this build does not recognise — one a **newer** Evara wrote — is carried as an
+  unknown rather than coerced to `STAGED`, and **acted on by nothing**. The `CHECK` keeps the
+  three known spellings exclusive within a build, so an unrecognised value can only have come
+  from a build that knows more than this one; guessing its intent is how a newer protocol's
+  half-finished replacement gets completed wrongly by an older binary.
+  `a_phase_a_newer_build_wrote_is_carried_as_unknown`, and
+  `an_unrecognised_phase_is_reported_and_acted_on_by_nothing`.
 
 ### Sidecars are one set
 
@@ -2074,12 +2098,24 @@ covered by a named test rather than a `T-` number, which is noted.
 **T-84…T-90 are owed twice, and the first half is paid** — revision 2.2. Revision 2 listed them
 against `evara-project`, but §8 put the S1/S2/S3 *primitives* in Stage 1, which is where the
 decisions they assert actually live. Stage 1 therefore asserts each one against the primitive:
-✅ in `evara-db`, including **T-87 over all 192 reachable fact combinations** rather than only
-the twelve rows written down, **T-86** as the data-loss case directly, and **T-90** against a
+✅ in `evara-db`, including **T-87 over every row of the table under all three phases**, so the
+facts decide and the journal does not; **T-88 over all 128 reachable combinations** — four
+destination states × staged × aside × keep-name × four phases — rather than only the twelve
+rows written down; **T-86** as the data-loss case directly, and **T-90** against a
 child process that is genuinely killed (`std::process::abort`) at each journal-commit-to-rename
 window, whose real disk state is then fed to the same `reconcile`. The `evara-project` half —
 the same assertions against the **composed protocol**, with the `.replaced-` keep-name and the
 bounded rename retry — is Stage 2's, and Stage 2 is not done until they are green there too.
+
+**What T-88's sweep deliberately does not reach.** Two of `DiskFacts`' fields are held at "no
+sidecars" across all 128 combinations, by decision rather than omission: `DestinationState::Project`
+*means* "no sidecar beside it" — `DiskFacts::observe` applies that conjunction once — so a
+fabricated project-with-a-`-wal` is a state the observer cannot produce, and sweeping over it
+would assert about nothing. The sidecar-bearing destinations are T-89's. The one combination the
+sweep **does** reach without the invariant firing — an **absent** main file with a stray
+sidecar — is pinned separately by
+`an_absent_destination_with_a_stray_sidecar_still_blocks_the_rename`, which shows that what
+blocks the rename there is `refuse_if_sidecars_present` (S3 step 4) and not the reconciler.
 
 ### Portability, scale and hygiene
 
