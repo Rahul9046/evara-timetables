@@ -78,14 +78,33 @@ directories = "6"
 # `chrono` never leaves `evara-import`: a date is rendered to `YYYY-MM-DD` at the parser's
 # edge and travels as text, so it is not named in any signature. MIT OR Apache-2.0.
 #
-# Held at 0.37 or later deliberately: 0.36 required `zip ^8.6`, and `zip 8.6.0` carries
-# RUSTSEC-2026-0367, -0368 and -0369 — three extraction vulnerabilities, all patched in
-# `zip >= 9.0`. 0.37 is the first calamine release that requires `zip ^9.0`, so this bound
-# is a security floor and not a preference: do not relax it below 0.37 to avoid an API
-# change. Evara never calls the affected `extract` paths — `evara-import` is given bytes
-# and a name — but an unreachable vulnerability is still one `cargo deny` fails on, and
-# M10's Stage 2 will link a ZIP reader for real.
-calamine = { version = "0.37", features = ["dates"] }
+# Held at 0.38 or later deliberately, and the floor has moved twice for security reasons.
+# Both rounds are recorded because each bound looks arbitrary without its advisory:
+#
+#   - 0.36 required `zip ^8.6`, and `zip 8.6.0` carries RUSTSEC-2026-0367, -0368 and -0369,
+#     three extraction vulnerabilities patched in `zip >= 9.0`. 0.37 was the first release
+#     requiring `zip ^9.0`, which is why the floor was 0.37.
+#   - 0.37 itself carries **RUSTSEC-2026-0436**, in calamine's own code rather than a
+#     dependency's: its Compound File Binary (OLE2) parser indexes fixed offsets into
+#     128-byte directory chunks without checking the chunk length, so a directory stream
+#     whose length is not a multiple of 128 panics; and its DIFAT loader grows without
+#     bounding the chain, so a crafted 512-byte file drives a multi-gigabyte allocation.
+#     Denial of service, not memory unsafety — safe Rust turns the out-of-bounds read into
+#     a bounds-checked panic. Fixed in 0.38.0 (tafia/calamine#762).
+#
+# This round is closer to Evara than the `zip` one was. That round's vulnerabilities were in
+# `extract` paths `evara-import` never calls; this one is in the reader itself, and the
+# advisory names `open_workbook`, `Xls::new` and `Xlsb::new` as the entry points. Evara
+# reaches none of the three today: `SourceFormat::of` accepts only `.xlsx` and `.csv` — `.xls`
+# and `.xlsb` are an `UnsupportedExtension`, `.xlsm`/`.xltm` a `MacroWorkbook` refusal — and
+# the one reader built is `Xlsx::new` over a `Cursor` of bytes already in memory, which is
+# what bounds the allocation as well.
+#
+# That is a property of today's call sites, not of the dependency: the OLE2 parser is compiled
+# in whatever Evara calls, `vba_project()` is one call away, and M10 Stage 2 links a ZIP
+# reader for real. An unreachable vulnerability is still one `cargo deny` fails on, which is
+# the point of the gate. So: do not relax this below 0.38 to avoid an API change.
+calamine = { version = "0.38", features = ["dates"] }
 # CSV, with the quoting and embedded-newline handling that hand-rolled splitting gets
 # wrong. Unlicense OR MIT.
 csv = "1"
