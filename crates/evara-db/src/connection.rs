@@ -129,12 +129,37 @@ pub(crate) fn open_query_only(path: &Path) -> Result<Connection> {
 /// *"no such function"*. That is deliberate — an unattributable change is worse than a
 /// refused one, and it means another tool cannot quietly write rows that the change feed
 /// then misreports.
+///
+/// # Why `SQLITE_INNOCUOUS`
+///
+/// SQLite will not call an application-defined function from inside a trigger or a view
+/// unless the function is marked innocuous **or** `trusted_schema` is on. The bundled build
+/// sets no `-DSQLITE_TRUSTED_SCHEMA` flag, so it defaults **on** today and every change-log
+/// trigger works without this flag.
+///
+/// M10 is what makes it necessary. A staged payload from elsewhere is opened with
+/// `trusted_schema` **off** — it is a file whose schema nobody has vouched for, and leaving
+/// trusted schema on would let a hostile view or trigger in that file invoke functions
+/// during an ordinary read. But the payload then has to be *migrated*, and migration fires
+/// Evara's own change-log triggers, which call this function. Without the flag the two
+/// requirements are in direct conflict: either the payload is trusted or it cannot be
+/// migrated.
+///
+/// The flag is honest here rather than a workaround. `SQLITE_INNOCUOUS` asserts the function
+/// has no side effects, writes nothing, reads nothing outside its arguments and reveals
+/// nothing it was not given — and this one returns a captured string. It takes no arguments
+/// and touches no state at all.
+///
+/// Deliberately **not** combined with `SQLITE_DIRECTONLY`, which would be its opposite:
+/// that flag forbids exactly the trigger use this function exists for.
 fn register_site_id(conn: &Connection, site_id: Uuid) -> Result<()> {
     let value = site_id.to_string();
     conn.create_scalar_function(
         SITE_ID_FUNCTION,
         0,
-        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        FunctionFlags::SQLITE_UTF8
+            | FunctionFlags::SQLITE_DETERMINISTIC
+            | FunctionFlags::SQLITE_INNOCUOUS,
         move |_ctx| Ok(value.clone()),
     )?;
     Ok(())

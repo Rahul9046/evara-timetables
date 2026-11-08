@@ -55,6 +55,7 @@
 //! a school running two bell schedules holds two disjoint slot sets over the same minutes.
 
 pub mod availability;
+pub mod cancel;
 pub mod clock;
 pub mod constraints;
 pub mod context;
@@ -85,6 +86,7 @@ pub use availability::{
     AvailabilityEntity, AvailabilityEntityKind, AvailabilityRule, AvailabilityScope,
     AvailabilityStatus, EffectiveWindow, SlotAvailability, SlotMask, UnavailabilityIndex,
 };
+pub use cancel::{Cancel, NeverCancel};
 pub use clock::{DurationPeriods, TimeInterval, TimeOfDay};
 pub use constraints::{
     AffectedSet, CompiledConstraint, ConstraintError, ConstraintLevel, ConstraintOptions,

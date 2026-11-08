@@ -93,6 +93,15 @@ fn settings_database_holds_no_project_data() {
         tables,
         vec![
             "app_settings".to_owned(),
+            // V2, M10. The replacement recovery journal: paths and a phase, so an import
+            // interrupted by a crash can be reconciled on the next launch. It lives here
+            // because this is the only store reachable at startup without knowing which
+            // project to look at -- and the project that needs recovering may be the one
+            // that will not open.
+            //
+            // Still no school data: a destination path and a phase name, nothing from
+            // inside any `.evaraproj`.
+            "pending_replacement".to_owned(),
             "recent_project".to_owned(),
             "refinery_schema_history".to_owned(),
         ],

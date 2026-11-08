@@ -116,31 +116,18 @@ impl Default for SolveConfig {
     }
 }
 
-/// Whether the caller wants the run to stop.
-///
-/// Asked between construction steps. See this module's header for why the clock lives on the
-/// caller's side of this trait and not inside the engine.
-pub trait Cancel {
-    /// Whether to stop now.
-    ///
-    /// Called often, so it must be cheap. An implementation that read a file or took a lock
-    /// would make the solver's speed depend on something other than the problem.
-    fn is_cancelled(&self) -> bool;
-}
-
-/// A cancellation that never fires.
-///
-/// What the headless CLI and every test pass. Named rather than anonymous so a caller that
-/// genuinely wants no cancellation says so, instead of an `Option<&dyn Cancel>` that reads as
-/// an oversight.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct NeverCancel;
-
-impl Cancel for NeverCancel {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-}
+// Cancellation now lives in `evara-core`.
+//
+// It moved there when M10 gave the workspace a second long-running operation: copying a
+// project, taken by `evara-db`, which may not depend on `evara-solver` (`ARCHITECTURE.md`
+// §3 rule 4). Two crates needing to agree on a type is §3 rule 1's criterion for
+// `evara-core`, so the trait is defined once there and re-exported here.
+//
+// Re-exported rather than aliased so `impl evara_solver::Cancel for X` and
+// `impl evara_core::scheduling::Cancel for X` are the same impl — there is no second trait
+// anywhere, which is the whole point of having moved it. Every existing
+// `use evara_solver::{Cancel, NeverCancel}` keeps working unchanged.
+pub use evara_core::scheduling::cancel::{Cancel, NeverCancel};
 
 /// Where a run reports its progress.
 ///
@@ -161,4 +148,55 @@ pub struct NoProgress;
 
 impl ProgressSink for NoProgress {
     fn placed(&self, _placed: usize, _total: usize, _steps: u64) {}
+}
+
+#[cfg(test)]
+mod cancel_reexport_tests {
+    //! That the move to `evara-core` left **one** trait, not two that look alike.
+    //!
+    //! `ProgressSink` above stayed here deliberately. Its contract is a solve's — `placed`
+    //! of `total` after `steps` attempts — and nothing outside the solver reports that
+    //! shape, so moving it would widen `evara-core`'s vocabulary for no second caller.
+    //! M10's snapshot reports page counts through a plain callback instead, which is the
+    //! approved answer to Q1 and the reason A1 covered `Cancel` alone.
+
+    use super::{Cancel, NeverCancel};
+
+    /// Takes the trait by its `evara-core` path.
+    fn ask_as_core(cancel: &dyn evara_core::scheduling::Cancel) -> bool {
+        cancel.is_cancelled()
+    }
+
+    /// Takes the trait by its `evara-solver` path.
+    fn ask_as_solver(cancel: &dyn Cancel) -> bool {
+        cancel.is_cancelled()
+    }
+
+    struct Stopped;
+
+    // Implemented through the *solver's* path only.
+    impl Cancel for Stopped {
+        fn is_cancelled(&self) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn one_impl_satisfies_both_paths() {
+        // This compiles only if the two paths name the same trait. A type implementing a
+        // re-export satisfies the original; a type implementing a *duplicate* trait would
+        // not, and this would not build — which is the regression being guarded against.
+        assert!(ask_as_core(&Stopped));
+        assert!(ask_as_solver(&Stopped));
+
+        assert!(!ask_as_core(&NeverCancel));
+        assert!(!ask_as_solver(&NeverCancel));
+    }
+
+    #[test]
+    fn the_never_cancel_re_export_is_the_core_type() {
+        // Same object, both names.
+        let _: evara_core::scheduling::NeverCancel = NeverCancel;
+        let _: NeverCancel = evara_core::scheduling::NeverCancel;
+    }
 }

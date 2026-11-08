@@ -467,6 +467,68 @@ pub enum DbError {
     #[error("this project was opened for inspection only, so nothing can be written to it")]
     ReadOnlyProject,
 
+    /// The caller stopped a snapshot before it finished.
+    ///
+    /// Not a failure: the user asked. Typed separately from every other refusal so the
+    /// interface can stay silent about it rather than reporting an error nobody needs to
+    /// act on. The partial file has already been removed.
+    #[error("the copy was stopped before it finished")]
+    SnapshotCancelled,
+
+    /// A schema version was asked for that this build has no migration for.
+    ///
+    /// Raised by `migrations::run_up_to`, which builds a database as an earlier release left
+    /// it. Since M10 that runs in production — a transfer generates a reference schema at a
+    /// payload's claimed version to compare the payload against — so the version is input
+    /// rather than a test constant, and an impossible one is a refusal instead of a panic.
+    ///
+    /// Distinct from [`DbError::SchemaTooNew`], which is about a *project* written by a
+    /// newer Evara. This one is about a version nobody can construct.
+    #[error(
+        "schema version {requested} cannot be built by this version of Evara, \
+         which knows versions 1 to {supported}"
+    )]
+    UnknownSchemaVersion {
+        /// The version asked for.
+        requested: u32,
+        /// The highest this build can construct.
+        supported: u32,
+    },
+
+    /// A staged payload's schema does not match what this build would have produced.
+    ///
+    /// Checked **before** the payload is migrated and before its identity is read, so no
+    /// code has trusted a row from it yet. The differences are carried so the refusal can
+    /// name what was wrong rather than saying only that something was.
+    #[error(
+        "this file's structure does not match an Evara project at schema version {version}: \
+         {summary}"
+    )]
+    SchemaDoesNotConform {
+        /// The version the payload claimed, and was therefore compared against.
+        version: u32,
+        /// Human-readable list of the differences found.
+        summary: String,
+    },
+
+    /// A file could not be reduced to a single database file before being moved.
+    ///
+    /// A WAL database is up to four files, and there is no atomic multi-file move. The
+    /// protocol checkpoints each side down to one file first; if a `-wal` or `-shm` cannot
+    /// be removed, the replacement is refused **before anything has moved** rather than
+    /// risking a new main file paired with a foreign sidecar — which is a database that
+    /// opens cleanly and is wrong.
+    #[error(
+        "{name} still has a {sidecar} file beside it, so it cannot be moved safely. \
+         Close any other program using it and try again."
+    )]
+    RenameBlocked {
+        /// File name of the database involved.
+        name: String,
+        /// Which sidecar is in the way.
+        sidecar: &'static str,
+    },
+
     /// Schema migration failed. Nothing was applied.
     #[error("migrating the project failed; no changes were applied")]
     Migration(#[source] InternalError),
