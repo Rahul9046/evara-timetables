@@ -328,13 +328,56 @@ fn settings_json(limits: SolveLimits) -> String {
     .to_string()
 }
 
-/// Opens the project for writing, through this installation's settings database.
+/// Opens the project for writing, through a settings database.
 fn open_workspace(path: &Path) -> Result<Workspace, String> {
-    let mut workspace = Workspace::new(VERSION).map_err(|error| describe(path, &error))?;
+    let mut workspace = new_workspace().map_err(|error| describe(path, &error))?;
     workspace
         .open_project(path)
         .map_err(|error| describe(path, &error))?;
     Ok(workspace)
+}
+
+/// This installation's settings database — the only answer in a shipped binary.
+#[cfg(not(test))]
+fn new_workspace() -> evara_db::Result<Workspace> {
+    Workspace::new(VERSION)
+}
+
+/// The settings database a test named, and **never** the installation's own.
+///
+/// # Why this seam exists rather than a test calling the real thing
+///
+/// Every other `evara-cli` command reads, so its tests can open the project directly. This
+/// one writes, so it needs a `Workspace` — and a `Workspace` built by [`Workspace::new`]
+/// resolves `directories::ProjectDirs` and opens the **installation's** settings database,
+/// wherever the test happens to be running.
+///
+/// That is not merely untidy. The settings database has its own refinery chain and
+/// `Settings::open_at` runs it with `set_abort_missing(true)`, so the chain is **forward
+/// only**: once a newer build has migrated that file, every older build refuses to open its
+/// own settings until somebody deletes it. A test that reaches the real file therefore
+/// migrates the developer's installation as a side effect of `cargo test`, and the damage
+/// shows up later, on a different branch, as an unrelated-looking failure. It is invisible to
+/// CI, whose runners start with no settings database at all.
+///
+/// So the test fixture names a path inside its own `TempDir` and the command uses that. The
+/// production code path is otherwise identical — the same `open_project`, the same triggers,
+/// the same `evara_site_id()` — because the point is to test what ships.
+///
+/// # Why an unset override panics
+///
+/// Falling back to [`Workspace::new`] would restore exactly the defect this replaces, and
+/// restore it silently: a test added without the fixture would pass while quietly migrating
+/// the developer's installation. A panic names the omission at the moment it is made, which
+/// is the difference between a rule and a hope.
+#[cfg(test)]
+fn new_workspace() -> evara_db::Result<Workspace> {
+    let path = tests::settings_override().expect(
+        "a `save` test must set the settings path with `tests::use_settings_at` -- opening \
+         the installation's own settings database from a test migrates it forward and leaves \
+         every older build unable to open it",
+    );
+    Workspace::with_settings_at(&path, VERSION)
 }
 
 /// ISO-8601 UTC to millisecond precision, which is what every stored timestamp uses.

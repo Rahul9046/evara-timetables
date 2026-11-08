@@ -4,7 +4,7 @@
 //! timetable back, because the whole point of the command is the write — a test that stopped at
 //! argument parsing would prove nothing about it.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use evara_core::calendar::WorkingDays;
 use evara_db::{
@@ -14,6 +14,30 @@ use evara_solver::SolveLimits;
 use uuid::Uuid;
 
 use super::{Outcome, Request, USAGE, run};
+
+// ------------------------------------------------- the settings database a test writes to
+
+thread_local! {
+    /// Where this test's `Workspace` takes its settings database from.
+    ///
+    /// Thread-local rather than a `static`: the test harness gives each test its own thread,
+    /// so this is per-test state with no lock and no interference between tests running at
+    /// once. `super::new_workspace` reads it and panics when it is unset, which is what makes
+    /// reaching the installation's own settings database impossible rather than merely
+    /// discouraged — see that function for why it matters.
+    static SETTINGS: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Points this test's `save` run at `path`.
+fn use_settings_at(path: &Path) {
+    SETTINGS.with_borrow_mut(|slot| *slot = Some(path.to_path_buf()));
+}
+
+/// What [`use_settings_at`] last named on this thread, for `super::new_workspace`.
+pub(super) fn settings_override() -> Option<PathBuf> {
+    SETTINGS.with_borrow(Clone::clone)
+}
 
 fn parse(args: &[&str]) -> Result<Request, String> {
     let owned: Vec<String> = args.iter().map(|a| (*a).to_owned()).collect();
@@ -209,6 +233,10 @@ fn the_usage_text_states_the_four_exit_codes() {
 fn a_project() -> (tempfile::TempDir, PathBuf, Uuid, Uuid) {
     let dir = tempfile::TempDir::new().expect("temp dir");
     let settings = dir.path().join("settings.sqlite");
+    // The command under test opens its own `Workspace`, so it has to be told the same
+    // temporary settings database this fixture builds — otherwise it would resolve the
+    // installation's own and migrate it. `super::new_workspace` panics if this is not set.
+    use_settings_at(&settings);
     let mut workspace = Workspace::with_settings_at(&settings, "0.1.0-test").expect("workspace");
     let path = dir.path().join(format!("cli.{PROJECT_EXTENSION}"));
     workspace.create_project(&path).expect("create project");
@@ -264,6 +292,11 @@ fn a_school_with_no_grid_has_nothing_to_save() {
 
 #[test]
 fn a_missing_project_fails_the_command() {
+    // No project, but still a settings database of its own: the refusal is about the
+    // project file, and proving that must not migrate the installation's settings.
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    use_settings_at(&dir.path().join("settings.sqlite"));
+
     let error = run(&owned(&[
         "--project",
         "no-such-file.evaraproj",
@@ -274,6 +307,45 @@ fn a_missing_project_fails_the_command() {
     ]))
     .expect_err("refused");
     assert!(!error.is_empty(), "the failure must say something");
+}
+
+#[test]
+fn a_run_that_names_no_settings_database_panics_instead_of_reaching_the_installation() {
+    // The guard that makes the leak unrepresentable, pinned. If this stops panicking,
+    // `super::new_workspace` has regained a fallback to `Workspace::new`, and the next
+    // `save` test written without the fixture will migrate the developer's settings
+    // database forward -- silently, and invisibly to CI, whose runners have none.
+    //
+    // Deliberately no `use_settings_at` call: the override is thread-local and the harness
+    // gives this test its own thread, so it starts unset.
+    //
+    // The panic hook is replaced for the duration so the expected panic does not print a
+    // backtrace that reads like a failure. It is process-global, which is why it is put back
+    // immediately rather than left for the rest of the run.
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let outcome = std::panic::catch_unwind(|| {
+        run(&owned(&[
+            "--project",
+            "unreachable.evaraproj",
+            "--school",
+            &an_id().to_string(),
+            "--cycle",
+            &an_id().to_string(),
+        ]))
+    });
+    std::panic::set_hook(hook);
+
+    let payload = outcome.expect_err("a run with no settings path must panic, not proceed");
+    let message = payload
+        .downcast_ref::<String>()
+        .map_or("", String::as_str)
+        .to_owned();
+    assert!(
+        message.contains("use_settings_at"),
+        "the panic must name the fixture helper that is missing, so the omission is \
+         obvious at the point it is made; got: {message}"
+    );
 }
 
 #[test]
