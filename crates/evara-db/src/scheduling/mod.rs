@@ -534,5 +534,10 @@ mod tests;
 // The database-backed school builder M4 wrote for its loader tests. M7's persistence tests
 // need the same thing -- a real project with a grid, lessons and a solvable problem -- and a
 // second builder would be a second place for a fixture to drift from the schema.
+//
+// M10 Stage 2 moved it to `crate::fixtures::seed` and put it behind the `fixtures` feature,
+// because the transfer round trips are in `evara-project` and `#[cfg(test)]` made it
+// unreachable from there. This re-export is kept so the suites that already say
+// `scheduling::seed` are untouched by the move.
 #[cfg(test)]
-pub(crate) use tests::seed;
+pub(crate) use crate::fixtures::seed;

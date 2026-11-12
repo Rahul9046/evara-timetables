@@ -24,6 +24,15 @@
 //! subtlest point in the module: a later refactor that "shares the factory" would
 //! reintroduce a header write on an untrusted file.
 //!
+//! # The path a payload is opened by — finding F-2
+//!
+//! The record said URI filenames were disabled by leaving `SQLITE_OPEN_URI` out of the open
+//! flags. They are not: the bundled engine carries `-DSQLITE_USE_URI`, which makes URI
+//! parsing the **global default**, so the flag can only add the capability and never remove
+//! it. The real control is that every path a payload is opened by is one Evara chose, and
+//! [`super::paths::require_plain_database_path`] asserts the form regardless. See that
+//! module for the forms and why each one matters.
+//!
 //! # The phases
 //!
 //! - **V0 — audit.** File-level read-only, every capability off, limits clamped. Nothing is
@@ -33,8 +42,8 @@
 //!   makes `evara_site_id`'s `SQLITE_INNOCUOUS` flag necessary rather than decorative: the
 //!   change-log triggers fire during migration and would otherwise be refused.
 //!
-//! Stage 1 provides V0 and the audit. V1's migration of a staged file is Stage 2's, because
-//! it needs the staging lifecycle to migrate *into*.
+//! V0 and the audit are here; V1 and V2 are [`super::stage`], which owns the order the three
+//! run in and is the only caller that should compose them.
 
 use std::path::Path;
 
@@ -127,12 +136,24 @@ impl UntrustedPayload {
     /// # Errors
     ///
     /// - [`DbError::ProjectNotFound`] if nothing is there.
-    /// - [`DbError::Open`] if SQLite will not open it at all — a file that is not a
-    ///   database reaches the caller as this.
+    /// - [`DbError::NotAnEvaraProject`] if the bytes are not a database. Probed with one read
+    ///   of `sqlite_master`, because a read-only open of arbitrary bytes **succeeds** —
+    ///   SQLite does not read the file header until the first statement.
+    /// - [`DbError::Open`] if SQLite will not open it at all.
     /// - [`DbError::PragmaRejected`] if a control did not take effect. Read back rather than
     ///   assumed: a pragma that silently failed would leave the payload opened with full
     ///   capabilities while the code believed otherwise.
     pub fn open(path: &Path) -> Result<Self> {
+        // The URI boundary, which is a property of the **path** and not of a flag — F-2.
+        // The bundled engine is compiled with `-DSQLITE_USE_URI`, so URI interpretation is
+        // the global default and omitting `SQLITE_OPEN_URI` below does not disable it
+        // (`t91_…` proves that against the engine). What makes the question closed is that
+        // every path reaching here is one Evara minted, and that its form is asserted.
+        //
+        // Asked **before** the existence check, so `file:x?mode=rwc` is reported as the
+        // path form it is rather than as a file that happens not to exist.
+        super::paths::require_plain_database_path(path)?;
+
         if !path.is_file() {
             return Err(DbError::ProjectNotFound {
                 name: file_name_of(path),
@@ -144,18 +165,37 @@ impl UntrustedPayload {
         // `open_plain`, which would run `PRAGMA journal_mode = WAL` and write the header of
         // a file we have not vetted.
         //
+        // `SQLITE_OPEN_URI` is **not** requested. It cannot subtract URI handling from this
+        // build, so this is a statement of intent rather than a control: nothing here asks
+        // for a capability the path guard above exists to deny.
+        //
         // `SQLITE_OPEN_NO_MUTEX` is not requested: the connection never leaves this type.
-        let conn = Connection::open_with_flags(
-            path,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
-        )
-        .map_err(|source| DbError::opening(path, source))?;
+        let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|source| DbError::opening(path, source))?;
 
         let payload = Self {
             conn,
             name: file_name_of(path),
         };
         payload.harden()?;
+
+        // The probe that turns "not a database" into a sentence. `Connection::open_with_flags`
+        // against a read-only file **succeeds** on bytes that are not a database at all:
+        // SQLite does not read the header until the first statement, so without this the
+        // failure arrives later as an opaque internal error from whichever query happened to
+        // run first. One cheap read of `sqlite_master` is where it belongs.
+        if payload
+            .conn
+            .query_row("SELECT COUNT(*) FROM sqlite_master", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .is_err()
+        {
+            return Err(DbError::NotAnEvaraProject {
+                name: payload.name.clone(),
+            });
+        }
+
         Ok(payload)
     }
 

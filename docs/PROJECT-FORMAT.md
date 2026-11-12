@@ -1,5 +1,28 @@
 # The `*.evara` Project Format
 
+> ## ⚠ Superseded below the container, and not yet rewritten
+>
+> **The design in this document is the one M10 rejected.** Everything from §1's entry listing
+> onwards describes a payload of **JSON sections**, and the shipped format carries a
+> **verified SQLite snapshot** instead — approved decision 1, D1, and ADR 0053 when Stage 6
+> writes it. The reasons are in
+> [M10-PROJECT-TRANSFER-PROPOSAL.md §1.4.5](M10-PROJECT-TRANSFER-PROPOSAL.md#145-adr-0004s-rejection-of-a-sqlite-payload-rested-on-a-cost-already-paid):
+> ADR 0004 rejected a snapshot because it *"inherits the migration burden"*, and it does not —
+> `CLAUDE.md` §3 already requires that burden to be carried for the life of the product.
+>
+> **Until Stage 6 rewrites this file, read the proposal and the code, not the sections below.**
+> Three specific passages are known-wrong rather than merely out of date, and each is corrected
+> in the proposal:
+>
+> | Here | Actually |
+> | --- | --- |
+> | §1's `data/*.json` sections and `attachments/` | three entries: `manifest.json`, `checksums.json`, `payload/project.evaraproj`. `attachments/` is **removed from v1 and reserved by name** — the logo is a `school_logo` row (§1.4.3) |
+> | §3: `violation` / `violation_ref` are not exported because re-scoring reproduces them | **they travel.** A `GENERATION` evaluation is immutable (ADR 0042 §C4), so findings that did not travel could never be put back — every transferred timetable would show a generation score beside an empty findings list, permanently (§1.4.1). `change_log` travels complete, for the reason in §1.4.2 |
+> | §5 step 6: rebuild score and violations | **an import rebuilds nothing** (§1.4.7). Re-scoring needs a compiled `Problem`, which can legitimately fail for a school mid-setup — an ordinary state that must still transfer |
+>
+> What *is* still accurate: the extension, the ZIP container, the atomic finalise by rename,
+> the manifest's job, and the Requirement A / Requirement B separation below.
+
 A single file that carries a complete Evara school project between installations.
 Export on one machine, import on another, no network involved.
 

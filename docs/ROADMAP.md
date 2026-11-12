@@ -827,14 +827,28 @@ rather than dynamically re-ranked; and `IncrementalScorer` lives in `evara-const
 
 ## Phase 9 — Project transfer
 
-- `evara-project`: writer, reader, manifest, checksums, format migration chain scaffold
-  (currently `formatVersion: 1` only).
-- Commands `project_export` / `project_import`, native file dialogs, progress for large
-  schools.
-- The full test set from [PROJECT-FORMAT.md](PROJECT-FORMAT.md) §7, round-trip included,
-  in CI.
+Architecture: [M10-PROJECT-TRANSFER-PROPOSAL.md](M10-PROJECT-TRANSFER-PROPOSAL.md), revision
+2.3. Its §0.2 is the authoritative replacement specification and its §8 the stage order.
+**Note that [PROJECT-FORMAT.md](PROJECT-FORMAT.md) describes the design M10 rejected** and is
+rewritten in Stage 6; its banner says which three passages are known-wrong.
 
-**Closes M1-17, M1-18.**
+| Stage | Scope | Status |
+| --- | --- | --- |
+| **P** | `zip >= 9`, `calamine 0.37`, `rust_xlsxwriter 0.102`; three RUSTSEC advisories out of the tree | ✅ PR #35 |
+| **1** | `evara-db::transfer`: the hardened V0 boundary, `snapshot_into`, conformance against a generated reference, the replacement journal and its settings migration, and the S1/S2/S3 primitives | ✅ PR #37 |
+| **2** | `evara-project`: the `.evara` container, its reader, the staging lifecycle, D11 as amended by §0.2, recovery; `transfer::stage`, `table_census`, the `fixtures` feature; **T-60, T-83 and §7.2's inflation figure measured** | ✅ this stage |
+| **3** | `evara export` / `import` / `inspect`; T-41's generated historical matrix in CI on both platforms | next |
+| **4** | Eleven Tauri commands, `TransferSessions`, the generalised `CoalescingSink`, `transfer://` events, identity disclosure (D13), typegen | |
+| **5** | The Export and Import screens | |
+| **6** | Rewrite `PROJECT-FORMAT.md`; ADRs 0053–0059; amend `TIMETABLE-PERSISTENCE.md` §7 and ADR 0042 §C4; discharge R8; add D37, D38, R11, R12 | |
+
+What Stage 2 settled, so a reader does not have to re-derive it: the change feed is **26.2%**
+of a realistic project's occupied pages (so A6 stays deferred, now with a figure); a stepped
+backup holds the workspace lock for **~46 ms** against a ≤ 500 ms budget, and ~50 ms under a
+concurrent writer; and a snapshot is **+6.9%** over a vacuumed copy, of which the archive
+absorbs 88.7% — so **no compaction pass is added**. §C.10 has the fixture and the method.
+
+**Closes M1-17, M1-18** — at the end of Stage 5, when the user can reach it.
 
 ---
 

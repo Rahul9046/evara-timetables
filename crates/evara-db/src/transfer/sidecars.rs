@@ -116,6 +116,10 @@ pub fn sidecar_path(database: &Path, suffix: &str) -> PathBuf {
 /// Opens the database, truncates its write-ahead log into the main file, closes it, and then
 /// **verifies** no sidecar remains. Refuses rather than reporting success if one does.
 ///
+/// A path that is absent, or that holds something which is **not a database**, is already one
+/// file and is left exactly as it is — see the comment in the body for why opening it would
+/// not be. Its sidecars are still asserted.
+///
 /// # Errors
 ///
 /// - [`DbError::RenameBlocked`] if a sidecar survives the close — most often because another
@@ -127,6 +131,31 @@ pub fn checkpoint_to_single_file(database: &Path) -> Result<()> {
     if !database.exists() {
         // Not an error. A destination that is absent is already "one file or fewer", and
         // the caller's next step is a rename that will create it.
+        return Ok(());
+    }
+
+    // A file that is **not a database** is already one file, and *opening* it would not leave
+    // it that way. Decided from the header alone, because the two consequences of opening are
+    // exactly what this protocol must not have: `open_plain` runs `PRAGMA journal_mode = WAL`,
+    // which on a zero-length file **creates a database there**; and opening a path with a
+    // stray `-wal` beside it makes SQLite try to recover the log and then **remove it**, which
+    // is the one act S3 forbids outright.
+    //
+    // Found by `a_zero_length_destination_is_kept_as_a_replaced_copy_rather_than_destroyed`
+    // and `a_stray_sidecar_beside_an_unknown_file_blocks_the_replacement`. It is S1's rule
+    // reaching one step further than S1 states it: an import must not write over an unknown
+    // file, and checkpointing one is writing over it.
+    //
+    // Its sidecars are still asserted below, because a stray `-wal` beside an unknown file is
+    // exactly as dangerous as one beside a project.
+    if !super::has_database_header(database) {
+        let remaining = SidecarState::observe(database);
+        if let Some(sidecar) = remaining.first_present() {
+            return Err(DbError::RenameBlocked {
+                name: file_name_of(database),
+                sidecar,
+            });
+        }
         return Ok(());
     }
 
@@ -270,5 +299,83 @@ mod tests {
         let dir = TempDir::new().expect("temp dir");
         checkpoint_to_single_file(&dir.path().join("nothing.evaraproj"))
             .expect("an absent destination is already one file or fewer");
+    }
+
+    #[test]
+    fn a_file_that_is_not_a_database_is_never_opened() {
+        // The defect M10 Stage 2 found, kept as a regression. Two mutations reached through
+        // here, and each is the opposite of what the protocol promises:
+        //
+        // - a **zero-length** destination was turned into a four-kilobyte database by
+        //   `PRAGMA journal_mode = WAL`, so the `.replaced-` copy the protocol then kept was
+        //   Evara's own header rather than the user's file;
+        // - a stray `-wal` beside an unknown file was **removed**, because SQLite tries to
+        //   recover a log it finds beside a database it is opening. Deleting a `-wal` is
+        //   discarding committed transactions the main file does not hold.
+        //
+        // Both are answered by deciding from the header instead of by opening.
+        let dir = TempDir::new().expect("temp dir");
+
+        let empty = dir.path().join("empty.evaraproj");
+        std::fs::write(&empty, b"").expect("create");
+        checkpoint_to_single_file(&empty).expect("an empty file is already one file");
+        assert_eq!(
+            std::fs::metadata(&empty).expect("stat").len(),
+            0,
+            "a zero-length destination must not be written into"
+        );
+
+        let unknown = dir.path().join("unknown.evaraproj");
+        std::fs::write(&unknown, b"not a database").expect("create");
+        let stray = sidecar_path(&unknown, "-wal");
+        std::fs::write(&stray, b"a log belonging to something").expect("create");
+
+        let error = checkpoint_to_single_file(&unknown)
+            .expect_err("a stray sidecar must refuse the replacement");
+        assert!(matches!(error, DbError::RenameBlocked { .. }), "{error:?}");
+        assert_eq!(
+            std::fs::read(&stray).expect("still there"),
+            b"a log belonging to something",
+            "and the sidecar must be reported, never removed"
+        );
+        assert_eq!(
+            std::fs::read(&unknown).expect("still there"),
+            b"not a database",
+            "and the unknown file must be untouched"
+        );
+    }
+
+    #[test]
+    fn observing_a_destination_changes_nothing_on_disk() {
+        // `DiskFacts::observe` calls `looks_like_a_project`, so an observation that mutated
+        // would make S2's reconciliation act on a state it had itself created. Asserted over
+        // the four shapes a destination can take.
+        let dir = TempDir::new().expect("temp dir");
+
+        for (name, bytes) in [
+            ("empty.evaraproj", &b""[..]),
+            ("unknown.evaraproj", b"not a database"),
+            ("short.evaraproj", b"SQLite"),
+            ("header-only.evaraproj", b"SQLite format 3 "),
+        ] {
+            let path = dir.path().join(name);
+            std::fs::write(&path, bytes).expect("create");
+            let before = std::fs::read(&path).expect("read");
+
+            assert!(
+                !crate::transfer::looks_like_a_project(&path),
+                "{name} is not a project"
+            );
+            assert_eq!(
+                std::fs::read(&path).expect("read again"),
+                before,
+                "observing {name} must change nothing"
+            );
+            assert_eq!(
+                SidecarState::observe(&path),
+                SidecarState::default(),
+                "and must create no sidecar beside {name}"
+            );
+        }
     }
 }

@@ -209,7 +209,7 @@ impl Workspace {
     ///
     /// Not part of the public surface: repositories reach the database through the
     /// workspace, and SQL stays inside this crate.
-    #[cfg(test)]
+    #[cfg(any(feature = "fixtures", test))]
     pub(crate) fn open_database_for_test(&mut self) -> &mut Database {
         self.open.as_mut().expect("a project must be open")
     }

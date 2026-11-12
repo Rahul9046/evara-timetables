@@ -18,3 +18,52 @@ evara-db = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+uuid = { workspace = true }
+# The container. `default-features = false` is load-bearing rather than tidy: `zip`'s default
+# set pulls in aes-crypto, bzip2, deflate64, lzma, ppmd, zstd and xz, and every one of those is
+# a decoder this reader would then be linking against for a method it refuses by name
+# (`reader::require_readable_entry` admits Stored and Deflate only). A decoder that is not
+# compiled in cannot have a bomb, so the narrow feature set is part of the security argument
+# and not a size optimisation.
+#
+# `deflate-flate2-zlib-rs` selects a backend explicitly, which `deflate-flate2` alone does not:
+# `zip` declares `flate2` with `default-features = false`, so without a backend feature the
+# build fails with *"You need to choose a zlib backend"*. `zlib-rs` is the pure-Rust one and was
+# already resolved in the lockfile through `calamine` and `rust_xlsxwriter`, so this adds no
+# crate, no licence (Zlib, already on `deny.toml`'s allow list) and no C toolchain -- a desktop
+# app shipped as one signed binary per platform should not acquire a native build dependency to
+# read a ZIP.
+#
+# Pinned at `9` because Stage P moved the floor there: `zip 8.6.0` carries RUSTSEC-2026-0367,
+# -0368 and -0369, three extraction vulnerabilities fixed in `zip >= 9.0`. This crate never
+# calls `extract()` -- ADR 0055 is why -- but an unreachable vulnerability is still one
+# `cargo deny` fails on, and the whole point of ordering Stage P first was to have the floor in
+# place before the reader was written. MIT.
+zip = { workspace = true }
+# SHA-256 for the integrity tree.
+sha2 = { workspace = true }
+
+[dev-dependencies]
+# A round trip needs a project with something in it, which is `evara-db`'s `fixtures` feature
+# -- off by default, so nothing shipped carries it.
+evara-db = { workspace = true, features = ["fixtures"] }
+tempfile = { workspace = true }
+# For the timetable layer of the round-trip fixture only. A stored timetable needs a real
+# `SolveOutcome`, and the only honest source of one is the engine that produces them;
+# hand-building one would be a fixture that could drift from what the solver actually returns.
+#
+# A *library* dependency this way round is not allowed -- `evara-project` owns a file format and
+# knows nothing about search -- but a test may run the other crate rather than imitate it. That
+# is the same argument `evara-db`'s own manifest records for its `evara-solver` dev-dependency,
+# and neither crate depends on this one, so there is no cycle.
+evara-constraints = { workspace = true }
+evara-solver = { workspace = true }
+# Deliberately absent: `rusqlite`, in any form. `CLAUDE.md`'s rule is that no crate but
+# `evara-db` may depend on the SQLite driver, *even for tests*, and the way that is asserted is
+# the absence itself -- there is no line here to remove, so a test cannot name a `rusqlite`
+# type and a public signature cannot leak one.
+#
+# `zip` is a library dependency above, so this crate's own modules -- `writer` and `reader` --
+# name its types internally and the refusal tests build malformed archives with it. What the
+# rule forbids is a `zip` type crossing the *public* boundary, and `TransferError` is where that
+# would show: `tests_hygiene` asserts every variant is matchable without naming one.

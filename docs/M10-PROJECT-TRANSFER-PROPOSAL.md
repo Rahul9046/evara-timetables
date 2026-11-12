@@ -3,9 +3,11 @@
 - Status: **Revision 2 — APPROVED FOR IMPLEMENTATION**, 2026-10-29, subject to the three
   mandatory safeguards in [§0.2](#02-mandatory-safeguards-from-the-second-review). Approvals
   **A1–A5 granted**; **A6 and A7 deferred**.
-- Stage progress: **Stage P complete** — merged as **PR #35** on 2026-11-01
-  ([§C.8](#c8-finding-6--dependency-upgrade-feasibility-resolved-and-delivered)). Stages 1–6
-  not started. **No transfer code exists**; Stage P carried none, by design.
+- Stage progress: **Stage P complete** (PR #35), **Stage 1 complete** (PR #37),
+  **Stage 2 complete** — the `.evara` container, its reader, the replacement protocol and its
+  recovery, with T-60, T-83 and §7.2's inflation figure **measured**
+  ([§C.10](#c10-stage-2-what-was-built-measured-and-corrected)). Stages 3–6 not started: no
+  CLI command, no Tauri command and no screen.
 - Phase: [ROADMAP.md](ROADMAP.md) Phase 9. Closes **M1-17** and **M1-18**.
 - Branch: `docs/m10-project-transfer-plan`, from `origin/develop` at `0faff47` — the merge of
   PR #35 (Stage P), verified present: `Cargo.toml` carries `calamine 0.37` and
@@ -18,8 +20,9 @@
   `crates/evara-import`, `crates/evara-project`, `crates/evara-cli`,
   `apps/desktop/src-tauri`.
 - Revision 2 adds twenty-two **measured or code-proven facts**; 2.1 and 2.2 bring the log to
-  **thirty-two**, one of which (E-04) corrects a revision 2 entry that was wrong. Every one is
-  listed with its evidence in
+  **thirty-two**, one of which (E-04) corrects a revision 2 entry that was wrong; 2.3 brings it
+  to **thirty-eight**, one of which (E-33) corrects a *control the record claimed and had not
+  tested*. Every one is listed with its evidence in
   [Part C §C.2](#c2-evidence-log--what-is-proven-and-what-still-needs-an-experiment),
   and nothing below is asserted without being marked proven, inferred, or pending.
 
@@ -30,6 +33,7 @@
 | 1 | 2026-10-28 | First architecture proposal. Seven findings returned by review. |
 | 2 | 2026-10-29 | All seven findings resolved (Part C). **Approved for implementation**: A1–A5 granted, A6–A7 deferred, three mandatory safeguards attached ([§0.2](#02-mandatory-safeguards-from-the-second-review)). D11's three known-wrong passages annotated as superseded in place. |
 | 2.1 | 2026-11-01 | **Documentation only — no design change.** Stage P recorded as complete (PR #35, `0faff47`): §C.8 rewritten as delivered, all three RUSTSEC advisories named and resolved, E-23…E-26 added, finding 6's last pending experiment closed, D12 and §1.4.9 corrected to say `evara-project` has no `zip` dependency *yet*, §8 and the appendix risks updated, and S3 extended to state recovery across the individual sidecar moves explicitly. **No decision was reopened and no superseded D11 text was reinstated.** |
+| 2.3 | 2026-11-12 | **Stage 2 folded in.** One **correction to a security control**: finding **F-2** — `SQLITE_OPEN_URI` was never a control in this build, because `-DSQLITE_USE_URI` makes URI interpretation the global default; §C.5, D6 and §6.1 now describe the control that exists (the path form, plus D6's "no archive byte reaches any path"), and **E-33** proves the flag's irrelevance against the engine. Two **defects found by composing Stage 1's primitives** and fixed: `looks_like_a_project` **created a database in a zero-length destination** and **deleted a stray `-wal`**, so *observing* the disk was mutating it — the thing S2's reconciliation assumes it does not (**E-34**). One **design fact recorded rather than assumed**: Deflate's own 1 032:1 ceiling makes the decompression-ratio cap unreachable for the two methods `formatVersion 1` admits, so what bounds a bomb is the byte cap (**E-35**). **T-60, T-83 and §7.2's inflation figure are measured** — §C.10 — and the §7.2 compaction question is **answered: no pass is added**. Four departures from the sketch, each recorded in §C.10. **No decision was reopened**, S1/S2/S3 stand exactly as §0.2 specifies them, and no superseded D11 text was reinstated. |
 | 2.2 | 2026-11-02 | **Stage 1 folded in** (PR #37, `cc025e2`…`ff695f0`). One **correction** — E-04 was wrong, and was cited as confirming shipped code (§C.2, §C.6, and `backup.rs` on the branch). One **deviation accepted** — D8's two snapshot mechanisms became one, with the free-page cost stated (§C.6, D8, §7.2). One fact the record did not state — **a read-only open creates WAL sidecars** (§6.1). Six additions, **E-27…E-32**. The discharged experiments moved out of the pending list, and **T-60 and T-83 moved to Stage 2**: neither can be measured without a project with real edit history, and Stage 2's round-trip fixtures are the first to build one. `hooks` removed from the `rusqlite` feature list. **No other decision was reopened** — S1, S2 and S3 stand exactly as §0.2 specifies them, and no superseded D11 text was reinstated. Three later corrections, from the branch's own review commits (`ff695f0`, `2b30105`), which landed after this revision was first drafted: the invariant sweep is **T-88's and is 128 combinations**, not T-87's and not 192 (§9); D11's journal block now carries the **uniqueness index** and the `CHECK`s the migration actually ships; and D11 states what happens when a journal row is **damaged or written by a newer build**. |
 
 > **Reading order for an implementer.** [§0.1](#01-approval-status-of-a1a7) is the
@@ -74,7 +78,7 @@ Granted 2026-10-29 at the second architecture review.
 | **A3** | The replaced copy is **never** deleted by Evara | ✅ **Approved** — Stage 2 |
 | **A4** | One **settings** migration, `V2__pending_replacement.sql` | ✅ **Delivered — Stage 1.** No project migration; the one-way-door cost of advancing the settings chain is written in the migration file itself, not only in the PR |
 | **A5** | `backup.rs`'s 0-byte leftover fixed inside Stage 1 | ✅ **Delivered — Stage 1.** The target is removed on the `VACUUM INTO` failure path too, so seventeen failed upgrades no longer exhaust the sixteen backup names. E-04's correction is why that mattered more than it looked (§C.6) |
-| **A6** | A `--without-history` export option | ⏸ **Deferred.** Not in M10. T-60 still measures the feed's share — in **Stage 2** since revision 2.2 — and the figure is reported, not acted on |
+| **A6** | A `--without-history` export option | ⏸ **Deferred, and now decided against for M10 with a number rather than a gap.** T-60 measured the feed at **26.2%** of a realistic project's occupied pages (E-36): real, not dominating, and it deflates with everything else. §C.10 says why that does not force the option |
 | **A7** | Scoped per-school export, and merge-into-existing | ⏸ **Deferred.** Neither in M10. OPEN-DECISIONS D38 |
 
 A6 and A7 being deferred changes nothing already specified: M10 carries the complete feed and
@@ -229,9 +233,13 @@ Parts A and B.
 | **6** | Confirm dependency upgrade feasibility | ✅ **Resolved, and now delivered** | Not merely feasible — **done**. `calamine 0.36.1 → 0.37.0`, `rust_xlsxwriter 0.99.1 → 0.102.0`, `zip 8.6.0 → 9.1.3` transitively with `8.6.0` out of the tree. **RUSTSEC-2026-0367, -0368 and -0369 all resolved**, with no `[advisories] ignore` and `deny.toml` untouched. Merged as **PR #35**, 2026-11-01. | [§C.8](#c8-finding-6--dependency-upgrade-feasibility-resolved-and-delivered), [Stage P](#8-implementation-stages-and-dependencies) |
 | **7** | Reconcile API and command contracts | ✅ **Resolved** | Thirteen discrepancies found in revision 1 and fixed, including one that contradicted D8's own lock rule and one false claim about migrations. | [§C.9](#c9-finding-7--api-and-command-reconciliation-resolved), [§4](#4-public-rust-apis-and-tauri-command-contracts) |
 
+| **F-2** | `SQLITE_OPEN_URI` claimed as a control | ✅ **Resolved — Stage 2** | The flag was never a control in this build: `-DSQLITE_USE_URI` makes URI interpretation the global default (E-33, proven against the engine). §C.5, D6 and §6.1 now describe what exists — D6's "no archive byte reaches any path", plus an assertion on the path form at every point a payload is opened. | [§C.10](#c10-stage-2-what-was-built-measured-and-corrected), [§C.5](#c5-finding-3--untrusted-sqlite-handling-resolved), [§6.1](#61-the-three-phase-boundary) |
+
 **Deferred** (carried, with reasons, not resolved): a `--without-history` export option,
-pending **Stage 2's** measurement — T-60 moved there in revision 2.2
-([§10 A6](#10-remaining-decisions-requiring-approval)); scoped per-school export and
+**still deferred, now with T-60's figure beside the decision rather than a gap** — 26.2% of a
+realistic project's occupied pages, which is real and not dominating
+([§C.10](#c10-stage-2-what-was-built-measured-and-corrected),
+[§10 A6](#10-remaining-decisions-requiring-approval)); scoped per-school export and
 merge-into-existing ([§10 A7](#10-remaining-decisions-requiring-approval)).
 
 **Blocked**: nothing.
@@ -279,6 +287,13 @@ design depends on CLI-only behaviour.
 | **E-31** | `evara_site_id` marked `SQLITE_INNOCUOUS` lets all three change-log triggers fire with `trusted_schema = OFF`; a connection **without** the function still cannot write a tracked row | five tests in `evara_db::tests_site_id_function` | **Proven** (A2 delivered) |
 | **E-32** | `rusqlite 0.37`'s `progress_handler` requires `F: FnMut() -> bool + Send + 'static`, so a borrowed `&dyn Cancel` cannot drive it | `rusqlite-0.37.0/src/hooks/mod.rs:426–429` | **Proven** — the cause of §C.6's one-mechanism deviation |
 
+| **E-33** | **`SQLITE_OPEN_URI` is not a control in this build.** The bundled engine carries `-DSQLITE_USE_URI`, so `sqlite3_open_v2` parses a filename beginning `file:` as a URI whether or not the flag is passed. Clearing the flag changes nothing observable | `t91_a_uri_filename_is_interpreted_without_the_open_uri_flag` | **Proven — and it corrects a control §C.5, D6 and §6.1 each claimed.** Finding F-2 |
+| **E-34** | **Deciding "is this a project" by opening it mutates the disk.** `open_plain` runs `PRAGMA journal_mode = WAL`, which on a **zero-length** file creates a 4 096-byte database there; and opening a path beside a stray `-wal` makes SQLite recover the log and then **remove it** | `a_file_that_is_not_a_database_is_never_opened`, `observing_a_destination_changes_nothing_on_disk`, and the two `evara-project` tests that found it | **Proven — a Stage 1 defect, fixed in Stage 2.** The predicate now reads the sixteen-byte header first |
+| **E-35** | **Deflate cannot express a decompression bomb.** Its maximum expansion is ~1 032:1, a property of the format, so the ratio cap at 2 000 is unreachable for the two methods `formatVersion 1` admits | `a_deflate_entry_cannot_declare_a_bomb_ratio` — 8 MiB of zeroes measured | **Proven.** What bounds a bomb is `MAX_PAYLOAD_BYTES` and the manifest's declared `byteLength`, through a limited reader |
+| **E-36** | **The change feed is 26.2% of a realistic project's occupied pages** — 4 306 rows, 1 036 288 of 3 956 736 bytes, measured from `dbstat` | `t60_the_change_feed_share_of_a_payload` | **Measured — T-60 discharged.** [§C.10](#c10-stage-2-what-was-built-measured-and-corrected) |
+| **E-37** | **A stepped backup of a realistic project holds the lock for ~46 ms** — 1 033 pages in 5 steps of 256, ~9 ms per step; ~50 ms with a writer committing 133 times during the copy | `t83_the_lock_duration_of_a_stepped_backup`, `t83_a_concurrent_writer_changes_the_duration_and_not_the_copy` | **Measured — T-83 discharged.** An order of magnitude inside the 500 ms budget, so D8's contingency is not needed |
+| **E-38** | **A snapshot is the project's size page for page, and ~6.9% larger than a vacuumed copy would be**; the archive then saves 88.7% of it, because free pages are mostly zeroes | `the_snapshot_is_not_compacted_and_the_archive_absorbs_most_of_it` | **Measured — §7.2's figure discharged, and the compaction question answered: no pass is added** |
+
 **Discharged in Stage 1.** These were the pending experiments, and they ran:
 
 | Was pending | Outcome |
@@ -287,13 +302,20 @@ design depends on CLI-only behaviour.
 | Whether a stepped backup inside a `BEGIN DEFERRED` holds the read snapshot for the whole copy under `rusqlite` | ✅ **Done — it does.** E-27, asserted twice |
 | `cargo deny check licenses` with `zip 9`'s tree | ✅ Recorded as E-23 in revision 2.1 |
 
+**Discharged in Stage 2.** The two figures 2.2 moved here, and the one §7.2 asked for:
+
+| Was pending | Outcome |
+| --- | --- |
+| Workspace-lock duration for a **stepped backup** at the realistic upper end | ✅ **~46 ms** for 1 033 pages in 5 steps, ~9 ms per step; ~50 ms under a concurrent writer. E-37, and an order of magnitude inside the 500 ms budget |
+| `change_log`'s share of the payload for a project with real edit history | ✅ **26.2%** of occupied pages. E-36. It decides A6, which stays deferred — §C.10 says why the figure does not force the option |
+| The snapshot's free-page inflation (§7.2) | ✅ **+6.9%** over a vacuumed copy, of which the archive absorbs 88.7%. E-38, and **no compaction pass is added** |
+
 **Still requiring an experiment**, and scheduled:
 
 | Pending | Why it cannot be settled on paper | Stage |
 | --- | --- | --- |
-| Workspace-lock duration for a **stepped backup** at the realistic upper end — total hold time, and whether the per-step overhead is material | Depends on page count, disk and platform. Reshaped in 2.2: `VACUUM INTO` is no longer on the snapshot path, and a copy made of many short steps is a different shape from one long statement | **2** (T-83) |
-| `change_log`'s share of the payload for a project with real edit history | Decides whether A6's `--without-history` option is needed | **2** (T-60) |
 | Windows rename behaviour under a live antivirus scan | Environmental; needs CI plus a manual pass | 4 (T-70) |
+| The **ten-times** project's figures (T-59 at 20 000 occurrences) | Needs a fixture an order larger than §7.3's realistic one, which is a build-time cost every run would pay. The realistic scale is measured (E-36…E-38); the ten-times row of §7.3 is not | 3, alongside T-41's generated matrix |
 
 **Why T-60 and T-83 moved from Stage 1 to Stage 2.** Both need a project with **real edit
 history and realistic size**, and Stage 1 builds no such fixture — its projects are a handful
@@ -404,10 +426,27 @@ proven available:
   engine is 3.50.2).
 - **Seven limits** (E-11), including `SQLITE_LIMIT_ATTACHED = 0`, which forbids `ATTACH`
   outright and works independently of engine version.
-- **`SQLITE_OPEN_URI` off**, because E-14 proves the bundled build sets `-DSQLITE_USE_URI`,
-  so a filename would otherwise be URI-interpretable. Combined with
-  [D6](#d6--nothing-is-ever-extracted-to-a-path-taken-from-the-archive) — no archive byte
-  reaches any path — the question is closed twice.
+- **The path form, not an open flag** — corrected in revision 2.3, finding **F-2**. The
+  earlier text said `SQLITE_OPEN_URI` was *off* and treated that as the control. It is not a
+  control this build has: E-14 proves the bundled build sets `-DSQLITE_USE_URI`, and that
+  compile-time option makes URI interpretation the **global default** — `sqlite3_open_v2`
+  parses a filename beginning `file:` as a URI whether or not the caller asked for it. The
+  flag can turn URI handling *on* for a build that defaults off; it cannot turn it off for a
+  build that defaults on. **E-33** proves it against the bundled engine rather than inferring
+  it from the build flag, which is the point of F-2: the record believed a control it had not
+  tested.
+
+  What closes the question is two things, neither of them a flag. First,
+  [D6](#d6--nothing-is-ever-extracted-to-a-path-taken-from-the-archive): every path a payload
+  is opened by is one **Evara minted** — a staging directory Evara created, a UUIDv7 file name
+  Evara chose — so no archive byte contributes to any path. Second, the form is asserted
+  anyway, at the one place a payload is opened, by
+  `evara_db::transfer::paths::require_plain_database_path`: a `file:` prefix, a `?`, a `#`, a
+  `%` escape, an interior NUL or a `..` component is a refusal
+  (`DbError::DestinationPathUnsafe`). Belt and braces by design — the assertion costs a string
+  scan, and it is what turns a future refactor that *did* let a name through into a refusal
+  rather than into a URI with `vfs=` and `mode=rwc` in it. The flag is still not requested,
+  which is now recorded as a statement of intent rather than as a control.
 - **Extension loading**: E-14 proves `-DSQLITE_ENABLE_LOAD_EXTENSION=1` is compiled in. The
   runtime gate defaults closed, rusqlite's `load_extension` Cargo feature is not enabled, and
   `load_extension()` is `SQLITE_DIRECTONLY` so it cannot be reached from a schema object.
@@ -648,6 +687,162 @@ Thirteen discrepancies in revision 1, each fixed. Two were substantive bugs, not
 | 11 | A pre-flight free-space check | Removed. No free-space API in the tree and `unsafe_code` is forbidden, so it needs a dependency to do what D11 already makes safe. Named `ENOSPC` error instead. |
 | 12 | Circular checksums | Finding 1, §C.3. |
 | 13 | Test matrix drift: T-32 conflated a bomb and an entry-count case; T-49 used the old overwrite vocabulary; nothing covered identity, recovery or the proof tests | T-32 split into T-32a/T-32b; T-49 rewritten for `OnConflict`; T-63…T-83 added. |
+
+---
+
+## C.10 Stage 2 — what was built, measured and corrected
+
+Added in revision 2.3, after Stage 2 was built. **No decision was reopened.** S1, S2 and S3
+stand exactly as [§0.2](#02-mandatory-safeguards-from-the-second-review) specifies them, and
+no superseded D11 text was reinstated.
+
+### What was built
+
+`evara-project` gains the format and the protocol: the manifest and `checksums.json` with the
+acyclic verification order, the ZIP writer and reader, the entry-name policy and the byte
+caps, the staging lifecycle, D11 as amended by §0.2's three safeguards, recovery, and
+`seal` / `inspect` / `import` / `recover_pending` / `abandoned_staging` behind `TransferError`.
+The container migration chain is present and **empty** at `formatVersion 1`, which is the
+decision rather than an omission (`migrate.rs`'s header says why).
+
+`evara-db` gains the three things Stage 1 deferred here, plus two the composition needed:
+`transfer::stage` (phases V1 and V2 beside Stage 1's V0), `transfer::table_census`, the
+`fixtures` feature with its only consumer, `transfer::facts` — every manifest fact read **out
+of the file it describes** — and `transfer::paths`, which is F-2's record.
+
+### The one security correction: F-2
+
+**`SQLITE_OPEN_URI` was never a control in this build, and the record said it was.** The
+bundled engine carries `-DSQLITE_USE_URI`, which makes URI interpretation the *global default*:
+the flag can add the capability and cannot remove it. **E-33** proves that against the engine
+rather than inferring it from the build flag — which is the whole lesson of F-2, because the
+record had inferred it.
+
+§C.5, [D6](#d6--nothing-is-ever-extracted-to-a-path-taken-from-the-archive) and
+[§6.1](#61-the-three-phase-boundary) now describe the control that exists:
+
+1. **No archive byte reaches any path.** D6, unchanged, and it is the load-bearing half.
+2. **The path form is asserted anyway**, by `require_plain_database_path`, at every point a
+   payload is opened: a `file:` prefix, a `?`, a `#`, a `%` escape, an interior NUL or a `..`
+   component is `DbError::DestinationPathUnsafe`. Asked **before** the existence check, so
+   `file:x?mode=rwc` is reported as the path form it is.
+
+The flag is still not requested. That is now recorded as a statement of intent rather than as
+a control, which is the narrow scope the correction was asked to keep.
+
+### Two defects the composition found, and what they say about the design
+
+Both were in Stage 1 primitives, both were invisible until the protocol composed them, and
+both were about **the same mistake**: deciding whether a path holds a project by *opening it*.
+
+| Defect | What happened | Why it mattered |
+| --- | --- | --- |
+| A **zero-length** destination was written into | `looks_like_a_project` → `open_plain` → `PRAGMA journal_mode = WAL` **creates a database** in an empty file | The Replace path then kept that as the `.replaced-` copy, so what was preserved was Evara's own 4 096-byte header rather than the user's file. **S1 says an import must not write over an unknown file; checkpointing one is writing over it** |
+| A stray `-wal` was **deleted** | opening a path beside one makes SQLite recover the log and remove it | [§0.2 S3](#s3--a-main-file-must-never-be-paired-with-another-databases-sidecars) forbids exactly this: a `-wal` may hold committed transactions its main file does not. And `DiskFacts::observe` calls this predicate, so **observing the disk was mutating it** — which S2's reconciliation assumes it does not |
+
+Fixed by deciding from the **sixteen-byte SQLite header** before anything is opened
+(`has_database_header`), and by probing `sqlite_master` once inside `UntrustedPayload::open` so
+"this is not a database" is a sentence rather than an opaque internal error. **E-34**, with
+regression tests in both crates.
+
+The design lesson is worth keeping: §0.2's safeguards were asserted against the primitives in
+Stage 1 and were all green. What they could not assert is that a *composed* protocol makes
+those calls, in that order, without a mutation on the way in. That is why T-84…T-90 are owed
+twice, and why the second payment found two defects the first could not.
+
+### One design fact recorded rather than assumed
+
+`MAX_COMPRESSION_RATIO` **cannot fire** on a `Deflate` entry: Deflate's maximum expansion is
+~1 032:1, a property of the format rather than of an encoder (**E-35**, measured). So the cap
+is unreachable for the two methods `formatVersion 1` admits, and lowering it below 1 032 would
+refuse legitimate payloads — a snapshot's free pages are mostly zeroes and deflate almost
+completely.
+
+It is kept, for a future `formatVersion` admitting a method that *can* reach it. **What
+actually bounds a Deflate bomb is the byte cap**: `MAX_PAYLOAD_BYTES` and the manifest's
+declared `byteLength`, applied through a limited reader, so a stream producing more than it
+declared stops at the bound rather than at the end of the disk. `limits.rs` carries the
+reasoning so a later reader finds it rather than finding only the constant.
+
+### The measurements
+
+Fixture: `evara_db::fixtures::transfer::Shape::Realistic` — two schools, three campuses, both
+cycle kinds, 126 sections, 503 occurrences, 80 teachers, 25 groups of 40, a shared building and
+room, an embedded logo, four passes of real updates over every room, plus a real generation, a
+second version, a duplicate, a lock and a **real repair** for the lineage edge; then one
+timetable deleted, so there is a free list to measure. 4 231 168 bytes on disk.
+
+| # | Figure | Measured | Budget | Verdict |
+| --- | --- | --- | --- | --- |
+| **T-60** | change feed's share of occupied pages | **26.2%** (4 306 rows, 1 036 288 of 3 956 736 bytes, from `dbstat`) | — | reported, not acted on |
+| **T-83** | workspace lock held by a stepped backup | **46–82 ms** — 1 033 pages, 5 steps of 256 | ≤ 500 ms | **inside, by an order of magnitude** |
+| **T-83** | the same, with a writer committing throughout | **50–130 ms** (115–133 commits during the copy), census identical | ≤ 500 ms | **inside**; E-27's consistency holds at scale |
+| **§7.2** | snapshot over a vacuumed copy | **+6.9%** (67 free pages of 4 096) | — | **no compaction pass added** |
+| **§7.2** | archive over payload | **88.2–88.7% smaller** (477–500 KB from 4 231 168 bytes) | — | the archive absorbs the free pages |
+| **§7.3** | export / inspect / import, end to end | **91–164 / 11–17 / 179–299 ms** | 1 500 / 50 / 3 000 ms | **inside** |
+
+**Why three of those are ranges and two are exact.** T-60 and the §7.2 inflation figure are
+read from `dbstat` and the free list, so they reproduce byte-for-byte on any machine. The three
+timing rows do not: they were measured twice on the same Windows laptop, under different load,
+and came out 46 and 82 ms, 50 and 130 ms, and 91/11/179 and 164/17/299 ms. The archive-size
+row is a range for a different reason: the fixture mints UUIDv7 keys, so its bytes differ a
+little between builds and deflate accordingly. The range is what was
+observed rather than a tolerance anyone chose, and the verdict is unchanged because the budgets
+are an order of magnitude above the whole spread. This is also why the tests assert the
+budget's **order of magnitude** and not a figure — a test pinning 46 ms would fail on a slower
+disk and would be measuring the machine rather than the design.
+
+**What T-60 decides, and what it does not.** 26.2% is a real share and not a dominating one,
+and the figure moves with *use* rather than with school size — so a school ten years in will
+see more. It does **not** force A6: the feed is the thing that makes `solve_run.inputs_watermark`
+and `timetable_evaluation.inputs_watermark` meaningful, D4's rule that a feed with a hole is
+worse than a full one or none still holds, and a quarter of a payload that deflates to an
+eighth of its size is not a user-visible cost. **A6 stays deferred**, now with a number beside
+the decision instead of a gap. `OPEN-DECISIONS` D37.
+
+**What §7.2 decides.** The compaction question is **answered and closed**: a second
+`VACUUM INTO` pass would recover 6.9% of a *staging* file at the cost of one more full write of
+the payload, and the figure with a user-visible consequence — archive size — barely moves,
+because deflate already absorbs free pages. No pass is added, as §7.2 said it would not be
+without a figure to justify one.
+
+### Four departures from the sketch, each with its reason
+
+| # | Sketch | Built | Why |
+| --- | --- | --- | --- |
+| 1 | `inspect(archive, known: &dyn IdentityLookup)` returning `identityConflicts` | `inspect(archive)`, with no identity lookup | D13's detection needs `Settings::projects_with_identity` and `RecentProject::duplicate_identity`, which [§8](#8-implementation-stages-and-dependencies) puts in **Stage 4**. Adding a trait here with no implementation would have been a seam nothing crossed; T-63…T-67 are Stage 4's |
+| 2 | `import(... )` taking no installation identity | `import(..., Importer { app_version, site_id }, journal, ...)` | V1's migration fires change-log triggers, which read `evara_site_id()` — so a staged payload that needs migrating needs the importing installation's identity. And the journal is a parameter rather than reached through a `Workspace`, which is what lets every recovery state be driven from a journal a test controls |
+| 3 | `payload.sha256` absent; `exportedBySiteId` written by `seal` | `exportedBySiteId` is `None` from `seal` | `evara-project` has no installation identity of its own, and writing `created_by_site_id` into that field is exactly the confusion T-03 exists to catch. The command layer fills it in — Stage 4 |
+| 4 | T-04's *"payload bytes identical"* after export → import → export | asserted as **identical census and identical manifest** but for `exportedAt` and `exportedBySiteId`; payload bytes identical for two exports of **one** project | Byte identity across an import is not achievable and should not be claimed: V1 opens the staged copy, and an open sets `journal_mode` and may stamp `app_meta`. What survives byte-for-byte is the thing that matters — two snapshots of an unchanged project (asserted), and every row (asserted) |
+
+### What Stage 2 deliberately did not build
+
+No CLI command, no Tauri command, no screen, no `TransferSessions`, no `transfer://` events, no
+typegen. No `Settings::projects_with_identity` and no `RecentProject::duplicate_identity`
+(Stage 4). No per-school export and no history-stripping export (A7, A6). **No project
+migration** — V18 is the schema, and transfer reads and copies it. The one settings migration
+is Stage 1's `V2__pending_replacement.sql`, unchanged.
+
+### One pre-existing blocker, reported rather than bypassed
+
+`cargo deny check advisories` **fails**, and it fails on `origin/develop` identically — checked
+by running it there. **RUSTSEC-2026-0459**: SQLite before 3.54.0 can return uninitialised
+page-cache memory when a database is opened together with a sibling `-wal` whose page size
+differs from the database's. `libsqlite3-sys 0.35.0` bundles 3.50.2; the fix is
+`libsqlite3-sys >= 0.39` via `rusqlite 0.41`.
+
+Not introduced by Stage 2, and not in its scope to fix: `rusqlite 0.37 → 0.41` is a
+cross-cutting dependency bump of exactly the shape Stage P was, and it wants its own PR for the
+same reason — it touches the connection factory every project open uses. `bans`, `licenses` and
+`sources` are **ok**, so `zip 9.1.3` and `sha2` added no licence or duplication problem.
+
+Worth noting precisely *because* it is this advisory: the vulnerability's shape is a main file
+paired with a foreign `-wal`, which is the one corruption
+[§0.2 S3](#s3--a-main-file-must-never-be-paired-with-another-databases-sidecars) exists to make
+unrepresentable. A `.evara` carries exactly three entries and no sidecar can arrive in one;
+`refuse_if_sidecars_present` asserts the destination is clean immediately before the rename;
+and `DiskFacts::observe` treats a main file with any sidecar as **not a project**. That is a
+reason the exposure is narrow, and **not** a reason to leave the engine unpatched.
 
 ---
 
@@ -904,8 +1099,24 @@ archive.
    backslash or a NUL, or longer than 128 bytes — in which case the **archive is refused**.
    An archive containing a traversal attempt is not one to read the rest of.
 5. Symlink and directory entries are refused; no entry's attributes are honoured.
-6. `SQLITE_OPEN_URI` is **off** on every connection that touches a payload, because E-14
-   proves the bundled build sets `-DSQLITE_USE_URI`.
+6. **The path a payload is opened by is a plain file path, and that is asserted rather than
+   arranged by a flag** — revision 2.3, finding **F-2**. `SQLITE_OPEN_URI` is not requested,
+   and clearing it achieves nothing in this build: `-DSQLITE_USE_URI` makes URI
+   interpretation the global default (E-14, proven behaviourally as **E-33**). The control is
+   point 3 above — no byte of archive content contributes to any path — plus
+   `require_plain_database_path`, which refuses a `file:` prefix, a `?`, a `#`, a `%` escape,
+   an interior NUL and a `..` component at every point a payload is opened. §C.5 has the
+   reasoning.
+7. **Observing the disk never changes it.** Deciding whether a path holds a project is done
+   from its **sixteen-byte header** before anything is opened
+   (`evara_db::transfer::has_database_header`). Two mutations reached through the earlier
+   "just open it and see" form, and Stage 2 found both: `PRAGMA journal_mode = WAL` on a
+   **zero-length** destination *creates a database there*, so the `.replaced-` copy the
+   protocol kept was Evara's own four-kilobyte header rather than the user's file; and opening
+   a path with a stray `-wal` beside it makes SQLite recover the log and then **remove it**,
+   which is the one act [§0.2 S3](#s3--a-main-file-must-never-be-paired-with-another-databases-sidecars)
+   forbids outright. S2's reconciliation rests on the observation being passive, so this is
+   not a tidiness point. **E-34**.
 
 Traversal is unexpressible rather than defended against, which is why §1.4.9's advisory class
 stays inapplicable after M10 links a ZIP reader. ADR 0055.
@@ -1749,7 +1960,9 @@ Every control below is proven available — E-09 through E-14.
 
 | Control | Value | Why |
 | --- | --- | --- |
-| open flags | `SQLITE_OPEN_READ_ONLY`, **`SQLITE_OPEN_URI` off** | E-14: the bundled build sets `-DSQLITE_USE_URI`, so a filename would otherwise be URI-interpretable |
+| open flags | `SQLITE_OPEN_READ_ONLY` only | **Corrected in revision 2.3 — F-2.** The earlier row claimed `SQLITE_OPEN_URI` *off* as a control. It is not one here: `-DSQLITE_USE_URI` (E-14) makes URI interpretation the global default, so clearing the flag changes nothing (E-33). The flag is not requested, as a statement of intent; the control is the row below |
+| the **path form** | `require_plain_database_path` before the open | F-2's actual control, beside D6's "no archive byte reaches any path". Refuses a `file:` prefix, a `?`, a `#`, a `%` escape, an interior NUL and a `..` component, as `DbError::DestinationPathUnsafe`. Asked **before** the existence check, so `file:x?mode=rwc` is reported as the path form it is rather than as a file that happens not to exist |
+| is it a database at all | the sixteen-byte header, read before anything is opened | **New in revision 2.3 — E-34.** A read-only open of arbitrary bytes *succeeds* (SQLite does not read the header until the first statement), and opening a non-database **mutates**: see [D6](#d6--nothing-is-ever-extracted-to-a-path-taken-from-the-archive) item 7. `UntrustedPayload::open` also probes `sqlite_master` once, so "this is not a database" is `NotAnEvaraProject` with a sentence rather than an opaque internal error from whichever query ran first |
 | `SQLITE_DBCONFIG_DEFENSIVE` | on | blocks `PRAGMA writable_schema` (E-07 proves it is otherwise permitted) and writes to virtual-table shadow tables |
 | `SQLITE_DBCONFIG_WRITABLE_SCHEMA` | off | belt and braces |
 | `SQLITE_DBCONFIG_TRUSTED_SCHEMA` | **off** | safe here: nothing is written and no tracked table is queried, so no change-log trigger can fire. §C.5 |
@@ -1953,7 +2166,7 @@ Stage 2  evara-project container  ◄──── Stage P (satisfied)           
 | --- | --- | --- | --- |
 | **P** | `calamine 0.36.1 → 0.37.0`, `rust_xlsxwriter 0.99.1 → 0.102.0`, converging `zip` on `9.1.3` and removing `8.6.0` from the tree. **Its own PR.** | — | ✅ **Done — PR #35, merged 2026-11-01 as `0faff47`.** Five gates green (`cargo deny check` all four sections, `rust:fmt`, `rust:lint`, `cargo test -p evara-import` 38, `cargo test --workspace --all-features` 1 709/0), CI on `windows-latest` + `macos-latest`. `typed-path` and `nix` licences **confirmed** (E-23). All three advisories resolved (E-24). The sixth gate, full `npm run check`, **did not pass** — two pre-existing jsdom timeouts unrelated to the change, reported not suppressed (§C.8). |
 | **1** | `evara-db::transfer`: the hardened V0 constructor, `snapshot_into` returning an owned `Snapshot` that carries its own census, conformance against a generated reference, the new `DbError` variants. The replacement journal and `settings-migrations/V2`. Fix the `backup.rs` 0-byte leftover (E-22). `evara_site_id` marked `SQLITE_INNOCUOUS` (A2). **Re-prove E-01…E-08 against the bundled engine** (T-75…T-82). **Build the S1/S2/S3 primitives** the Stage 2 protocol composes — safe destination claiming, filesystem-truth reconciliation, single-file-per-side sidecar handling — with T-84…T-90. | P (satisfied) | ✅ **Done — PR #37.** `cargo deny check` four sections ok, `rust:fmt` and `rust:lint` clean, `cargo test --workspace --all-features` **1 794 / 0**, `npm run check` green, CI green on `windows-latest` and `macos-latest`. T-75…T-82 and T-84…T-90 green; E-27…E-32 added; **E-04 corrected**. **One deviation**: one snapshot mechanism, not two (§C.6, E-32). **Three items moved out**: the `fixtures` feature to Stage 2 with its only consumer, and T-60 and T-83 to Stage 2 for want of a realistic fixture (§C.2). **No ZIP, manifest, CLI command, Tauri command or screen**, and no project migration. |
-| **2** | `evara-project`: manifest, `checksums.json`, the acyclic verification order, ZIP writer and reader, entry policy, byte caps, staging lifecycle, **D11's protocol as amended by [§0.2](#02-mandatory-safeguards-from-the-second-review) S1/S2/S3 — never its superseded text** — and recovery, `seal` / `inspect` / `import` / `recover_pending`, `TransferError`. Container migration chain, empty, at `formatVersion 1`. Takes the direct `zip 9.1.3` dependency. **Plus, moved here from Stage 1:** `evara-db`'s `fixtures` feature (§1.4.8), whose only consumer is this stage's round-trip tests; `transfer::stage` — phase V1, which needs the staging lifecycle to migrate *into* — and the free-function `table_census(path)` the round-trip assertion reads a *destination* with; and the §7 measurements — **T-60, T-83 and the snapshot-inflation figure** — which need the realistic fixture this stage is the first to build. | 1, P | Round-trip, corruption, replacement and recovery tests green; §7 budgets **measured**, including T-60, T-83 and §7.2's inflation figure, and the §7.2 compaction question answered from them. Replacement support is **not** complete until all three safeguards are composed on Stage 1's primitives and covered end to end. |
+| **2** | `evara-project`: manifest, `checksums.json`, the acyclic verification order, ZIP writer and reader, entry policy, byte caps, staging lifecycle, **D11's protocol as amended by [§0.2](#02-mandatory-safeguards-from-the-second-review) S1/S2/S3 — never its superseded text** — and recovery, `seal` / `inspect` / `import` / `recover_pending`, `TransferError`. Container migration chain, empty, at `formatVersion 1`. Takes the direct `zip 9.1.3` dependency. **Plus, moved here from Stage 1:** `evara-db`'s `fixtures` feature (§1.4.8), `transfer::stage`, the free-function `table_census(path)`, and the §7 measurements. | 1, P | ✅ **Done.** Round-trip, corruption, replacement and recovery tests green; `cargo test --workspace --all-features` **1 892 / 0**; `rust:fmt` and `rust:lint` clean. **T-60 = 26.2%, T-83 = 46-82 ms (50-130 ms under a writer), §7.2 = +6.9% over a vacuumed copy** — and the compaction question **answered: no pass added** (E-36…E-38, §C.10). One **security correction**: F-2, `SQLITE_OPEN_URI` was never a control here (E-33). Two **defects found by the composition** and fixed: observing the disk mutated it (E-34). One **fact recorded**: Deflate cannot express a bomb (E-35). Four departures, each in §C.10. `cargo deny check advisories` fails on a **pre-existing** advisory that fails on `develop` too — RUSTSEC-2026-0459, §C.10. |
 | **3** | `evara export` / `import` / `inspect`; move them from `PLANNED` to `IMPLEMENTED`. T-41's generated matrix in CI on both platforms. | 2 | Matrix green for V1…V18 on Windows and macOS. |
 | **4** | Eleven Tauri commands, `TransferSessions` in `AppState` cleared on create/open/close, generalised `CoalescingSink`, `transfer://` events, extended `ProjectError`, `Workspace::remember_imported_project`, `Settings::projects_with_identity`, `RecentProject::duplicate_identity`, typegen. | 2 | `npm run check` green; command tests green. |
 | **5** | Export and Import screens: native dialogs, inspect-then-confirm, the identity warnings of D13 verbatim, destination conflict with Replace and the keep-name named, progress with cancel, the synced-folder advisory, the recovery report, the recent-list entry with "Open now", and a keyboard path to all of it. | 4 | vitest green; the GUI smoke-test gap M9A left is not widened. |
@@ -2051,7 +2264,34 @@ covered by a named test rather than a `T-` number, which is noted.
 | T-82 | `t82_a_vacuum_into_to_a_missing_directory_leaves_nothing_behind` | E-08 — so E-01's leftover is specific to the refused write | `evara-db` ✅ |
 | — | `a_read_only_open_flag_is_not_the_same_as_the_query_only_pragma` | E-03, the draft's T-78 | `evara-db` ✅ |
 | — | `send_assertions::a_snapshot_can_be_moved_to_a_worker` | `Snapshot` is `Send`, the draft's T-82 | `evara-db` ✅ |
-| T-83 | Lock duration for a **stepped backup** at the realistic upper end — total hold and per-step overhead | ≤ 500 ms (§7.3) | **Stage 2** — §C.2 says why |
+| T-83 | `t83_the_lock_duration_of_a_stepped_backup`, `t83_a_concurrent_writer_changes_the_duration_and_not_the_copy` | **E-37 — measured: 46 ms, 1 033 pages, 5 steps, ~9 ms/step; 50 ms under a writer** | `evara-project` ✅ |
+| T-91 | `t91_a_uri_filename_is_interpreted_without_the_open_uri_flag` | **E-33** — F-2: the flag is not a control in this build | `evara-db` ✅ |
+
+### What Stage 2's suites cover, by matrix identifier
+
+Added in revision 2.3. Every row below is green; the identifiers are the matrix's, and where a
+row was built differently from its description the difference is in
+[§C.10](#c10-stage-2-what-was-built-measured-and-corrected)'s departures table rather than
+quietly absorbed.
+
+| Rows | Where | Note |
+| --- | --- | --- |
+| T-01, T-03, T-21, T-43, T-44, T-64 | `evara-project::tests_round_trip` | census compared over every table **discovered** from `sqlite_master`, so a future table is covered by discovery |
+| T-04, T-05, T-06 | same | T-04 asserted as identical census and identical manifest but for the two fields that may differ — §C.10 departure 4 |
+| T-08…T-19 | same, as one sweep | `every_table_the_record_names_as_travelling_arrives_populated` names each table, so a failure says *which* came through empty; the census equality is what proves the counts |
+| T-23…T-27, T-31…T-39, T-42, T-45, T-47, T-48, T-50, T-68, T-69 | `evara-project::tests_refusal` | each asserts the refusal **and** that the destination's directory listing is unchanged |
+| T-32a | same, as two tests | a payload producing more than it declared stops at the bound; one declared beyond the absolute cap is refused unread. The *ratio* half is E-35 — Deflate cannot reach the cap |
+| T-49, T-84…T-90 | `evara-project::tests_replacement` | the second payment of the assertions Stage 1 made against the primitives, and the one that found E-34's two defects |
+| T-56, T-61, T-62 | `evara-project::tests_hygiene` | T-62 asserted by `rusqlite`'s **absence** from the manifest, and by every `zip`-reachable refusal being matchable as plain data |
+| T-60, T-83, §7.2, §7.3 | `evara-project::tests_measurements` | figures reported with `--nocapture`; only the order-of-magnitude bound is asserted, because the value depends on the disk |
+
+**Owed to later stages, and named rather than assumed:** T-02 (row-by-row equality over all 38
+tracked tables — the census plus the tracked-table sweep is what stands in today), T-07 (all
+twelve catalogue fixtures round-tripped; the catalogue is in place behind the `fixtures`
+feature and one project is round-tripped), T-10, T-20, T-22, T-28…T-30, T-71…T-74 (the
+`evara-db` half of the hostile-payload rows, which need a crafted SQLite file and so a driver
+this crate deliberately does not have), T-41 (the generated historical matrix — **Stage 3**),
+T-51…T-55 and T-63…T-67 and T-70 (**Stage 4**), T-57…T-59 (**CI and the ten-times fixture**).
 
 ### Versions and compatibility
 
