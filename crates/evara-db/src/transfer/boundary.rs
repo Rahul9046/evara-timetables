@@ -298,10 +298,17 @@ impl UntrustedPayload {
 
         // `query_only` as well as the read-only open flag. Belt and braces, and cheap: the
         // flag stops the file being written, this stops a statement even trying.
-        self.conn.pragma_update(None, "query_only", "ON")?;
+        // Classified rather than `?`: the blanket `From<rusqlite::Error>` makes every failure
+        // `Internal`, and on SQLite 3.54 *this* is the first statement to touch page 1 — so a
+        // payload that is not a database arrives here, and `?` would report it as an internal
+        // error rather than as the sentence the user needs.
+        self.conn
+            .pragma_update(None, "query_only", "ON")
+            .map_err(|source| self.classify_control_failure(source))?;
         let query_only: i64 = self
             .conn
-            .query_row("PRAGMA query_only", [], |row| row.get(0))?;
+            .query_row("PRAGMA query_only", [], |row| row.get(0))
+            .map_err(|source| self.classify_control_failure(source))?;
         if query_only == 0 {
             return Err(DbError::PragmaRejected {
                 pragma: "query_only",
