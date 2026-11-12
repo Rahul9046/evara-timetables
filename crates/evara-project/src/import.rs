@@ -137,7 +137,8 @@ pub struct ImportReport {
 /// Every refusal in [`reader`]'s order, plus:
 ///
 /// - [`TransferError::WrongExtension`] if `destination` is not a `.evaraproj`.
-/// - [`TransferError::DestinationUnsafe`] if part of its path is a link, or it is a URI.
+/// - [`TransferError::DestinationUnsafe`] if it *is* a link, or it is a URI. A link in an
+///   ancestor is fine — `crate::paths::require_safe_destination` carries why.
 /// - [`TransferError::DestinationExists`] with [`OnConflict::Refuse`].
 /// - [`TransferError::ReplacementInFlight`] if one is already journalled for it.
 /// - [`TransferError::RenameBlocked`] if a sidecar cannot be released, or a rename cannot be
