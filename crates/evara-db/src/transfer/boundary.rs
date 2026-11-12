@@ -136,9 +136,12 @@ impl UntrustedPayload {
     /// # Errors
     ///
     /// - [`DbError::ProjectNotFound`] if nothing is there.
-    /// - [`DbError::NotAnEvaraProject`] if the bytes are not a database. Probed with one read
-    ///   of `sqlite_master`, because a read-only open of arbitrary bytes **succeeds** —
-    ///   SQLite does not read the file header until the first statement.
+    /// - [`DbError::NotAnEvaraProject`] if the bytes are not a database, from either of two
+    ///   places. A read-only open of arbitrary bytes **succeeds** — SQLite does not read the
+    ///   file header until something needs it — so the condition surfaces later: on SQLite
+    ///   3.54 while the controls are being applied ([`Self::classify_control_failure`]), and
+    ///   on a file whose page 1 reads but holds no schema at the `sqlite_master` probe below.
+    ///   Both say the same sentence, because to a user they are the same answer.
     /// - [`DbError::Open`] if SQLite will not open it at all.
     /// - [`DbError::PragmaRejected`] if a control did not take effect. Read back rather than
     ///   assumed: a pragma that silently failed would leave the payload opened with full
@@ -199,24 +202,51 @@ impl UntrustedPayload {
         Ok(payload)
     }
 
+    /// Classifies a driver failure raised while applying the V0 controls.
+    ///
+    /// `SQLITE_NOTADB` is the engine saying the file is not a database, and that is the
+    /// **user's** answer — this is not a campus file — rather than an internal error nobody
+    /// can act on. Every other failure stays internal, because a control that will not take
+    /// effect is a defect in Evara and not something about the payload.
+    ///
+    /// # Why this is needed where it was not before
+    ///
+    /// SQLite 3.54 validates page 1 earlier than 3.50.2 did. On the older engine a payload
+    /// that was not a database opened, hardened, and was then caught by the `sqlite_master`
+    /// probe in [`Self::open`]; on 3.54 the hardening itself touches the page and fails
+    /// first. Without this the refusal regressed to `Internal(file is not a database)` —
+    /// which is exactly the opaque error E-34 removed, so preserving the sentence is
+    /// preserving behaviour rather than adding any.
+    ///
+    /// The probe below **stays**: it is what covers a file whose page 1 is readable but
+    /// holds no schema, which hardening does not touch.
+    fn classify_control_failure(&self, source: rusqlite::Error) -> DbError {
+        if source.sqlite_error_code() == Some(rusqlite::ErrorCode::NotADatabase) {
+            return DbError::NotAnEvaraProject {
+                name: self.name.clone(),
+            };
+        }
+        DbError::Internal(InternalError::wrap(source))
+    }
+
     /// Applies every V0 control and verifies each one took effect.
     fn harden(&self) -> Result<()> {
         // DEFENSIVE first: it is the switch that makes several of the others stick.
         self.conn
             .set_db_config(DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)
-            .map_err(|source| DbError::Internal(InternalError::wrap(source)))?;
+            .map_err(|source| self.classify_control_failure(source))?;
 
         for (config, label) in AUDIT_DISABLED {
             self.conn
                 .set_db_config(*config, false)
-                .map_err(|source| DbError::Internal(InternalError::wrap(source)))?;
+                .map_err(|source| self.classify_control_failure(source))?;
 
             // Read back. `set_db_config` returns the resulting value, but reading it
             // separately is what catches an engine that accepted the call and ignored it.
             let still_on = self
                 .conn
                 .db_config(*config)
-                .map_err(|source| DbError::Internal(InternalError::wrap(source)))?;
+                .map_err(|source| self.classify_control_failure(source))?;
             if still_on {
                 return Err(DbError::PragmaRejected {
                     pragma: "db_config",
@@ -252,11 +282,11 @@ impl UntrustedPayload {
         ] {
             self.conn
                 .set_limit(limit, value)
-                .map_err(|source| DbError::Internal(InternalError::wrap(source)))?;
+                .map_err(|source| self.classify_control_failure(source))?;
             let applied = self
                 .conn
                 .limit(limit)
-                .map_err(|source| DbError::Internal(InternalError::wrap(source)))?;
+                .map_err(|source| self.classify_control_failure(source))?;
             if applied != value {
                 return Err(DbError::PragmaRejected {
                     pragma: "limit",

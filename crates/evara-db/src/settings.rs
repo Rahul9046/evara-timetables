@@ -152,12 +152,19 @@ impl Settings {
 
         // Keep only the newest entries. Ordered by time then key so the result is
         // deterministic when two projects share a timestamp.
+        //
+        // Bound as `i64` rather than as the `usize` the constant is: `rusqlite 0.41` removed
+        // `ToSql for usize` deliberately, because a `usize` is 32 bits on one target and 64 on
+        // another and binding one leaves the value's width up to the platform. `i64` is what
+        // SQLite's INTEGER actually is, so this is the one place a Rust count becomes a SQL
+        // integer and it now says so. The conversion cannot fail for a small constant.
         tx.execute(
             "DELETE FROM recent_project WHERE path_key NOT IN (
                  SELECT path_key FROM recent_project
                  ORDER BY last_opened_at DESC, path_key ASC LIMIT ?1
              )",
-            [MAX_RECENT_PROJECTS],
+            [i64::try_from(MAX_RECENT_PROJECTS)
+                .expect("the recent-project limit is a small constant")],
         )?;
         tx.commit()?;
         Ok(())
