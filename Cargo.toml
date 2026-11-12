@@ -75,7 +75,7 @@ ts-rs = { version = "12", features = ["uuid-impl", "no-serde-warnings"] }
 # All three are no-dependency feature flags in rusqlite's own manifest, so enabling them
 # widens the compiled surface and adds nothing to the dependency graph: `cargo deny check`
 # is unchanged by this line.
-rusqlite = { version = "0.37", features = [
+rusqlite = { version = "0.41", features = [
     "bundled",
     "functions",
     "backup",
