@@ -39,6 +39,9 @@ use evara_db::transfer::{self, facts_of};
 use crate::tests_fixture::Fixture;
 use crate::{IgnoreProgress, seal};
 
+/// The one table a concurrent writer appends to, so the one the bracket is about.
+const FEED: &str = "change_log";
+
 /// A realistic project, closed, with its size and facts read.
 struct Measured {
     _dir: tempfile::TempDir,
@@ -304,10 +307,51 @@ fn t83_a_concurrent_writer_changes_the_duration_and_not_the_copy() {
         held.as_secs_f64() * 1_000.0,
     );
 
+    // What "one coherent instant" can honestly be asserted as here.
+    //
+    // Not equality with the pre-writer baseline, which is what this assertion used to be and
+    // which is a **race**: the writer commits continuously, so by the time the backup pins its
+    // read transaction some of those commits have already landed. The copy is then a coherent
+    // view of a *later* instant, which is correct and fails an equality check. Windows won the
+    // race and macOS did not — the observed failure was `change_log` 4312 against 4306, every
+    // other one of the 48 tables identical, which is exactly a coherent later instant and not a
+    // torn copy.
+    //
+    // So the property is stated as what it is. The writer only ever calls `update_room`, which
+    // modifies one existing row and appends one `change_log` entry — it inserts into no other
+    // table and deletes from none. Therefore:
+    //
+    // - every other table must be **identical**, and a torn copy is what would break that;
+    // - `change_log` must lie **between** the count before the writer started and the count
+    //   after it stopped, because the instant copied is inside that window.
+    //
+    // That is a stronger statement than the old one in the respect that matters — it is
+    // checked against a bracket the copy must fall inside rather than against one end of it —
+    // and it is true on every machine rather than on the one that wins a race.
+    let after = facts_of(&measured.project).expect("read the project's facts after the writer");
+
+    let without_feed = |census: &std::collections::BTreeMap<String, i64>| {
+        census
+            .iter()
+            .filter(|(table, _)| table.as_str() != FEED)
+            .map(|(table, count)| (table.clone(), *count))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+
     assert_eq!(
-        snapshot_facts.census, measured.facts.census,
-        "the copy is of one coherent instant: the pinned read transaction is what makes that \
-         true, and E-27 is the test that proves the mechanism"
+        without_feed(&snapshot_facts.census),
+        without_feed(&measured.facts.census),
+        "a concurrent writer touches one room and the feed; every other table must be \
+         identical in the copy, because a torn copy is what would show up here"
+    );
+
+    let copied = snapshot_facts.census.get(FEED).copied().unwrap_or_default();
+    let before = measured.facts.census.get(FEED).copied().unwrap_or_default();
+    let ended = after.census.get(FEED).copied().unwrap_or_default();
+    assert!(
+        (before..=ended).contains(&copied),
+        "the copy is of one coherent instant, so its feed must fall inside the window the \
+         writer ran in: {copied} is not within {before}..={ended}"
     );
     assert!(
         held.as_secs() < 10,
