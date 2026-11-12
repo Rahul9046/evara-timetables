@@ -57,6 +57,9 @@ pub use meta::now_iso8601;
 pub mod cloud_sync;
 mod connection;
 mod error;
+/// Synthetic projects on disk, behind the `fixtures` feature. See [`fixtures`].
+#[cfg(any(feature = "fixtures", test))]
+pub mod fixtures;
 pub mod import;
 pub mod meta;
 mod migrations;
@@ -251,7 +254,7 @@ impl Database {
     ///
     /// A valid but *empty* SQLite file is not a project â€” that is the case `create`
     /// produces and `open_existing` must reject.
-    fn looks_like_a_project(path: &Path) -> Result<bool> {
+    pub(crate) fn looks_like_a_project(path: &Path) -> Result<bool> {
         let conn = match connection::open_plain(path) {
             Ok(conn) => conn,
             // "file is not a database" and friends mean the user picked the wrong file.

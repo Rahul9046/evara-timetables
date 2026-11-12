@@ -16,6 +16,20 @@ workspace = true
 # TypeScript definitions for the record and input types that cross the IPC boundary.
 # Off by default so the CLI and the solver never carry the generator. See ADR 0012.
 ts = ["dep:ts-rs", "evara-core/ts"]
+# Synthetic projects on disk: `fixtures::seed`'s builder, `fixtures::catalogue`'s twelve
+# named schools, and `fixtures::transfer`'s realistic project. Off by default, so nothing
+# shipped carries it -- the same arrangement `evara-core` has for `scheduling::fixtures`.
+#
+# It takes `tempfile`, which was already a dev-dependency and is already in the lockfile: a
+# fixture owns the directory its project file lives in, so the file outlives every borrow and
+# goes away with the test. `evara-core`'s fixtures feature adds no dependency because its
+# fixtures are in memory; a project fixture is a file, and a file needs somewhere to be.
+#
+# M10 Stage 2 is why this exists: an export and a re-import live in `evara-project`, and
+# until this feature every project fixture was `#[cfg(test)]` inside this crate and so
+# unreachable from there. Stage 1 deferred the feature here deliberately, to land with its
+# only consumer rather than as a feature nothing used.
+fixtures = ["dep:tempfile"]
 
 [dependencies]
 evara-core = { workspace = true }
@@ -28,6 +42,7 @@ rusqlite = { workspace = true }
 refinery = { workspace = true }
 directories = { workspace = true }
 ts-rs = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

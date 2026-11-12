@@ -387,6 +387,54 @@ disagree about whether a placement is legal, the product is broken.
   [adr/0052](docs/adr/0052-an-unexpressible-lock-blocks-a-repair.md),
   [TIMETABLE-REPAIR.md](docs/TIMETABLE-REPAIR.md).
 
+- **A `.evara` carries a verified snapshot, is read by name, and is never extracted.** Every
+  rule in the next four bullets is specified in
+  [M10-PROJECT-TRANSFER-PROPOSAL.md](docs/M10-PROJECT-TRANSFER-PROPOSAL.md), whose §0.2 is the
+  authoritative replacement specification and whose §C.10 records what Stage 2 built, measured
+  and corrected. ADRs 0053–0059 are Stage 6's and are named here as *to come* rather than
+  linked, so no reference dangles. The
+  archive is exactly three entries — `manifest.json`, `checksums.json`,
+  `payload/project.evaraproj` — opened by **exact name**, never by iterating the directory and
+  never through an extract-to-directory API, so a traversal is unexpressible rather than
+  defended against (D6, and ADR 0055 when Stage 6 writes it). The payload
+  streams to a path **Evara chose**, and no byte of archive content contributes to any path.
+  The integrity model is **two levels with one root** and the manifest is the deliberately
+  unverified one: these digests detect **corruption, not authenticity** — anyone can rewrite a
+  manifest and recompute every digest below it — and the interface says so at the point of
+  import. Two version axes, one refusal each: `formatVersion` is the container,
+  `payload.schemaVersion` is the data, and a disagreement between the manifest and the payload
+  is a refusal because it means the archive was not assembled by Evara. `capabilities` is
+  **derived from the data**, so a rule a reader cannot evaluate is a refusal naming it and
+  never a row quietly dropped.
+- **An import stages, verifies, migrates and renames — and the project it replaces is kept.**
+  Verification runs V0 (hardened read-only audit, then schema conformance against a reference
+  **this binary generates**, and only then the identity read), V1 (migrate), V2 (verify what
+  migration produced), in that order, first failure stopping everything
+  (D10, §6.1, and ADR 0056 to come). An import **rebuilds nothing** and takes no safety backup
+  of the staged file, because the archive is a checksummed copy of the source (D7, ADR 0057 to
+  come). A destination is only
+  ever written **by a rename**; staging is a sibling of it so no rename crosses a volume; and
+  `<stem>.replaced-<stamp>.evaraproj` is **never deleted by any code path**, success or failure
+  (D11 **as amended by §0.2's three safeguards — never its superseded text**, and ADR 0058 to
+  come). An existing
+  zero-length destination is **occupied**, not creatable — deliberately unlike
+  `Database::create` — and an import never opens what it imported.
+- **Deciding what is at a path must not change it.** Whether a file is a project is answered
+  from its **sixteen-byte header** before anything is opened: `open_plain` runs
+  `PRAGMA journal_mode = WAL`, which *creates a database* in a zero-length file, and opening a
+  path beside a stray `-wal` makes SQLite recover the log and then **remove it** — discarding
+  committed transactions the main file does not hold. Recovery reconciles **observed** facts
+  against the journal's *intent*, so an observation that mutated would have it act on a state
+  it created itself. Nothing in the transfer path ever deletes a sidecar to make a destination
+  look clean.
+- **`SQLITE_OPEN_URI` is not a control in this build.** The bundled engine is compiled with
+  `-DSQLITE_USE_URI`, so URI interpretation is the **global default** and omitting the flag
+  changes nothing — a `file:…?mode=rwc` filename is parsed as a URI either way. What bounds it
+  is that every path a payload is opened by is one Evara minted, and that the form is asserted
+  anyway (`evara_db::transfer::paths`): a `file:` prefix, a `?`, a `#`, a `%` escape, an
+  interior NUL or a `..` component is a refusal. Do not reintroduce the flag as a security
+  claim.
+
 ## 4. Definition of done for a constraint
 
 A constraint type is not "supported" until all six exist:

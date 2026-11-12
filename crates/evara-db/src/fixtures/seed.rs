@@ -1,6 +1,14 @@
 //! Database-backed scheduling fixtures: real `.evaraproj` files, built through the
 //! repositories.
 //!
+//! # Why this is behind a feature rather than `#[cfg(test)]`
+//!
+//! It was `#[cfg(test)]` until M10 Stage 2, which made it unreachable outside this crate's
+//! own test binary — and Stage 2's round trips are in `evara-project`, which has to export
+//! and re-import a project that actually holds something. `evara-core` had the same problem
+//! in M2 and answered it with a `fixtures` feature; this is the same answer, off by default
+//! so nothing shipped carries it. See [`crate::fixtures`].
+//!
 //! # Why these exist beside M2's
 //!
 //! `evara_core::scheduling::fixtures` builds a [`Problem`](evara_core::scheduling::Problem)
@@ -51,7 +59,7 @@ const APP_VERSION: &str = "0.1.0-test";
 ///
 /// Holds the `TempDir` so the file outlives every borrow of the database and is removed when
 /// the test ends. Nothing here touches a project the user owns.
-pub(crate) struct Project {
+pub struct Project {
     /// Held so the project file outlives every borrow, and is removed with the test.
     _dir: tempfile::TempDir,
     path: std::path::PathBuf,
@@ -60,12 +68,29 @@ pub(crate) struct Project {
 
 impl Project {
     /// Creates an empty project in a fresh temporary directory.
-    pub(crate) fn new() -> Self {
+    ///
+    /// No `Default` implementation, deliberately: this creates a directory, a settings
+    /// database and a project file, which is not what `Default::default()` leads a reader to
+    /// expect. `new` is the only constructor, and it is spelled out at every call site.
+    #[expect(
+        clippy::new_without_default,
+        reason = "creating one makes a directory, a settings database and a project file"
+    )]
+    pub fn new() -> Self {
+        Self::named("fixture")
+    }
+
+    /// Creates an empty project with a chosen file stem, in a fresh temporary directory.
+    ///
+    /// The stem reaches the manifest's `schools` nowhere and the file name everywhere a
+    /// replacement protocol reasons about a keep-name, so a test that exercises replacement
+    /// wants to choose it rather than compare `fixture.evaraproj` with itself.
+    pub fn named(stem: &str) -> Self {
         let dir = tempfile::TempDir::new().expect("temp dir");
         let settings = dir.path().join("settings.sqlite");
         let mut workspace =
             Workspace::with_settings_at(&settings, APP_VERSION).expect("settings database");
-        let path = dir.path().join(format!("fixture.{PROJECT_EXTENSION}"));
+        let path = dir.path().join(format!("{stem}.{PROJECT_EXTENSION}"));
         workspace.create_project(&path).expect("create project");
         Self {
             _dir: dir,
@@ -74,8 +99,32 @@ impl Project {
         }
     }
 
+    /// The directory the project file sits in.
+    ///
+    /// Staging is always a **sibling** of a destination, so a test composing the
+    /// replacement protocol needs the parent as well as the file.
+    pub fn directory(&self) -> &std::path::Path {
+        self.path
+            .parent()
+            .expect("a fixture project always has a parent directory")
+    }
+
+    /// Closes the project, leaving the file on disk.
+    ///
+    /// What an export of a *closed* project needs, and what a replacement needs before it
+    /// may move the destination: `Workspace` holds one project at a time, and a rename over
+    /// a file SQLite still has open fails on Windows and silently orphans an inode on macOS.
+    pub fn close(&mut self) {
+        self.workspace.close_project();
+    }
+
+    /// The workspace that owns the project, for a test that needs its settings database.
+    pub fn workspace(&mut self) -> &mut Workspace {
+        &mut self.workspace
+    }
+
     /// The open database, for writing a fixture.
-    pub(crate) fn db(&mut self) -> &mut Database {
+    pub fn db(&mut self) -> &mut Database {
         self.workspace.open_database_for_test()
     }
 
@@ -85,7 +134,7 @@ impl Project {
     /// connection that wrote it being dropped, and a fixture validated through the same
     /// handle that built it would not prove that. Dropping the `Database` closes the file and
     /// checkpoints the WAL, so the reopened connection reads what is actually on disk.
-    pub(crate) fn reopen(&mut self) {
+    pub fn reopen(&mut self) {
         assert!(self.workspace.close_project(), "a project was open");
         self.workspace
             .open_project(&self.path)
@@ -93,12 +142,12 @@ impl Project {
     }
 
     /// The project file's path, for a test that opens it a second way.
-    pub(crate) fn path(&self) -> &std::path::Path {
+    pub fn path(&self) -> &std::path::Path {
         &self.path
     }
 
     /// Compiles one selection, through the read-only handle.
-    pub(crate) fn load(&self, selection: &SchedulingSelection) -> crate::Result<Assembly> {
+    pub fn load(&self, selection: &SchedulingSelection) -> crate::Result<Assembly> {
         self.workspace
             .scheduling()
             .expect("a project is open")
@@ -106,7 +155,7 @@ impl Project {
     }
 
     /// Reads the display labels for one selection, through the same read-only handle.
-    pub(crate) fn labels(
+    pub fn labels(
         &self,
         selection: &SchedulingSelection,
     ) -> crate::Result<evara_core::scheduling::display::LabelSet> {
@@ -117,7 +166,7 @@ impl Project {
     }
 
     /// Reads one timetable's stored entry flags.
-    pub(crate) fn entry_flags(&self, timetable_id: Uuid) -> crate::Result<Vec<(Uuid, bool, bool)>> {
+    pub fn entry_flags(&self, timetable_id: Uuid) -> crate::Result<Vec<(Uuid, bool, bool)>> {
         self.workspace
             .scheduling()
             .expect("a project is open")
@@ -129,32 +178,32 @@ impl Project {
 ///
 /// Fields rather than accessors: a fixture is data, and a test that has to call six methods
 /// to find out what it built is harder to read than one that names the field.
-pub(crate) struct School {
+pub struct School {
     /// The school.
-    pub(crate) id: Uuid,
+    pub id: Uuid,
     /// Its campuses, in creation order.
-    pub(crate) campuses: Vec<Uuid>,
+    pub campuses: Vec<Uuid>,
     /// The cycle the grid is defined over.
-    pub(crate) cycle: Uuid,
+    pub cycle: Uuid,
     /// The term, where the fixture made one.
-    pub(crate) term: Option<Uuid>,
+    pub term: Option<Uuid>,
     /// Its bell schedules (`period_structure` rows), in creation order.
-    pub(crate) schedules: Vec<Uuid>,
+    pub schedules: Vec<Uuid>,
     /// Its room types, in creation order.
-    pub(crate) room_types: Vec<Uuid>,
+    pub room_types: Vec<Uuid>,
     /// Its rooms, in creation order.
-    pub(crate) rooms: Vec<Uuid>,
+    pub rooms: Vec<Uuid>,
     /// Its teachers, in creation order.
-    pub(crate) teachers: Vec<Uuid>,
+    pub teachers: Vec<Uuid>,
     /// Its student groups, in creation order.
-    pub(crate) groups: Vec<Uuid>,
+    pub groups: Vec<Uuid>,
     /// Its class sections, in creation order.
-    pub(crate) sections: Vec<Uuid>,
+    pub sections: Vec<Uuid>,
 }
 
 impl School {
     /// What to pass the loader.
-    pub(crate) const fn selection(&self) -> SchedulingSelection {
+    pub const fn selection(&self) -> SchedulingSelection {
         SchedulingSelection {
             school_id: self.id,
             cycle_id: self.cycle,
@@ -167,7 +216,7 @@ impl School {
     /// A `CUSTOM` cycle rather than a `WEEKLY` one, because a weekly cycle is *the week* —
     /// all seven positions, always — and a fixture that wants a five-day grid should say
     /// five rather than materialise seven and ignore two.
-    pub(crate) fn new(project: &mut Project, name: &str, campuses: &[&str], days: i64) -> Self {
+    pub fn new(project: &mut Project, name: &str, campuses: &[&str], days: i64) -> Self {
         let id = project
             .db()
             .structure()
@@ -228,7 +277,7 @@ impl School {
     }
 
     /// Adds an academic year with one term, and selects that term.
-    pub(crate) fn with_term(&mut self, project: &mut Project) -> &mut Self {
+    pub fn with_term(&mut self, project: &mut Project) -> &mut Self {
         let year = project
             .db()
             .structure()
@@ -265,7 +314,7 @@ impl School {
     /// Materialisation goes through [`TimeModel::apply_materialisation`], the only thing that
     /// may create a `timeslot`: a slot that did not come from materialisation would have no
     /// logical identity to preserve.
-    pub(crate) fn bells(
+    pub fn bells(
         &mut self,
         project: &mut Project,
         name: &str,
@@ -313,7 +362,7 @@ impl School {
     /// Separate from [`School::bells`] so a fixture can define a schedule and deliberately
     /// **not** materialise it — ADR 0033 test 8's case, and the one M3 found M2 had
     /// documented wrongly.
-    pub(crate) fn materialise(&mut self, project: &mut Project) -> &mut Self {
+    pub fn materialise(&mut self, project: &mut Project) -> &mut Self {
         for schedule in self.schedules.clone() {
             let request = MaterialisationRequest::new(self.cycle, schedule, self.term);
             project
@@ -326,7 +375,7 @@ impl School {
     }
 
     /// Adds a room type.
-    pub(crate) fn room_type(&mut self, project: &mut Project, name: &str) -> Uuid {
+    pub fn room_type(&mut self, project: &mut Project, name: &str) -> Uuid {
         let id = project
             .db()
             .structure()
@@ -346,7 +395,7 @@ impl School {
     /// `is_bookable = 0` removes a room from **every** activity's candidate set and is
     /// unrelated to how many people fit (ADR 0034 §6). Stored, editable, and read by nothing
     /// until the loader built a candidate domain.
-    pub(crate) fn unbookable_room(
+    pub fn unbookable_room(
         &mut self,
         project: &mut Project,
         name: &str,
@@ -376,7 +425,7 @@ impl School {
     }
 
     /// Adds a room on one campus, optionally shared with others.
-    pub(crate) fn room(
+    pub fn room(
         &mut self,
         project: &mut Project,
         name: &str,
@@ -412,7 +461,7 @@ impl School {
     ///
     /// Created at this school, so this is their home school and their membership exists and
     /// is active — the ordinary state, and the one every other fixture varies from.
-    pub(crate) fn teacher(&mut self, project: &mut Project, family: &str) -> Uuid {
+    pub fn teacher(&mut self, project: &mut Project, family: &str) -> Uuid {
         let id = project
             .db()
             .people()
@@ -441,7 +490,7 @@ impl School {
     /// `size` of `None` means *membership is the truth*, which is a different statement from
     /// a declared zero and must not be merged with it — ADR 0006 requires a full timetable to
     /// be buildable from declared sizes with no student records at all.
-    pub(crate) fn group(
+    pub fn group(
         &mut self,
         project: &mut Project,
         name: &str,
@@ -474,7 +523,7 @@ impl School {
     /// it the way the eventual screen will, through `update_student_group` carrying the row's
     /// revision. Three states: `None` is "not stated", which is what every migrated project
     /// holds.
-    pub(crate) fn declare_children(project: &mut Project, group: Uuid, disjoint: Option<bool>) {
+    pub fn declare_children(project: &mut Project, group: Uuid, disjoint: Option<bool>) {
         let current = project
             .db()
             .people()
@@ -509,7 +558,7 @@ impl School {
     /// refused as a duplicate. That matters for the fixture because an effective member is a
     /// conjunction: `student.is_active` **and** a spell whose status is not `LEFT` **and** a
     /// membership row. Two of the three come free; the group membership is what this adds.
-    pub(crate) fn student_in(&mut self, project: &mut Project, group: Uuid, n: usize) -> Uuid {
+    pub fn student_in(&mut self, project: &mut Project, group: Uuid, n: usize) -> Uuid {
         let student = project
             .db()
             .people()
@@ -542,7 +591,7 @@ impl School {
     /// history, so a child who has left is still a member of the group they were in. Right
     /// for the record, wrong for a room — counting them would manufacture clashes between
     /// groups that no longer share anybody.
-    pub(crate) fn student_leaves(&mut self, project: &mut Project, student: Uuid) {
+    pub fn student_leaves(&mut self, project: &mut Project, student: Uuid) {
         project
             .db()
             .membership()
@@ -555,7 +604,7 @@ impl School {
     /// Separate from [`School::section`] because a school teaches a handful of subjects and
     /// offers many courses of each, and a fixture that minted a subject per section would
     /// describe a school nobody has.
-    pub(crate) fn subject(&mut self, project: &mut Project, name: &str) -> Uuid {
+    pub fn subject(&mut self, project: &mut Project, name: &str) -> Uuid {
         project
             .db()
             .curriculum()
@@ -576,7 +625,7 @@ impl School {
     /// class_section`, and neither carries a `school_id` — ownership is resolved through
     /// `subject`, which is what `create_course` and `create_class_section` check.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn section(
+    pub fn section(
         &mut self,
         project: &mut Project,
         subject_id: Uuid,
@@ -629,7 +678,7 @@ impl School {
     /// §3 both say a section's audience is its student groups and the individual roster is
     /// never added to it. What this enables in a test is the per-student *view*, which M8
     /// derives from these rows and from nothing else.
-    pub(crate) fn enrol(&mut self, project: &mut Project, section: Uuid, student: Uuid) {
+    pub fn enrol(&mut self, project: &mut Project, section: Uuid, student: Uuid) {
         project
             .db()
             .lessons()
@@ -638,7 +687,7 @@ impl School {
     }
 
     /// Gives a section a teacher.
-    pub(crate) fn teach(&mut self, project: &mut Project, section: Uuid, teacher: Uuid) {
+    pub fn teach(&mut self, project: &mut Project, section: Uuid, teacher: Uuid) {
         project
             .db()
             .lessons()
@@ -647,7 +696,7 @@ impl School {
     }
 
     /// Gives a section an attending group.
-    pub(crate) fn attend(&mut self, project: &mut Project, section: Uuid, group: Uuid) {
+    pub fn attend(&mut self, project: &mut Project, section: Uuid, group: Uuid) {
         project
             .db()
             .lessons()
@@ -660,13 +709,7 @@ impl School {
     /// One row per occurrence — ADR 0029. Four single periods a cycle is `(1, 4)`, which is
     /// four activities; a double is `(2, 1)`, which is one activity of two consecutive
     /// periods and **not** two activities.
-    pub(crate) fn occurrences(
-        &mut self,
-        project: &mut Project,
-        section: Uuid,
-        duration: i64,
-        count: i64,
-    ) {
+    pub fn occurrences(&mut self, project: &mut Project, section: Uuid, duration: i64, count: i64) {
         project
             .db()
             .lessons()
@@ -680,7 +723,7 @@ impl School {
     /// `class_teacher`, and `V15`'s eligibility trigger pair fires only on `class_teacher`,
     /// so narrowing somebody who already teaches elsewhere is permitted. See
     /// [`super::super::findings`] for the whole route.
-    pub(crate) fn narrow_to_campus(&mut self, project: &mut Project, teacher: Uuid, campus: usize) {
+    pub fn narrow_to_campus(&mut self, project: &mut Project, teacher: Uuid, campus: usize) {
         project
             .db()
             .membership()
@@ -689,7 +732,7 @@ impl School {
     }
 
     /// Records an availability rule for one entity on one cycle day.
-    pub(crate) fn unavailable_on_day(
+    pub fn unavailable_on_day(
         &mut self,
         project: &mut Project,
         kind: AvailabilityEntity,
@@ -719,7 +762,7 @@ impl School {
     }
 
     /// Records an availability rule for one entity in one period, every day.
-    pub(crate) fn unavailable_in_period(
+    pub fn unavailable_in_period(
         &mut self,
         project: &mut Project,
         kind: AvailabilityEntity,
@@ -749,7 +792,7 @@ impl School {
     }
 
     /// The cycle days of this school's cycle, in ordinal order.
-    pub(crate) fn days(&self, project: &mut Project) -> Vec<Uuid> {
+    pub fn days(&self, project: &mut Project) -> Vec<Uuid> {
         project
             .db()
             .time_model()
@@ -761,7 +804,7 @@ impl School {
     }
 
     /// The periods of one bell schedule, in ordinal order.
-    pub(crate) fn periods(&self, project: &mut Project, schedule: usize) -> Vec<Uuid> {
+    pub fn periods(&self, project: &mut Project, schedule: usize) -> Vec<Uuid> {
         project
             .db()
             .time_model()
@@ -791,7 +834,7 @@ impl School {
     ///
     /// The row is written through [`Database::write`], so it is a real transaction and the
     /// change-log trigger fires on it like any other insert.
-    pub(crate) fn orphan_availability_rule(
+    pub fn orphan_availability_rule(
         &mut self,
         project: &mut Project,
         kind: &str,
@@ -832,7 +875,7 @@ impl School {
     /// `Availability::set` accepts one, so this needs no bypass. What the engine does not do
     /// is schedule around it, and saying so is `availability-entity-kind-not-scheduled`'s
     /// whole job.
-    pub(crate) fn resource_rule(&mut self, project: &mut Project, day: Uuid) -> Uuid {
+    pub fn resource_rule(&mut self, project: &mut Project, day: Uuid) -> Uuid {
         let resource = project
             .db()
             .structure()
@@ -861,7 +904,7 @@ impl School {
 /// is **two** rather than four. That matters: a run is broken by any non-teaching period
 /// between two teaching ones, and a fixture whose periods were all teaching could not
 /// demonstrate the difference.
-pub(crate) const STANDARD_DAY: &[(&str, &str, &str, bool)] = &[
+pub const STANDARD_DAY: &[(&str, &str, &str, bool)] = &[
     ("1", "09:00", "10:00", true),
     ("2", "10:00", "11:00", true),
     ("Break", "11:00", "11:30", false),
@@ -870,7 +913,7 @@ pub(crate) const STANDARD_DAY: &[(&str, &str, &str, bool)] = &[
 ];
 
 /// Six teaching periods with no break, for the fixtures that want a long run.
-pub(crate) const LONG_DAY: &[(&str, &str, &str, bool)] = &[
+pub const LONG_DAY: &[(&str, &str, &str, bool)] = &[
     ("1", "09:00", "10:00", true),
     ("2", "10:00", "11:00", true),
     ("3", "11:00", "12:00", true),

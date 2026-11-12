@@ -149,6 +149,14 @@ rust_xlsxwriter = { version = "0.102", default-features = false }
 # numbers. Already in the tree as a transitive dependency of tauri, so this adds no new
 # crate and no new licence. Apache-2.0 OR MIT.
 base64 = "0.23"
+# SHA-256, for the `.evara` integrity tree -- M10 Stage 2. `RustCrypto`'s implementation: pure
+# Rust, no network code, no C toolchain. Already in the lockfile as a transitive dependency, so
+# this adds no crate and no licence. MIT OR Apache-2.0.
+sha2 = "0.10"
+# The `.evara` container, read and written -- M10 Stage 2. See `crates/evara-project` for why
+# `default-features = false` is part of the security argument rather than a size optimisation,
+# and `calamine` above for the advisory history that put the floor at 9. MIT.
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 # Lints are declared once and inherited by every crate via `[lints] workspace = true`,
 # so `cargo clippy` enforces them even when a contributor forgets `-D warnings`.

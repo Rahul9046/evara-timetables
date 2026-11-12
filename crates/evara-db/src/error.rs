@@ -529,6 +529,43 @@ pub enum DbError {
         sidecar: &'static str,
     },
 
+    /// A path Evara will not open a database by.
+    ///
+    /// The bundled engine is compiled with `-DSQLITE_USE_URI`, so URI interpretation is the
+    /// **global default** and leaving `SQLITE_OPEN_URI` out of the open flags does not turn
+    /// it off — finding F-2. The control is that every path a payload is opened by is one
+    /// Evara minted, and that its form is asserted anyway. See
+    /// [`transfer::paths`](crate::transfer::paths).
+    #[error("Evara will not open {name} because the path contains {reason}")]
+    DestinationPathUnsafe {
+        /// File name involved, never the whole path.
+        name: String,
+        /// Which form was found, in words.
+        reason: &'static str,
+    },
+
+    /// A staged payload could not be stood up as a project.
+    ///
+    /// Carried separately from [`Self::NotAnEvaraProject`] because the remedy differs: the
+    /// file *is* a database and *is* shaped like a project, and something about it still
+    /// cannot be completed. The detail names what.
+    #[error("the campus inside this archive is damaged ({detail}); ask for a fresh export")]
+    PayloadCorrupt {
+        /// What was wrong, in words a user can relay.
+        detail: String,
+    },
+
+    /// A staged payload holds references to rows that are not there.
+    ///
+    /// Reported after migration, where it is `PRAGMA foreign_key_check`'s answer. Separate
+    /// from [`Self::PayloadCorrupt`] because `integrity_check` calls such a database `ok` —
+    /// the two audits answer different questions and both are run.
+    #[error("the campus inside this archive has {count} broken references; ask for a fresh export")]
+    ReferentialDamage {
+        /// How many violations `foreign_key_check` reported.
+        count: i64,
+    },
+
     /// Schema migration failed. Nothing was applied.
     #[error("migrating the project failed; no changes were applied")]
     Migration(#[source] InternalError),

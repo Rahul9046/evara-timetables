@@ -46,8 +46,9 @@
 //!
 //! # Every fact comes from the copy, never from the source
 //!
-//! [`Snapshot`] carries the identity, schema version, census and watermark it will be
-//! described by, and reads all of them **out of the file it just wrote**. Reading them from
+//! [`Snapshot`] carries every fact it will be described by — identity, schema version,
+//! census, change feed, schools, capability evidence — and reads all of them **out of the
+//! file it just wrote**. Reading them from
 //! the live project instead would describe something that was true a moment earlier, and the
 //! whole point of a snapshot is that one instant is being captured. This is finding 4 of the
 //! architecture review and it is why the facts live on this type rather than being read
@@ -60,7 +61,7 @@ use evara_core::scheduling::Cancel;
 use rusqlite::Connection;
 
 use crate::error::{DbError, InternalError, Result};
-use crate::{Database, change_log, connection, meta, migrations};
+use crate::{Database, connection, meta};
 
 /// How far a snapshot has got.
 ///
@@ -107,10 +108,7 @@ impl SnapshotProgress {
 pub struct Snapshot {
     path: PathBuf,
     pages: u32,
-    schema_version: u32,
-    identity: meta::ProjectIdentity,
-    census: BTreeMap<String, i64>,
-    watermark: i64,
+    facts: super::facts::ProjectFacts,
     byte_len: u64,
     keep: bool,
 }
@@ -131,7 +129,7 @@ impl Snapshot {
     /// Schema version of the copy, read from the copy.
     #[must_use]
     pub const fn schema_version(&self) -> u32 {
-        self.schema_version
+        self.facts.schema_version
     }
 
     /// Project identity of the copy, read from the copy.
@@ -140,7 +138,7 @@ impl Snapshot {
     /// new identifier would destroy round-trip comparison and any future synchronisation.
     #[must_use]
     pub const fn identity(&self) -> meta::ProjectIdentity {
-        self.identity
+        self.facts.identity
     }
 
     /// Row counts per table, read from the copy.
@@ -149,7 +147,17 @@ impl Snapshot {
     /// added by a future migration is counted without anyone remembering to add it here.
     #[must_use]
     pub const fn census(&self) -> &BTreeMap<String, i64> {
-        &self.census
+        &self.facts.census
+    }
+
+    /// Every fact the manifest describing this snapshot carries.
+    ///
+    /// Read **from the copy**, on the worker thread, after the workspace lock was released.
+    /// Finding 4 of the architecture review: reading them from the live project instead would
+    /// let the manifest describe an instant the payload does not hold.
+    #[must_use]
+    pub const fn facts(&self) -> &super::facts::ProjectFacts {
+        &self.facts
     }
 
     /// Highest `change_log.seq` in the copy.
@@ -157,7 +165,7 @@ impl Snapshot {
     /// The instant the snapshot represents, expressed in the project's own terms.
     #[must_use]
     pub const fn watermark(&self) -> i64 {
-        self.watermark
+        self.facts.change_log.watermark
     }
 
     /// Size of the copy on disk.
@@ -363,57 +371,21 @@ fn describe(target: &Path, pages: u32) -> Result<Snapshot> {
         ));
     }
 
-    let schema_version = migrations::applied_schema_version(&conn)?;
-    let identity = meta::read_identity(&conn)?;
-    let census = census(&conn)?;
-    let watermark = change_log::watermark(&conn)?.get();
+    let facts = super::facts::read_facts(&conn)?;
+
+    // Closed before the size is read, so the figure is the single file the archive will
+    // carry rather than a main file with an unflushed `-wal` beside it.
+    conn.close()
+        .map_err(|(_, source)| backup_refused(target, InternalError::wrap(source)))?;
     let byte_len = std::fs::metadata(target).map_or(0, |metadata| metadata.len());
 
     Ok(Snapshot {
         path: target.to_path_buf(),
         pages,
-        schema_version,
-        identity,
-        census,
-        watermark,
+        facts,
         byte_len,
         keep: false,
     })
-}
-
-/// Row counts for every ordinary table in the database.
-///
-/// Discovered rather than listed. A hand-written list is stale the moment a migration adds a
-/// table, and a census that silently omits a table is worse than none — it would make a
-/// comparison pass over data nobody counted.
-///
-/// `sqlite_%` is SQLite's own bookkeeping and `refinery_schema_history` is the migration
-/// runner's; neither is project data, and both are excluded by name rather than by pattern
-/// guesswork.
-fn census(conn: &Connection) -> Result<BTreeMap<String, i64>> {
-    let tables: Vec<String> = conn
-        .prepare(
-            "SELECT name FROM sqlite_master
-             WHERE type = 'table'
-               AND name NOT LIKE 'sqlite_%'
-               AND name <> 'refinery_schema_history'
-             ORDER BY name",
-        )?
-        .query_map([], |row| row.get(0))?
-        .collect::<rusqlite::Result<_>>()?;
-
-    let mut census = BTreeMap::new();
-    for table in tables {
-        // The table name comes from `sqlite_master`, so it is an existing identifier and
-        // cannot be bound as a parameter. Quoted with double quotes so a table named like a
-        // keyword still reads correctly.
-        let count: i64 =
-            conn.query_row(&format!("SELECT COUNT(*) FROM \"{table}\""), [], |row| {
-                row.get(0)
-            })?;
-        census.insert(table, count);
-    }
-    Ok(census)
 }
 
 /// A name in `directory` that is not taken.
