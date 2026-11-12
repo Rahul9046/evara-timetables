@@ -184,6 +184,27 @@ fn verify(target: &Path, source: &Connection) -> Result<()> {
         ));
     }
 
+    // Only if there is a `school` table to compare. It arrives with **V3**, and this function
+    // runs for every project below V12 — so on a V1 or V2 file the unguarded count below was
+    // `no such table: school`, which made the safety backup fail and with it the whole open.
+    // A project at those versions could not be opened by this build at all.
+    //
+    // Found by T-41's generated matrix, which is the first thing to ever open a V1 project in
+    // a current build. The `app_meta` check above already has exactly this shape; this is the
+    // same guard, applied to the second table.
+    let has_school: i64 = source
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'school'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|source| refused(target, InternalError::wrap(source)))?;
+    if has_school == 0 {
+        // Nothing to compare, and nothing is assumed: `integrity_check` and the `app_meta`
+        // check above are the whole of what a pre-V3 file admits.
+        return Ok(());
+    }
+
     let expected: i64 = source.query_row("SELECT COUNT(*) FROM school", [], |row| row.get(0))?;
     let found: i64 = copy
         .query_row("SELECT COUNT(*) FROM school", [], |row| row.get(0))

@@ -103,3 +103,6 @@ mod tests_measurements;
 
 #[cfg(test)]
 mod tests_hygiene;
+
+#[cfg(test)]
+mod tests_historical;
