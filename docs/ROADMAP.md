@@ -837,7 +837,7 @@ rewritten in Stage 6; its banner says which three passages are known-wrong.
 | **P** | `zip >= 9`, `calamine 0.37`, `rust_xlsxwriter 0.102`; three RUSTSEC advisories out of the tree | ✅ PR #35 |
 | **1** | `evara-db::transfer`: the hardened V0 boundary, `snapshot_into`, conformance against a generated reference, the replacement journal and its settings migration, and the S1/S2/S3 primitives | ✅ PR #37 |
 | **2** | `evara-project`: the `.evara` container, its reader, the staging lifecycle, D11 as amended by §0.2, recovery; `transfer::stage`, `table_census`, the `fixtures` feature; **T-60, T-83 and §7.2's inflation figure measured** | ✅ this stage |
-| **3** | `evara export` / `import` / `inspect`; T-41's generated historical matrix in CI on both platforms | next |
+| **3** | `evara export` / `import` / `inspect`, on §4.4's syntax and its three exit codes | ✅ this stage — **except T-41's generated historical matrix**, which is not built; see below |
 | **4** | Eleven Tauri commands, `TransferSessions`, the generalised `CoalescingSink`, `transfer://` events, identity disclosure (D13), typegen | |
 | **5** | The Export and Import screens | |
 | **6** | Rewrite `PROJECT-FORMAT.md`; ADRs 0053–0059; amend `TIMETABLE-PERSISTENCE.md` §7 and ADR 0042 §C4; discharge R8; add D37, D38, R11, R12 | |
@@ -847,6 +847,21 @@ of a realistic project's occupied pages (so A6 stays deferred, now with a figure
 backup holds the workspace lock for **~46 ms** against a ≤ 500 ms budget, and ~50 ms under a
 concurrent writer; and a snapshot is **+6.9%** over a vacuumed copy, of which the archive
 absorbs 88.7% — so **no compaction pass is added**. §C.10 has the fixture and the method.
+
+What Stage 3 settled: the three commands are the **first callers** of Stage 2's API and add
+no protocol of their own, which is the property that lets Stage 4's Tauri commands be a second
+caller with no shared code to keep in step. `export` is read-only on the source and refuses an
+occupied archive — `seal` itself renames over whatever is at the destination, so that guard is
+the caller's and **Stage 4 needs its own**. `import` opens the installation's real settings
+database for the journal and the `site_id`, recovers any interrupted replacement first, and is
+tested through the same `cfg(test)` seam PR #39 built for `save`.
+
+**T-41 is not built, and Stage 3's exit criterion is therefore not met.** The generated
+V1…V18 matrix needs `migrations::run_up_to` reachable from outside `evara-db` (it is
+`pub(crate)`) and a per-version fill routine, because today's repository API cannot write to a
+V3 schema — the tables are not there yet. That is a stage's worth of work rather than a test,
+and it is recorded here rather than quietly dropped: the compatibility claim "a V1 export opens
+in a V18 build" still has no test behind it, exactly as §1.4.6 says.
 
 **Closes M1-17, M1-18** — at the end of Stage 5, when the user can reach it.
 
