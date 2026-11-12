@@ -490,3 +490,6 @@ that into a red build rather than a wrong timetable.
 | `cargo run -p evara-cli -- evaluate --project <path> --timetable <id>` | Score a **stored** timetable against the inputs as they now stand; writes nothing |
 | `cargo run -p evara-cli -- validate --project <path> --list` | What schools, cycles and terms a `.evaraproj` holds, with their identifiers |
 | `cargo run -p evara-cli -- validate --project <path> --school <id> --cycle <id>` | Pre-solve validation of a **real project**, read-only — migrates nothing, writes nothing |
+| `cargo run -p evara-cli -- export --project <path> --to <archive.evara>` | Write a portable `.evara`. Read-only on the source; **refuses an existing archive** rather than overwriting it |
+| `cargo run -p evara-cli -- inspect <archive.evara>` | What an archive says about itself and whether this build can read it. Writes nothing, imports nothing |
+| `cargo run -p evara-cli -- import <archive.evara> --to <path.evaraproj> [--replace]` | Read an archive into a project file. Refuses an occupied destination without `--replace`, and **never deletes the project it replaced** |

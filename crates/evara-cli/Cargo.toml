@@ -31,12 +31,27 @@ serde_json = { workspace = true }
 # `evara validate --project` names a school, a cycle and a term by identifier, so the
 # command has to parse one. Already in the tree.
 uuid = { workspace = true }
+# `evara export` stages its snapshot in a directory beside the archive and needs that
+# directory -- and the copy inside it -- to go away on every path out of the command,
+# including an early `?`. A `TempDir` is that guarantee. It was already a dev-dependency
+# here and is a real one in `evara-db`, so moving it up adds no crate and no licence -- and
+# the tests still reach it, because a dev build sees the normal dependencies too.
+tempfile = { workspace = true }
 # `evara save` records when a run started and finished. The engine reads no clock, so the
 # caller does -- M6's decision -- and a stored timestamp has to be ISO-8601 UTC with
 # millisecond precision like every other one. Already in the tree.
 time = { workspace = true }
 
 [dev-dependencies]
-# `evara validate --project` is tested end to end against a real temporary project, which
-# is the only way to prove the read-only open path and the exit codes together.
-tempfile = { workspace = true }
+# The transfer tests need a project with something in it -- two schools, timetable versions,
+# a lock and a real repair -- which is `evara-db`'s `fixtures` feature. Off by default, so
+# nothing shipped carries it.
+evara-db = { workspace = true, features = ["fixtures"] }
+# `evara-project`'s reader, so a test can assert that the archive the real binary wrote is
+# the one the real importer accepts. The CLI depends on this crate anyway; the dev-dependency
+# is here so a test may name `inspect` without the command having to print it.
+evara-project = { workspace = true }
+# `evara-solver` and `evara-constraints` are already normal dependencies of this crate, for
+# `generate` and `evaluate`, so the one timetable the transfer tests need can be solved and
+# saved without adding anything here. `src/transfer/tests.rs` records why that fixture layer
+# is built in the test rather than shared from `evara-project`.

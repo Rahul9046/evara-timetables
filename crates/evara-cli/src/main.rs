@@ -21,11 +21,18 @@
 //! the roadmap's phase and the user-facing screen all call it. `solve` stays accepted as an
 //! alias, so the spelling the accepted record used still works, and there is one
 //! implementation behind both.
+//!
+//! M10 Stage 3 ships [`transfer`]'s three: `export`, `inspect` and `import`. `export` and
+//! `import` were `PLANNED` at phase 9 and move to `IMPLEMENTED`; `inspect` was never listed,
+//! because reading an archive without importing it is a question the planned pair could not
+//! express. They are the first callers of `evara-project`'s API and add no protocol of their
+//! own.
 
 mod evaluate;
 mod fixture;
 mod generate;
 mod save;
+mod transfer;
 mod validate;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -40,8 +47,6 @@ const PLANNED: &[(&str, u8, &str)] = &[
         7,
         "score a stored timetable and list its violations",
     ),
-    ("export", 9, "write a portable *.evara archive"),
-    ("import", 9, "read a *.evara archive"),
     ("migrate", 1, "apply pending migrations"),
 ];
 
@@ -66,6 +71,18 @@ const IMPLEMENTED: &[(&str, &str)] = &[
     (
         "save",
         "generate a timetable and SAVE it into a project, or re-score a stored one",
+    ),
+    (
+        "export",
+        "write a portable *.evara archive from a project (reads only, never overwrites)",
+    ),
+    (
+        "inspect",
+        "describe a *.evara archive and say whether this build can read it (writes nothing)",
+    ),
+    (
+        "import",
+        "read a *.evara archive into a project file (keeps any project it replaces)",
     ),
 ];
 
@@ -139,6 +156,34 @@ fn main() -> std::process::ExitCode {
                 std::process::ExitCode::from(2)
             }
         },
+        // The transfer trio, all on the same three codes (proposal SS 4.4): a refusal is the
+        // command working and the answer being no -- a tampered archive, a schema this build
+        // cannot read, a destination already occupied -- and must not share a code with the
+        // command itself failing.
+        Some("export") => match transfer::export(&args[1..]) {
+            Ok(transfer::Outcome::Done) => std::process::ExitCode::SUCCESS,
+            Ok(transfer::Outcome::Refused) => std::process::ExitCode::from(1),
+            Err(message) => {
+                eprintln!("evara export: {message}");
+                std::process::ExitCode::from(2)
+            }
+        },
+        Some("inspect") => match transfer::inspect(&args[1..]) {
+            Ok(transfer::Outcome::Done) => std::process::ExitCode::SUCCESS,
+            Ok(transfer::Outcome::Refused) => std::process::ExitCode::from(1),
+            Err(message) => {
+                eprintln!("evara inspect: {message}");
+                std::process::ExitCode::from(2)
+            }
+        },
+        Some("import") => match transfer::import(&args[1..]) {
+            Ok(transfer::Outcome::Done) => std::process::ExitCode::SUCCESS,
+            Ok(transfer::Outcome::Refused) => std::process::ExitCode::from(1),
+            Err(message) => {
+                eprintln!("evara import: {message}");
+                std::process::ExitCode::from(2)
+            }
+        },
         Some(other) => {
             eprintln!("evara: `{other}` is not implemented yet\n");
             help();
@@ -167,7 +212,8 @@ fn help() {
     println!("docs/PRE-SOLVE-VALIDATION.md for what `validate` checks,");
     println!("docs/CONSTRAINT-ENGINE.md for what `evaluate` scores,");
     println!("docs/TIMETABLE-CONSTRUCTION-SOLVER.md for how `generate` builds one, and");
-    println!("docs/SCHEDULING-PROBLEM-ASSEMBLY.md for how a project becomes a problem.");
+    println!("docs/SCHEDULING-PROBLEM-ASSEMBLY.md for how a project becomes a problem, and");
+    println!("docs/PROJECT-FORMAT.md for what a portable *.evara archive carries.");
 }
 
 #[cfg(test)]
