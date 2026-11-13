@@ -6,15 +6,28 @@
 
 name: CI
 
+# `develop` is in the push list as well as `main`, because `develop` is where every stage
+# lands. Without it a merge produced no run at all: the PR's own run is cancelled by GitHub
+# when the pull request closes, so the merge commit went unvalidated and the gap was invisible
+# — a cancelled job is rendered as a failure by `gh pr checks`, and nothing re-ran it. Three
+# macOS results in M10 had to be chased after the fact before this was noticed.
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
   workflow_dispatch:
 
+# Cancel a superseded run **only while iterating on a pull request**, never on a branch whose
+# history has to stay validated.
+#
+# The group keys on `github.ref`, so a PR's runs are already separate from a branch's. What the
+# expression fixes is the other half: two merges into `develop` in quick succession share the
+# group `…-refs/heads/develop`, and with an unconditional `true` the second would cancel the
+# first — leaving the first merge commit permanently without a completed run. That is the same
+# hole the push trigger above exists to close, reached a different way.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
