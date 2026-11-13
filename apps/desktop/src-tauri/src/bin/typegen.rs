@@ -148,6 +148,7 @@ fn write_all() -> (Vec<Generated>, Vec<String>) {
         spreadsheet_import(),
         timetables(),
         repair(),
+        transfer(),
     ] {
         files.extend(more_files);
         errors.extend(more_errors);
@@ -399,6 +400,58 @@ fn time_model_and_interface() -> (Vec<Generated>, Vec<String>, BTreeSet<(PathBuf
         // no business crossing as JSON.
         SchoolLogoView,
         LogoLimits,
+    ]
+}
+
+/// M10 Stage 4: the portable `.evara` transfer contract.
+///
+/// Its own group for the reason [`spreadsheet_import`] has one — a reader asking "what does
+/// the import screen receive" should find one list rather than a dozen entries interleaved
+/// with the grid's — and because the two imports are different features entirely.
+///
+/// Two of these come from `evara-project` rather than from this crate, and deliberately:
+/// `Phase` is the seven-word vocabulary every `transfer://progress` event reports, and
+/// `OnConflict` is the `"refuse"` / `"replace"` answer the import command takes. Restating
+/// either here would be a second vocabulary for one thing — the duplication `CLAUDE.md` §2 is
+/// about — so the crate that owns the protocol owns the words.
+///
+/// `ProjectView`, `RecentProjectView` and `ProjectError` join the contract here too. They
+/// crossed the boundary from Phase 1B onwards and were mirrored by hand in `ipc/project.ts`,
+/// which `CLAUDE.md` §2 names as an architecture bug; Stage 4 had to extend all three for
+/// D13 and for the transfer refusals, so they are generated now and the mirror is gone.
+fn transfer() -> (Vec<Generated>, Vec<String>, BTreeSet<(PathBuf, String)>) {
+    // Fully qualified rather than imported, for the reason `repair` is: `contract!` names
+    // each type inside a macro expansion, which clippy's unused-import analysis cannot see
+    // through.
+    use evara_desktop_lib::commands::transfer as cmd;
+
+    contract![
+        // The project lifecycle contract, generated at last rather than hand-mirrored.
+        evara_desktop_lib::commands::project::ProjectView,
+        evara_desktop_lib::commands::project::RecentProjectView,
+        evara_desktop_lib::commands::project::ProjectError,
+        // The protocol's own two vocabularies.
+        evara_project::Phase,
+        evara_project::OnConflict,
+        // The session, as the interface sees it.
+        evara_desktop_lib::commands::transfer_session::TransferKind,
+        evara_desktop_lib::commands::transfer_session::TransferPhase,
+        // Export.
+        cmd::ExportStarted,
+        cmd::ExportStatus,
+        cmd::ExportReportView,
+        // Import.
+        cmd::ArchiveSummaryView,
+        cmd::ImportStarted,
+        cmd::ImportStatus,
+        cmd::ImportReportView,
+        cmd::CountDisagreementView,
+        // Shared.
+        cmd::SchoolSummaryView,
+        cmd::RecoveredView,
+        // The two events.
+        cmd::TransferProgressEvent,
+        cmd::TransferFinishedEvent,
     ]
 }
 

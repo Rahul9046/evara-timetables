@@ -18,6 +18,7 @@ pub mod commands;
 use std::sync::Mutex;
 
 use commands::project::AppState;
+use tauri::Manager as _;
 
 /// Builds and runs the application.
 ///
@@ -38,6 +39,13 @@ pub fn run() {
     let workspace = evara_db::Workspace::new(env!("CARGO_PKG_VERSION"))
         .expect("failed to open the Evara settings database");
 
+    // D11: recovery runs **before any project is open**, because the campus that needs
+    // recovering may be the one that will not open. It reconciles each journalled
+    // replacement against what is actually on disk — never against the recorded phase — and
+    // reports, without touching anything, any state it cannot resolve unambiguously.
+    // `project_recovery_report` reads this back; nothing re-runs it.
+    let recovery = commands::transfer::recover_at_startup(workspace.settings_path());
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
@@ -46,6 +54,8 @@ pub fn run() {
             generations: commands::session::GenerationSessions::default(),
             edits: commands::edit_session::EditSessions::default(),
             repairs: commands::repair_session::RepairSessions::default(),
+            transfers: commands::transfer_session::TransferSessions::default(),
+            recovery,
             epoch: commands::session::ProjectEpoch::default(),
         })
         .invoke_handler(tauri::generate_handler![
@@ -295,12 +305,42 @@ pub fn run() {
             commands::repair::repair_apply,
             commands::repair::repair_discard,
             commands::edit::timetable_duplicate,
+            // Portable project transfer — M10 Stage 4. Two of these write, and each writes
+            // exactly one file: an export writes its archive, an import writes its new campus.
+            // Nothing here opens what it imported, and nothing here deletes a campus it
+            // replaced.
+            commands::transfer::project_archive_extension,
+            commands::transfer::project_export_start,
+            commands::transfer::project_export_status,
+            commands::transfer::project_export_cancel,
+            commands::transfer::project_export_discard,
+            commands::transfer::project_import_inspect,
+            commands::transfer::project_import_start,
+            commands::transfer::project_import_status,
+            commands::transfer::project_import_cancel,
+            commands::transfer::project_import_discard,
+            commands::transfer::project_recovery_report,
             // Timetable grid — Phase 1E. `release_orphans` is the only destructive one.
             commands::grid::setup_grid_preview,
             commands::grid::setup_grid_rebuild,
             commands::grid::setup_grid_release_orphans,
             commands::grid::setup_grid_timeslots,
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to start the Evara Timetables window");
+        .build(tauri::generate_context!())
+        .expect("failed to start the Evara Timetables window")
+        .run(|app, event| {
+            // Shutdown: ask every running transfer to stop. A **request**, not a wait — the
+            // worker is the only thing that leaves `Running`, and an import interrupted
+            // anyway is made safe by the replacement journal and by `recover_at_startup` at
+            // the next launch. That is D11's mechanism and nothing here could improve on it;
+            // what this does add is a clean cancellation point when there is time for one,
+            // so the usual case leaves no staging directory behind at all.
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) && let Some(state) = app.try_state::<AppState>()
+            {
+                state.transfers.request_cancel_all();
+            }
+        });
 }

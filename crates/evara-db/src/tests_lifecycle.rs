@@ -604,3 +604,180 @@ fn the_warning_survives_close_and_reopen() {
         Some("OneDrive")
     );
 }
+
+// ---------------------------------------------- D13: duplicate project identity (T-64/T-65)
+
+/// Two remembered copies of one campus, plus a third project with its own identity.
+fn three_remembered() -> (TempDir, Workspace, uuid::Uuid, uuid::Uuid) {
+    let (dir, mut workspace) = installation();
+    let twin = uuid::Uuid::now_v7();
+    let other = uuid::Uuid::now_v7();
+
+    workspace
+        .remember_imported_project(&project_path(&dir, "Northgate"), twin)
+        .expect("remember the first copy");
+    workspace
+        .remember_imported_project(&project_path(&dir, "Northgate-copy"), twin)
+        .expect("remember the second copy");
+    workspace
+        .remember_imported_project(&project_path(&dir, "Southmoor"), other)
+        .expect("remember an unrelated project");
+
+    (dir, workspace, twin, other)
+}
+
+#[test]
+fn remembering_an_imported_project_does_not_open_it() {
+    // D9's rule, asserted at the layer that owns it: the recent list gains an entry and the
+    // workspace stays exactly as it was. Auto-opening would discard whatever the user had
+    // open as a side effect of an import.
+    let (dir, mut workspace) = installation();
+    let imported = project_path(&dir, "Imported");
+
+    workspace
+        .remember_imported_project(&imported, uuid::Uuid::now_v7())
+        .expect("remember");
+
+    assert!(
+        workspace.current_project().is_none(),
+        "remembering a project must never open it"
+    );
+    assert!(
+        workspace
+            .recent_projects()
+            .expect("read the recent list")
+            .iter()
+            .any(|entry| entry.path == imported),
+        "the imported project must be findable in the recent list"
+    );
+}
+
+#[test]
+fn duplicate_identity_is_true_for_both_copies_and_false_otherwise() {
+    // T-65. Both entries are marked, because neither is "the original" — Evara cannot merge
+    // two copies, so it discloses the ambiguity rather than choosing a winner.
+    let (dir, workspace, _twin, _other) = three_remembered();
+    let listed = workspace.recent_projects().expect("read the recent list");
+
+    let marked: Vec<&str> = listed
+        .iter()
+        .filter(|entry| entry.duplicate_identity)
+        .map(|entry| entry.display_name.as_str())
+        .collect();
+
+    assert_eq!(
+        marked,
+        vec!["Northgate-copy", "Northgate"],
+        "both copies are marked and the unrelated project is not; got {listed:#?}"
+    );
+    drop(dir);
+}
+
+#[test]
+fn an_unrecorded_identity_is_never_a_duplicate() {
+    // `None` is unknown, not a value. Two entries whose identity was never recorded are not
+    // evidence of a twin, and marking them would put a warning on every old entry.
+    let (dir, workspace) = installation();
+    let mut settings = Settings::open_at(&dir.path().join("settings.sqlite")).expect("settings");
+    settings
+        .remember_project(&project_path(&dir, "Unknown-a"), None)
+        .expect("remember");
+    settings
+        .remember_project(&project_path(&dir, "Unknown-b"), None)
+        .expect("remember");
+    drop(settings);
+
+    let listed = workspace.recent_projects().expect("read the recent list");
+    assert!(
+        listed.iter().all(|entry| !entry.duplicate_identity),
+        "an unknown identity is not a duplicate: {listed:#?}"
+    );
+    // Touching the workspace keeps it alive past the settings handle above.
+    assert!(!workspace.has_open_project());
+}
+
+#[test]
+fn projects_with_identity_names_every_copy_and_nothing_else() {
+    let (_dir, workspace, twin, other) = three_remembered();
+
+    let copies = workspace
+        .projects_with_identity(twin)
+        .expect("read by identity");
+    assert_eq!(copies.len(), 2, "both copies must be named: {copies:#?}");
+    assert!(
+        copies.iter().all(|entry| entry.duplicate_identity),
+        "an entry returned here is by definition one of several"
+    );
+
+    let single = workspace
+        .projects_with_identity(other)
+        .expect("read by identity");
+    assert_eq!(single.len(), 1);
+    assert!(
+        !single[0].duplicate_identity,
+        "a sole copy is not a duplicate"
+    );
+
+    assert!(
+        workspace
+            .projects_with_identity(uuid::Uuid::now_v7())
+            .expect("read by identity")
+            .is_empty(),
+        "a project new to this installation has no conflicts"
+    );
+}
+
+#[test]
+fn an_identity_is_never_rewritten_by_remembering_a_second_copy() {
+    // T-64. `project_id` is ADR 0004's, and regenerating one would destroy round-trip
+    // comparison and any future synchronisation. Remembering a twin records a second row; it
+    // does not renumber the first.
+    let (dir, workspace, twin, _other) = three_remembered();
+
+    let copies = workspace
+        .projects_with_identity(twin)
+        .expect("read by identity");
+    assert!(
+        copies.iter().all(|entry| entry.project_id == Some(twin)),
+        "both rows must still carry the identity they were given: {copies:#?}"
+    );
+    drop(dir);
+}
+
+#[test]
+fn the_open_project_is_recognised_whatever_the_path_is_spelled_like() {
+    let (dir, mut workspace) = installation();
+    let path = project_path(&dir, "Northgate");
+    workspace.create_project(&path).expect("create");
+
+    assert!(
+        workspace.is_open_project(&path),
+        "the project just opened must be recognised"
+    );
+    assert!(
+        workspace.is_open_project(&PathBuf::from(path.to_string_lossy().replace('\\', "/"))),
+        "a forward-slashed spelling of the same path is the same project"
+    );
+    assert!(
+        !workspace.is_open_project(&project_path(&dir, "Southmoor")),
+        "a different file is not the open project"
+    );
+
+    workspace.close_project();
+    assert!(
+        !workspace.is_open_project(&path),
+        "nothing is the open project once nothing is open"
+    );
+}
+
+#[test]
+fn the_settings_path_is_the_one_the_workspace_was_built_over() {
+    // The transfer worker opens its own journal handle at this path. If it pointed at the
+    // installation's real settings database a test would migrate it — the defect
+    // `evara-cli`'s `open_settings` seam exists to prevent.
+    let dir = TempDir::new().expect("temp dir");
+    let settings = dir.path().join("settings.sqlite");
+    let workspace = Workspace::with_settings_at(&settings, APP_VERSION).expect("workspace");
+
+    assert_eq!(workspace.settings_path(), settings.as_path());
+}

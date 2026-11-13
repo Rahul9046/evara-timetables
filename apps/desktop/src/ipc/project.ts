@@ -8,39 +8,27 @@
  * rather than reading English out of a message string.
  */
 import { invoke } from "@tauri-apps/api/core";
+import type { ProjectError, ProjectView, RecentProjectView } from "@evara/domain";
 
-/** The open project, as the backend describes it. */
-export interface Project {
-  readonly projectId: string;
-  readonly displayName: string;
-  readonly path: string;
-  readonly folder: string;
-  readonly schemaVersion: number;
-  /** Whether this installation created the project. */
-  readonly createdHere: boolean;
-  /** Cloud provider the file appears to sit under. Advisory only. */
-  readonly syncedFolder: string | null;
-}
+/**
+ * The open project, as the backend describes it.
+ *
+ * Generated from the Rust since M10 Stage 4. These three types were hand-written here from
+ * Phase 1B onwards, which `CLAUDE.md` §2 names as an architecture bug — a TypeScript entity
+ * type mirroring a Rust one — and the mirror had already started to drift: `RecentProject`
+ * gained `projectId` and `duplicateIdentity` for D13, and `ProjectError` gained eight transfer
+ * refusals, neither of which a hand-written union would have known about.
+ *
+ * Aliased rather than renamed at every call site, because the *name* a component uses is not
+ * the part that was wrong.
+ */
+export type Project = ProjectView;
 
 /** An entry in the recent-project list. */
-export interface RecentProject {
-  readonly path: string;
-  readonly folder: string;
-  readonly displayName: string;
-  readonly lastOpenedAt: string;
-  /** False when the file has been moved or deleted outside Evara. */
-  readonly exists: boolean;
-}
+export type RecentProject = RecentProjectView;
 
-/** Every lifecycle failure the backend distinguishes. */
-export type ProjectError =
-  | { kind: "schemaTooNew"; found: number; supported: number; message: string }
-  | { kind: "notFound"; message: string }
-  | { kind: "notAnEvaraProject"; message: string }
-  | { kind: "wrongExtension"; expected: string; message: string }
-  | { kind: "alreadyExists"; message: string }
-  | { kind: "noProjectOpen"; message: string }
-  | { kind: "failed"; message: string };
+/** Every lifecycle failure the backend distinguishes, transfer included. */
+export type { ProjectError };
 
 /** Narrows an unknown rejection to a {@link ProjectError}. */
 export function isProjectError(value: unknown): value is ProjectError {

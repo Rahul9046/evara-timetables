@@ -51,6 +51,17 @@ pub struct RecentProject {
     /// as missing rather than failing when clicked. The list is never used to *discover*
     /// projects — Evara does not scan the filesystem.
     pub exists: bool,
+    /// Whether another remembered project carries the same [`RecentProject::project_id`].
+    ///
+    /// **Derived, never stored.** D13: Evara cannot merge two copies of one campus, so the
+    /// remedy for a duplicate is disclosure rather than prevention — and the disclosure has
+    /// to be visible in the recent list itself, not only at the moment of import. Two
+    /// legitimate copies must both stay listable, so there is deliberately no uniqueness
+    /// constraint on `recent_project.project_id`.
+    ///
+    /// Always `false` for an entry whose identity was never recorded: an unknown identity is
+    /// not evidence of a twin, and saying it was would put a warning on every old entry.
+    pub duplicate_identity: bool,
 }
 
 /// This installation's settings database.
@@ -180,6 +191,38 @@ impl Settings {
     ///
     /// Propagates any SQLite failure.
     pub fn recent_projects(&self) -> Result<Vec<RecentProject>> {
+        let mut listed = self.read_recent()?;
+        mark_duplicate_identities(&mut listed);
+        Ok(listed)
+    }
+
+    /// Recent entries carrying this project identity.
+    ///
+    /// Empty when the project is new to this installation, which is the ordinary case and is
+    /// not a condition worth distinguishing from an error. D13: the import screen asks this
+    /// **before** anything is staged, so the warning precedes the write rather than
+    /// explaining it afterwards.
+    ///
+    /// Reads the recent list and nothing else. Evara does not scan the filesystem for
+    /// projects, so a second copy this installation has never opened is genuinely
+    /// undiscoverable — and claiming otherwise would be a promise the product cannot keep.
+    ///
+    /// # Errors
+    ///
+    /// Propagates any SQLite failure.
+    pub fn projects_with_identity(&self, project_id: Uuid) -> Result<Vec<RecentProject>> {
+        let mut listed = self.read_recent()?;
+        mark_duplicate_identities(&mut listed);
+        listed.retain(|entry| entry.project_id == Some(project_id));
+        Ok(listed)
+    }
+
+    /// The recent list as stored, newest first, with `duplicate_identity` not yet decided.
+    ///
+    /// Private, and the one place the query lives: the grouping that decides
+    /// `duplicate_identity` has to see **every** entry, so a filtered read could not compute
+    /// it and a second query could disagree with the first.
+    fn read_recent(&self) -> Result<Vec<RecentProject>> {
         let mut stmt = self.conn.prepare(
             "SELECT path, display_name, project_id, last_opened_at
              FROM recent_project ORDER BY last_opened_at DESC, path_key ASC",
@@ -194,6 +237,7 @@ impl Settings {
                 display_name: row.get(1)?,
                 project_id: project_id.and_then(|id| Uuid::parse_str(&id).ok()),
                 last_opened_at: row.get(3)?,
+                duplicate_identity: false,
             })
         })?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -392,6 +436,29 @@ impl Settings {
     }
 }
 
+/// Marks every entry that shares its `project_id` with another entry.
+///
+/// Grouping rather than a per-row query, for the reason [`Settings::read_recent`] is private:
+/// "is there another one of these?" is a property of the whole list, and two queries that
+/// could disagree about it would show the warning on one copy and not the other.
+///
+/// An entry with no recorded identity is never marked. `None` is *unknown*, not a value, and
+/// collapsing the two would put a duplicate warning on every project remembered before
+/// identities were recorded.
+fn mark_duplicate_identities(listed: &mut [RecentProject]) {
+    let mut seen: std::collections::BTreeMap<Uuid, usize> = std::collections::BTreeMap::new();
+    for entry in listed.iter() {
+        if let Some(id) = entry.project_id {
+            *seen.entry(id).or_insert(0) += 1;
+        }
+    }
+    for entry in listed.iter_mut() {
+        entry.duplicate_identity = entry
+            .project_id
+            .is_some_and(|id| seen.get(&id).copied().unwrap_or(0) > 1);
+    }
+}
+
 /// Assigns this installation an identity on first run, and reads it thereafter.
 fn ensure_site_id(conn: &mut Connection) -> Result<Uuid> {
     let existing: Option<String> = conn
@@ -425,6 +492,19 @@ fn default_settings_path() -> Result<PathBuf> {
     let dirs = directories::ProjectDirs::from("app", "Evara", "Evara Timetables")
         .ok_or(DbError::SettingsDirectoryUnavailable)?;
     Ok(dirs.data_dir().join("settings.sqlite"))
+}
+
+/// Whether two paths name the same project file.
+///
+/// Crate-internal and built on [`path_key`], so "the same project" has **one** definition —
+/// the one the recent list already deduplicates by. A second comparison written somewhere
+/// else would disagree with it on exactly the cases that matter: a relative path, a
+/// forward-slashed Windows path, a difference of case.
+///
+/// Deliberately not `canonicalize`: a destination that does not exist yet is the common case
+/// here, and `canonicalize` fails for one.
+pub(crate) fn same_project_path(a: &Path, b: &Path) -> bool {
+    path_key(a) == path_key(b)
 }
 
 /// Normalises a path into a deduplication key.

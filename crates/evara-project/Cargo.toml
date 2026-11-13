@@ -12,7 +12,16 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Enabled by `evara-typegen` so the two vocabularies that cross the IPC boundary -- the
+# transfer `Phase` and `OnConflict` -- are generated rather than restated in the desktop
+# crate. ADR 0012, and the same arrangement `evara-core`, `evara-db` and `evara-report`
+# already carry. Off in a release build: the application never needs the generator at
+# runtime, and nothing in this crate's own logic reads the feature.
+ts = ["dep:ts-rs"]
+
 [dependencies]
+ts-rs = { workspace = true, optional = true }
 evara-core = { workspace = true }
 evara-db = { workspace = true }
 serde = { workspace = true }
