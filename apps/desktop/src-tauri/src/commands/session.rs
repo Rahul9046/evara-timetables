@@ -644,7 +644,62 @@ impl Cancel for CancelFlag {
 pub struct CoalescingSink<F> {
     life: Arc<dyn ProgressReporter>,
     emit: F,
+    rate: Coalescer,
+}
+
+/// The interval arithmetic, with one implementation and two callers.
+///
+/// Split out of [`CoalescingSink`] in M10 Stage 4. The solver reports *placements* through
+/// `ProgressSink::placed` and a transfer reports *bytes of a phase* through
+/// `evara_project::TransferProgress::progress`; the two traits have different methods and
+/// different payloads, so one struct cannot implement both. What they genuinely share is this
+/// — "has 50 ms passed?" — and a second copy of it is exactly the duplication `CLAUDE.md` §2
+/// is about, which is why the proposal asks for the sink to be generalised rather than copied.
+///
+/// The clock read here is the **caller's**, which is the division `SOLVER.md` §5 requires: the
+/// engine reads no clock, so the same seed still stops in the same place.
+#[derive(Debug)]
+pub struct Coalescer {
     last: Mutex<Option<std::time::Instant>>,
+}
+
+impl Default for Coalescer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Coalescer {
+    /// The shortest gap between two emitted events.
+    pub const INTERVAL_MS: u128 = 50;
+
+    /// A coalescer that has emitted nothing, so the first call is always due.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            last: Mutex::new(None),
+        }
+    }
+
+    /// Whether an event is due now, recording the time when it is.
+    ///
+    /// A poisoned lock answers `true`. Losing the interval is harmless — a few extra events —
+    /// and silencing progress entirely because another thread panicked while reporting it
+    /// would leave a bar frozen at whatever it last showed.
+    pub fn due(&self) -> bool {
+        let now = std::time::Instant::now();
+        match self.last.lock() {
+            Ok(mut last) => {
+                let due =
+                    last.is_none_or(|at| now.duration_since(at).as_millis() >= Self::INTERVAL_MS);
+                if due {
+                    *last = Some(now);
+                }
+                due
+            }
+            Err(_) => true,
+        }
+    }
 }
 
 /// Somewhere a sink can record progress.
@@ -665,14 +720,17 @@ impl ProgressReporter for Lifecycle {
 
 impl<F: Fn(Progress)> CoalescingSink<F> {
     /// The shortest gap between two emitted progress events.
-    pub const INTERVAL_MS: u128 = 50;
+    ///
+    /// Re-exported from [`Coalescer`] so existing callers and tests keep one name for it
+    /// while the arithmetic itself lives in one place.
+    pub const INTERVAL_MS: u128 = Coalescer::INTERVAL_MS;
 
     /// Wraps a reporter and an emitter.
     pub fn new(life: Arc<dyn ProgressReporter>, emit: F) -> Self {
         Self {
             life,
             emit,
-            last: Mutex::new(None),
+            rate: Coalescer::new(),
         }
     }
 }
@@ -687,20 +745,7 @@ impl<F: Fn(Progress)> ProgressSink for CoalescingSink<F> {
         // Recorded on every call, so `generate_status` is always current even between events.
         self.life.report(progress);
 
-        let now = std::time::Instant::now();
-        let due = match self.last.lock() {
-            Ok(mut last) => {
-                let due =
-                    last.is_none_or(|at| now.duration_since(at).as_millis() >= Self::INTERVAL_MS);
-                if due {
-                    *last = Some(now);
-                }
-                due
-            }
-            // A poisoned lock must not silence progress entirely; emitting is harmless.
-            Err(_) => true,
-        };
-        if due {
+        if self.rate.due() {
             (self.emit)(progress);
         }
     }
