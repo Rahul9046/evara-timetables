@@ -388,6 +388,50 @@ fn describe(target: &Path, pages: u32) -> Result<Snapshot> {
     })
 }
 
+/// Adopts a copy of `source` in `directory` as a [`Snapshot`] — **fixtures only**.
+///
+/// # Why this exists, and why only behind the feature
+///
+/// T-41 needs an archive whose payload is at an *earlier* schema version, and today's build
+/// cannot produce one through the ordinary path: [`crate::Database::open_for_inspection`]
+/// refuses a project below `supported_schema_version` with `SchemaUpgradeRequired`, which is
+/// deliberate — `CLAUDE.md` says that refusal is the user's decision to make, and reaching for
+/// the mutating path to avoid it is exactly what must not happen.
+///
+/// So the archive has to be assembled the way the **old build** would have: that release could
+/// snapshot its own project perfectly well, because the project was current *for it*. This
+/// function stands in for that release and nothing else.
+///
+/// A plain file copy is a sound snapshot here because the fixture is **closed** — no writer, no
+/// `-wal`, nothing to be inconsistent with. It is emphatically not a substitute for
+/// `snapshot_into` on a live project, which is why it is feature-gated and named for its one
+/// caller rather than offered as a second mechanism.
+///
+/// # Errors
+///
+/// [`DbError::BackupRefused`] if the copy cannot be made or does not verify.
+#[cfg(any(feature = "fixtures", test))]
+pub fn adopt_copy_for_fixture(source: &Path, directory: &Path) -> Result<Snapshot> {
+    let target = unique_target(directory)?;
+    std::fs::copy(source, &target)
+        .map_err(|error| backup_refused(&target, InternalError::from_message(error.to_string())))?;
+
+    // Read from the copy, so the figure describes what the archive will carry.
+    let pages = {
+        let conn = connection::open_plain(&target).map_err(|error| {
+            backup_refused(&target, InternalError::from_message(error.to_string()))
+        })?;
+        let count: i64 = conn
+            .query_row("PRAGMA page_count", [], |row| row.get(0))
+            .map_err(|source| backup_refused(&target, InternalError::wrap(source)))?;
+        conn.close()
+            .map_err(|(_, source)| backup_refused(&target, InternalError::wrap(source)))?;
+        u32::try_from(count).unwrap_or(u32::MAX)
+    };
+
+    describe(&target, pages)
+}
+
 /// A name in `directory` that is not taken.
 ///
 /// A UUIDv7 rather than a counter, because two exports may run from two installations into

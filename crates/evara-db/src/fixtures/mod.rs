@@ -44,5 +44,6 @@
 //! student.
 
 pub mod catalogue;
+pub mod historical;
 pub mod seed;
 pub mod transfer;
