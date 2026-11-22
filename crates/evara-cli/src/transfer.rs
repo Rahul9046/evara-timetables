@@ -59,8 +59,8 @@ use std::path::PathBuf;
 use evara_core::scheduling::{Cancel, NeverCancel};
 use evara_db::{Database, Settings};
 use evara_project::{
-    ARCHIVE_EXTENSION, ImportReport, Importer, OnConflict, Phase, Readability, TransferError,
-    TransferProgress, inspect as inspect_archive, recover_pending, seal,
+    ARCHIVE_EXTENSION, DestinationClaim, ImportReport, Importer, OnConflict, Phase, Readability,
+    TransferError, TransferProgress, inspect as inspect_archive, recover_pending, seal,
 };
 
 /// This build's version, recorded in a manifest's `generator` and used as the importing
@@ -212,18 +212,43 @@ fn export_with(request: &ExportRequest, cancel: &dyn Cancel) -> Result<Outcome, 
         return Err(format!("no project at {}", request.project.display()));
     }
 
-    // Refused here rather than in `seal`, which renames its `.part` over whatever is at the
-    // destination. Nothing in Stage 2 refuses an occupied *archive* path — a destination the
-    // user typed is theirs, and the library leaves the policy to the caller — so this is the
-    // guard, and Stage 4's desktop export needs the same one before it offers an overwrite.
-    if request.to.exists() {
-        eprintln!(
-            "evara export: {} already exists. Choose another name, or remove it first — \
-             Evara will not overwrite an archive you may still need.",
-            request.to.display()
-        );
-        return Ok(Outcome::Refused);
+    // **The destination is judged, then claimed.** Nothing in Stage 2 refuses an occupied
+    // *archive* path — a destination the user typed is theirs, and the library leaves the
+    // policy to its caller — so the refusal is this command's.
+    //
+    // It is a `create_new` claim rather than an `exists()` check because `seal` finishes by
+    // renaming its `.part` over whatever is at the name, and a check leaves a snapshot and a
+    // full compression between the answer and that rename: an archive another program creates
+    // inside that window would be destroyed without anybody being asked. `DestinationClaim`
+    // makes the question and the answer one filesystem operation, and it is the same device
+    // the import side and the desktop export already use rather than a third copy of it.
+    //
+    // The two path judgements run **first**, so a path Evara will not write to is refused
+    // without a placeholder ever being made at it — and a destination that is a *symlink* is
+    // reported as the link it is rather than as an occupied name, which is the answer
+    // `require_safe_destination` exists to give. `seal` asserts both again; they are pure and
+    // idempotent, and asking early is what lets the claim come second.
+    if let Err(error) = evara_project::writer::require_archive_extension(&request.to) {
+        return settle("export", &error);
     }
+    if let Err(error) = evara_project::paths::require_safe_destination(&request.to) {
+        return settle("export", &error);
+    }
+    let claim = match DestinationClaim::take(&request.to) {
+        Ok(claim) => claim,
+        Err(TransferError::DestinationExists { .. }) => {
+            // The command's own wording rather than the library's one-liner: this is the
+            // refusal a person is most likely to meet, and the one that has to say what to do
+            // next. Same exit code, same `already exists`, same advice as before the claim.
+            eprintln!(
+                "evara export: {} already exists. Choose another name, or remove it first — \
+                 Evara will not overwrite an archive you may still need.",
+                request.to.display()
+            );
+            return Ok(Outcome::Refused);
+        }
+        Err(error) => return settle("export", &error),
+    };
 
     let progress = Lines::new(request.quiet);
 
@@ -263,7 +288,15 @@ fn export_with(request: &ExportRequest, cancel: &dyn Cancel) -> Result<Outcome, 
     drop(db);
 
     let report = match seal(snapshot, &request.to, &progress, cancel) {
-        Ok(report) => report,
+        Ok(report) => {
+            // `seal`'s own rename has replaced the placeholder, so it is no longer ours to
+            // remove. On **every** other path out of here the claim is dropped instead, which
+            // removes it — a refusal, a failure or a cancellation leaves the folder exactly as
+            // it was found, and the only file any of those ever removes is the zero-length one
+            // this process created moments ago.
+            claim.released();
+            report
+        }
         Err(error) => return settle("export", &error),
     };
 

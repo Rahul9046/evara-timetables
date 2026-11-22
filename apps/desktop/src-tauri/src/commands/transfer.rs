@@ -69,8 +69,8 @@ use std::sync::Arc;
 use evara_db::RecentProject;
 use evara_db::transfer::Snapshot;
 use evara_project::{
-    ARCHIVE_EXTENSION, ArchiveSummary, ExportReport, ImportReport, Importer, OnConflict, Phase,
-    Readability, TransferError,
+    ARCHIVE_EXTENSION, ArchiveSummary, DestinationClaim, ExportReport, ImportReport, Importer,
+    OnConflict, Phase, Readability, TransferError,
 };
 use serde::Serialize;
 use tauri::{Emitter, Manager as _, State};
@@ -1318,68 +1318,57 @@ fn unknown_run(kind: TransferKind) -> ProjectError {
     }
 }
 
-/// The zero-length placeholder that holds an archive destination's name.
+/// The zero-length placeholder that holds an archive destination's name, phrased for a screen.
 ///
-/// `create_new(true)` is the claim, and it is atomic: two callers racing for one name have
-/// exactly one winner, and a file somebody else creates during the export is never silently
-/// replaced by it. The same device `evara_project::import`'s Create path uses, for the same
-/// reason — and the only atomic claim available without FFI, since `unsafe_code` is forbidden
-/// workspace-wide.
+/// The device itself is [`DestinationClaim`] — `create_new(true)`, atomic, so two callers
+/// racing for one name have exactly one winner and a file somebody else creates during the
+/// export is never silently replaced by it. `evara_project::import`'s Create path and the
+/// CLI's export take the same claim from the same place; what this wrapper adds is the
+/// **wording**, which is this layer's business and nobody else's.
 ///
-/// The file is removed on drop unless it was released, so a refusal, a failure or a
-/// cancellation after the claim leaves nothing behind. It is only ever a zero-length file
-/// Evara made moments ago, so removing it destroys nothing.
+/// Cleanup is the inner claim's: the placeholder is removed on drop unless it was released, so
+/// a refusal, a failure or a cancellation after the claim leaves nothing behind.
 #[derive(Debug)]
-struct ArchiveClaim {
-    path: PathBuf,
-    released: bool,
-}
+struct ArchiveClaim(DestinationClaim);
 
 impl ArchiveClaim {
     /// Claims `destination`, refusing if anything is already there.
     fn take(destination: &Path) -> CommandResult<Self> {
-        std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(destination)
-            .map_err(|error| match error.kind() {
-                std::io::ErrorKind::AlreadyExists => ProjectError::AlreadyExists {
+        DestinationClaim::take(destination)
+            .map(Self)
+            .map_err(|error| match error {
+                TransferError::DestinationExists { .. } => ProjectError::AlreadyExists {
                     message: format!(
                         "{} already exists. Choose another name — Evara will not overwrite \
                          a portable file you may still need.",
                         file_name_of(destination)
                     ),
                 },
-                _ => ProjectError::Failed {
+                // The io error itself rather than the wrapper's sentence: "permission denied"
+                // or "no such folder" is what tells somebody what to do next, and
+                // `TransferError::Io` carries it as a source rather than in its `Display`.
+                TransferError::Io { source, .. } => ProjectError::Failed {
                     message: format!(
-                        "Evara could not write to {}: {error}",
+                        "Evara could not write to {}: {source}",
                         file_name_of(destination)
                     ),
                 },
-            })?;
-        Ok(Self {
-            path: destination.to_path_buf(),
-            released: false,
-        })
+                other => ProjectError::Failed {
+                    message: format!(
+                        "Evara could not write to {}: {other}",
+                        file_name_of(destination)
+                    ),
+                },
+            })
     }
 
     /// The archive replaced it, so it is no longer ours to remove.
     ///
-    /// Consumes the claim and sets the flag its `Drop` reads — the idiom `Snapshot` and the
-    /// `.part` file use, so the cleanup stays structural and the release is a single named
-    /// call rather than a flag a caller might forget.
-    fn released(mut self) {
-        self.released = true;
-    }
-}
-
-impl Drop for ArchiveClaim {
-    fn drop(&mut self) {
-        if !self.released {
-            // A placeholder left behind would read as an empty portable file in a folder
-            // listing, which is worse than nothing at all.
-            let _ = std::fs::remove_file(&self.path);
-        }
+    /// Consumes the claim, as the inner one does — the idiom `Snapshot` and the `.part` file
+    /// use, so the cleanup stays structural and the release is a single named call rather than
+    /// a flag a caller might forget.
+    fn released(self) {
+        self.0.released();
     }
 }
 

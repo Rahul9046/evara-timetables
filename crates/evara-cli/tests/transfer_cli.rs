@@ -243,6 +243,38 @@ fn exporting_over_an_existing_archive_is_refused_and_leaves_it_alone() {
 }
 
 #[test]
+fn exporting_onto_an_empty_file_is_refused_and_leaves_it_empty() {
+    let fixture = Fixture::new();
+
+    // The destination is **claimed** with `create_new`, not checked with `exists()`, and
+    // `create_new` fails if the path exists at all. So a zero-length file is occupied: this is
+    // the shape another program's half-made output file has, and the shipped exit code for it
+    // is the same `1` an occupied archive gets.
+    let empty = fixture.at("reserved.evara");
+    std::fs::write(&empty, b"").expect("create an empty file");
+
+    let run = Run::of(&[
+        "export",
+        "--project",
+        &text(&fixture.project),
+        "--to",
+        &text(&empty),
+    ]);
+
+    assert_eq!(run.code, 1, "an empty file is occupied: {}", run.said());
+    assert!(
+        run.stderr.contains("already exists"),
+        "and says so: {}",
+        run.said()
+    );
+    assert_eq!(
+        std::fs::metadata(&empty).expect("stat").len(),
+        0,
+        "it must be untouched rather than adopted"
+    );
+}
+
+#[test]
 fn exporting_a_project_that_is_not_there_fails() {
     let fixture = Fixture::new();
     let run = Run::of(&[
