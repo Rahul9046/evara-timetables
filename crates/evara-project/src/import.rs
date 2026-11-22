@@ -29,7 +29,9 @@
 //!
 //! The claim is what closes the TOCTOU window. `fs::rename` **replaces** an existing
 //! destination on both platforms, so without the claim a file created between the check and
-//! the rename is silently destroyed.
+//! the rename is silently destroyed. The device itself is
+//! [`crate::claim::DestinationClaim`] — one implementation, shared with the export side,
+//! which finishes with the same rename and so has the same window.
 //!
 //! # Safeguard S3 — each side is reduced to one file before it moves
 //!
@@ -63,6 +65,7 @@ use evara_db::transfer::{
 };
 use uuid::Uuid;
 
+use crate::claim::DestinationClaim;
 use crate::error::{Result, TransferError};
 use crate::manifest::Manifest;
 use crate::progress::{Phase, TransferProgress};
@@ -165,7 +168,7 @@ pub fn import(
     // ---------------------------------------------------------------- P1: claim or decide
     let mode = decide(destination, on_conflict)?;
     let claim = match mode {
-        Mode::Create => Some(Claim::take(destination)?),
+        Mode::Create => Some(DestinationClaim::take(destination)?),
         Mode::Replace => None,
     };
 
@@ -300,7 +303,7 @@ fn finalise_create(
     staging: &mut Staging<'_>,
     staged_file: &Path,
     destination: &Path,
-    claim: Option<Claim>,
+    claim: Option<DestinationClaim>,
 ) -> Result<()> {
     // S3 step 4, on the Create path too. The destination is a zero-length placeholder Evara
     // just made, so a sidecar beside it cannot be ours — and a `-wal` whose main file is
@@ -373,60 +376,4 @@ fn compare_counts(manifest: &Manifest, staged: &StagedPayload) -> Vec<CountDisag
         }
     }
     disagreements
-}
-
-/// The zero-length placeholder that holds a destination's name.
-///
-/// `create_new(true)` is the claim, and it is atomic: two processes racing for one name have
-/// exactly one winner. The file is removed on drop unless it was released, so a refusal after
-/// the claim leaves nothing behind.
-struct Claim {
-    path: PathBuf,
-    released: bool,
-}
-
-impl Claim {
-    /// Claims `destination`, failing if anything is already there.
-    fn take(destination: &Path) -> Result<Self> {
-        std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(destination)
-            .map_err(|error| match error.kind() {
-                // Somebody won the race between `decide` and here. Reported as the occupied
-                // destination it now is, which is the same answer `decide` would have given
-                // a moment later — and the reason the claim exists rather than a check.
-                std::io::ErrorKind::AlreadyExists => TransferError::DestinationExists {
-                    name: crate::paths::file_name_of(destination),
-                },
-                _ => TransferError::Io {
-                    action: "claim the destination",
-                    source: error,
-                },
-            })?;
-        Ok(Self {
-            path: destination.to_path_buf(),
-            released: false,
-        })
-    }
-
-    /// The rename replaced it, so it is no longer ours to remove.
-    ///
-    /// Consumes the claim and sets the flag its `Drop` reads, which is the idiom `Snapshot`
-    /// and the `.part` file use: the cleanup stays structural and the release is a single
-    /// named call rather than a flag a caller might forget.
-    fn released(mut self) {
-        self.released = true;
-    }
-}
-
-impl Drop for Claim {
-    fn drop(&mut self) {
-        if !self.released {
-            // Only ever a zero-length file Evara made moments ago, so removing it destroys
-            // nothing. A placeholder left behind would read as an empty project in a folder
-            // listing, which is worse than nothing at all.
-            let _ = std::fs::remove_file(&self.path);
-        }
-    }
 }

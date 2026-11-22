@@ -32,7 +32,10 @@ use evara_db::{Settings, transfer};
 
 use crate::staging::{ASIDE_DIR, ReplacementJournal, STAGED_FILE, STAGING_PREFIX};
 use crate::tests_fixture::{APP_VERSION, Fixture};
-use crate::{IgnoreProgress, Importer, OnConflict, TransferError, import, recover_pending, seal};
+use crate::{
+    DestinationClaim, IgnoreProgress, Importer, OnConflict, TransferError, import, recover_pending,
+    seal,
+};
 
 /// An archive, a settings database, and a directory to import into.
 struct Scene {
@@ -241,6 +244,106 @@ fn two_imports_of_one_destination_cannot_both_proceed() {
         }
         other => panic!("expected DestinationExists, got {other:?}"),
     }
+}
+
+// =======================================================================================
+// The shared claim, directly
+// =======================================================================================
+//
+// `DestinationClaim` is the one implementation of the device, called by this crate's import,
+// by the CLI's export and by the desktop's. The tests above assert the composed behaviour
+// through `import`; these assert the type's own contract, because the export side has no
+// `OnConflict` and depends on exactly these three facts: an occupied name is refused, a
+// released claim is left alone, and an unreleased one is removed.
+
+#[test]
+fn a_claim_refuses_an_occupied_name_whatever_is_there() {
+    let dir = tempfile::TempDir::new().expect("temp dir");
+
+    // A zero-length file, a file with bytes in it, and a directory. All three are *occupied*:
+    // `create_new` fails if the path exists at all, which is S1's rule and the reason an
+    // export cannot quietly adopt an empty file somebody else is mid-way through writing.
+    let empty = dir.path().join("empty.evara");
+    std::fs::write(&empty, b"").expect("write an empty file");
+    let full = dir.path().join("full.evara");
+    std::fs::write(&full, b"not an archive").expect("write a file");
+    let folder = dir.path().join("folder.evara");
+    std::fs::create_dir(&folder).expect("create a directory");
+
+    for occupied in [&empty, &full] {
+        match DestinationClaim::take(occupied) {
+            Err(TransferError::DestinationExists { name }) => {
+                assert_eq!(name, crate::paths::file_name_of(occupied));
+            }
+            other => panic!("{occupied:?} must be occupied, got {other:?}"),
+        }
+    }
+
+    // A directory is refused too, and the variant is deliberately not asserted: Unix reports
+    // `AlreadyExists` and Windows reports a permission error for the same situation, so the
+    // promise is "refused, and the directory survives" rather than one error variant.
+    assert!(
+        DestinationClaim::take(&folder).is_err(),
+        "a directory at the name must never be claimable"
+    );
+
+    assert_eq!(
+        std::fs::metadata(&empty).expect("stat").len(),
+        0,
+        "the empty file must be untouched"
+    );
+    assert_eq!(
+        std::fs::read(&full).expect("read"),
+        b"not an archive",
+        "the occupied file must be untouched"
+    );
+    assert!(folder.is_dir(), "and the directory must still be one");
+}
+
+#[test]
+fn a_released_claim_is_left_alone_and_an_unreleased_one_is_removed() {
+    let dir = tempfile::TempDir::new().expect("temp dir");
+
+    // Released: the caller's rename has replaced the placeholder, so the claim must not touch
+    // the name on the way out. Simulated by writing over it, which is what a rename does.
+    let kept = dir.path().join("kept.evara");
+    let claim = DestinationClaim::take(&kept).expect("claim an absent name");
+    assert_eq!(claim.path(), kept.as_path());
+    std::fs::write(&kept, b"the archive that replaced the placeholder").expect("rename stand-in");
+    claim.released();
+    assert_eq!(
+        std::fs::read(&kept).expect("read"),
+        b"the archive that replaced the placeholder",
+        "a released claim must not remove what replaced it"
+    );
+
+    // Unreleased: every path that is not a successful rename, which is what makes a refusal, a
+    // failure and a cancellation all leave the folder as they found it.
+    let dropped = dir.path().join("dropped.evara");
+    drop(DestinationClaim::take(&dropped).expect("claim"));
+    assert!(
+        !dropped.exists(),
+        "an unreleased claim must remove its own placeholder"
+    );
+}
+
+#[test]
+fn a_claim_holds_the_name_against_a_competing_claim() {
+    // The property the whole device exists for: while a claim is held, nothing else can take
+    // the name — so the long work between the claim and the rename has nothing of anybody
+    // else's to destroy, and the rename is safe without a second check.
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    let contested = dir.path().join("contested.evara");
+
+    let held = DestinationClaim::take(&contested).expect("the first claim wins");
+    match DestinationClaim::take(&contested) {
+        Err(TransferError::DestinationExists { name }) => assert_eq!(name, "contested.evara"),
+        other => panic!("two claims of one name must have one winner, got {other:?}"),
+    }
+
+    // And the name is free again once the holder gives it up without a rename.
+    drop(held);
+    DestinationClaim::take(&contested).expect("claimable again once released");
 }
 
 // =======================================================================================

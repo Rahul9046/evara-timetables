@@ -89,6 +89,56 @@ impl Cancel for CancelAfter {
     }
 }
 
+/// A `Cancel` that never cancels and tries to steal the destination every time it is asked.
+///
+/// The export asks about cancellation throughout the snapshot, the hash and the compression,
+/// which makes each question a place to stand inside the window an `exists()` check would have
+/// left open. A competing `create_new` there is exactly what another program does, and its
+/// failure is the claim holding the name.
+///
+/// If a steal ever *succeeds* the file it made is removed again immediately, so the test fails
+/// on the count rather than on the export being derailed by the probe's own litter.
+struct ClaimProbe {
+    destination: PathBuf,
+    attempts: std::sync::atomic::AtomicUsize,
+    wins: std::sync::atomic::AtomicUsize,
+}
+
+impl ClaimProbe {
+    fn watching(destination: &Path) -> Self {
+        Self {
+            destination: destination.to_path_buf(),
+            attempts: std::sync::atomic::AtomicUsize::new(0),
+            wins: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    fn attempts(&self) -> usize {
+        self.attempts.load(Ordering::Relaxed)
+    }
+
+    /// How many times the name was free while the export was running. Must be zero.
+    fn wins(&self) -> usize {
+        self.wins.load(Ordering::Relaxed)
+    }
+}
+
+impl Cancel for ClaimProbe {
+    fn is_cancelled(&self) -> bool {
+        self.attempts.fetch_add(1, Ordering::Relaxed);
+        let stolen = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&self.destination);
+        if stolen.is_ok() {
+            self.wins.fetch_add(1, Ordering::Relaxed);
+            drop(stolen);
+            let _ = std::fs::remove_file(&self.destination);
+        }
+        false
+    }
+}
+
 /// A built project, an archive made from it, and a place to put things.
 struct Scene {
     dir: tempfile::TempDir,
@@ -673,6 +723,221 @@ fn an_export_refuses_an_occupied_archive_rather_than_overwriting_it() {
         before,
         "the existing archive must be untouched"
     );
+}
+
+// ---------------------------------------------------------------------------------------
+// 11b: the destination is claimed, not checked
+// ---------------------------------------------------------------------------------------
+//
+// `seal` finishes by renaming its `.part` over whatever is at the destination, and between an
+// `exists()` answer and that rename sit a snapshot and a full compression. A file created
+// inside that window would be destroyed without anybody being asked, so the guard is a
+// `DestinationClaim` — `create_new(true)`, one filesystem operation for the question and the
+// answer. These are the four things that has to mean.
+
+#[test]
+fn an_export_refuses_a_zero_length_destination_rather_than_adopting_it() {
+    let scene = Scene::new();
+
+    // A zero-length file is **occupied**, not creatable — S1's rule, and deliberately unlike
+    // `Database::create`. It is also the realistic shape of the hazard: another program that
+    // has just created its output file and not yet written to it.
+    let destination = scene.at("reserved.evara");
+    std::fs::write(&destination, b"").expect("create an empty file");
+
+    let request = ExportRequest {
+        project: scene.project.clone(),
+        to: destination.clone(),
+        quiet: true,
+    };
+    assert_eq!(
+        export_with(&request, &NeverCancel).expect("an occupied name is a refusal"),
+        Outcome::Refused
+    );
+    assert!(destination.exists(), "and the file must still be there");
+    assert_eq!(
+        std::fs::metadata(&destination).expect("stat").len(),
+        0,
+        "untouched, rather than adopted and written into"
+    );
+}
+
+#[test]
+fn an_export_holds_its_destination_for_the_whole_of_the_write() {
+    let scene = Scene::new();
+    let destination = scene.at("held.evara");
+
+    // The hazard, reproduced from inside: `ClaimProbe` answers "not cancelled" to every
+    // question the export asks and uses each one as the moment another program tries to create
+    // the destination. Those questions span the snapshot, the hash and the compression — the
+    // whole of the window an `exists()` check would have left open.
+    let probe = ClaimProbe::watching(&destination);
+    let request = ExportRequest {
+        project: scene.project.clone(),
+        to: destination.clone(),
+        quiet: true,
+    };
+    assert_eq!(
+        export_with(&request, &probe).expect("the export itself must succeed"),
+        Outcome::Done
+    );
+
+    assert!(
+        probe.attempts() > 0,
+        "the probe never ran, so this test asserted nothing"
+    );
+    assert_eq!(
+        probe.wins(),
+        0,
+        "the name was free for {} of {} attempts during the export",
+        probe.wins(),
+        probe.attempts()
+    );
+
+    // And what is at the name is the archive, not the placeholder or the competitor's file.
+    assert!(
+        evara_project::inspect(&destination).is_ok(),
+        "a real archive must be at the destination"
+    );
+}
+
+#[test]
+fn two_exports_racing_for_one_name_have_exactly_one_winner() {
+    let scene = Scene::new();
+    let destination = scene.at("contested.evara");
+
+    // Two processes is the real case; two threads is the same claim through the same
+    // filesystem call, and the only version a test can make deterministic.
+    let outcomes: Vec<Result<Outcome, String>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                let request = ExportRequest {
+                    project: scene.project.clone(),
+                    to: destination.clone(),
+                    quiet: true,
+                };
+                scope.spawn(move || export_with(&request, &NeverCancel))
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().expect("an export thread panicked"))
+            .collect()
+    });
+
+    let done = outcomes
+        .iter()
+        .filter(|outcome| matches!(outcome, Ok(Outcome::Done)))
+        .count();
+    let refused = outcomes
+        .iter()
+        .filter(|outcome| matches!(outcome, Ok(Outcome::Refused)))
+        .count();
+    assert_eq!(done, 1, "exactly one export may write: {outcomes:?}");
+    assert_eq!(
+        refused, 1,
+        "and the other is refused rather than failing: {outcomes:?}"
+    );
+
+    // The winner's archive is whole. Without the claim both would have compressed happily and
+    // the second rename would have replaced the first's archive — two valid-looking exports,
+    // one of them discarded silently.
+    assert!(
+        evara_project::inspect(&destination).is_ok(),
+        "the winner's archive must be readable"
+    );
+}
+
+#[test]
+fn a_cancelled_export_leaves_no_placeholder_and_touches_nothing_else() {
+    let scene = Scene::new();
+    let destination = scene.at("abandoned.evara");
+
+    // A bystander in the same folder, with the same stem, so a cleanup that worked by prefix
+    // rather than by exact path would take it.
+    let bystander = scene.at("abandoned.evara.notes");
+    std::fs::write(&bystander, b"somebody else's file").expect("write a bystander");
+
+    // Cancelled partway rather than at the first question: after the claim is held and with
+    // work already done, which is the phase a "it left an empty file behind" bug lives in.
+    let outcome = export_with(
+        &ExportRequest {
+            project: scene.project.clone(),
+            to: destination.clone(),
+            quiet: true,
+        },
+        &CancelAfter::new(3),
+    );
+    assert!(outcome.is_err(), "a cancelled export does not complete");
+
+    assert!(
+        !destination.exists(),
+        "the claim's placeholder must go with the operation that made it"
+    );
+    assert!(
+        !scene.at("abandoned.evara.part").exists(),
+        "and so must the writer's `.part`"
+    );
+    assert_eq!(
+        std::fs::read(&bystander).expect("read the bystander"),
+        b"somebody else's file",
+        "a cancelled export must remove only what it created"
+    );
+    let strays: Vec<_> = std::fs::read_dir(scene.dir.path())
+        .expect("list")
+        .filter_map(std::result::Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with(".evara-export-"))
+        .collect();
+    assert!(
+        strays.is_empty(),
+        "nor may it leave a staging folder: {strays:?}"
+    );
+}
+
+#[test]
+fn an_export_to_a_path_evara_will_not_write_to_creates_nothing_at_it() {
+    let scene = Scene::new();
+
+    // The path is judged **before** it is claimed, so an unsafe destination is refused for the
+    // reason it is unsafe rather than reported as occupied — and no placeholder is ever made
+    // at it. `file:` is finding F-2's form; `..` is the traversal one.
+    for unsafe_destination in ["file:somewhere.evara", "../escaped.evara"] {
+        let to = PathBuf::from(unsafe_destination);
+        let outcome = export_with(
+            &ExportRequest {
+                project: scene.project.clone(),
+                to: to.clone(),
+                quiet: true,
+            },
+            &NeverCancel,
+        )
+        .expect("an unsafe destination is a refusal, not a failure");
+        assert_eq!(
+            outcome,
+            Outcome::Refused,
+            "{unsafe_destination} was allowed"
+        );
+        assert!(
+            !to.exists(),
+            "{unsafe_destination} must not have been created"
+        );
+    }
+
+    // And a destination that is not a `.evara` at all, for the same reason: refused before the
+    // claim, so the wrong extension never becomes a file.
+    let wrong = scene.at("archive.zip");
+    let outcome = export_with(
+        &ExportRequest {
+            project: scene.project.clone(),
+            to: wrong.clone(),
+            quiet: true,
+        },
+        &NeverCancel,
+    )
+    .expect("the wrong extension is a refusal");
+    assert_eq!(outcome, Outcome::Refused);
+    assert!(!wrong.exists(), "and nothing was created at it");
 }
 
 #[test]

@@ -64,6 +64,7 @@
 //! and this crate's API is what they call.
 
 pub mod checksums;
+pub mod claim;
 pub mod entry;
 pub mod error;
 pub mod import;
@@ -77,6 +78,7 @@ pub mod recovery;
 pub mod staging;
 pub mod writer;
 
+pub use crate::claim::DestinationClaim;
 pub use crate::error::{Recovered, Result, TransferError};
 pub use crate::import::{CountDisagreement, ImportReport, Importer, OnConflict, import};
 pub use crate::manifest::{FORMAT, FORMAT_VERSION, Manifest};
