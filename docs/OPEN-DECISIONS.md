@@ -777,6 +777,66 @@ this note was written. It is now **Accepted**, so D22 is closed for the intra-sc
 its cross-school case is deferred by that record rather than left open here. The premise
 correction this note asked for has been applied to D22's text above and is marked there.
 
+---
+
+### D37 — Should an export be able to leave the change history behind? ⏸ DEFERRED 2026-11-22 (M10), with a number rather than a gap
+
+**Decided: no `--without-history` option in M10, and the measurement is why.**
+
+Raised as proposal item A6. A `.evara` carries the **complete** change feed
+([adr/0053](adr/0053-the-payload-is-a-verified-sqlite-snapshot.md) §1), and the question was
+whether a user sending a project onward should be able to strip it — for size, or because a
+feed records who changed what and when.
+
+T-60 measured it on a realistic fixture: the feed is **26.2%** of occupied pages — 4 306 rows,
+1 036 288 of 3 956 736 bytes, read from `dbstat`. Real, not dominating, and it deflates with
+everything else in the archive.
+
+Two reasons that figure settles it for now. The payload is a **page-level copy**, so stripping
+the feed means post-processing a verified snapshot — turning a copy back into a curated extract
+and giving up the property the snapshot design exists for. And a project whose feed has been
+removed is no longer the project: `inputs_watermark` on a stored timetable points into it, so a
+stripped archive would arrive with saves that cannot be re-validated against the history they
+were refused or allowed on.
+
+**What would reopen it:** a user with a privacy requirement rather than a size one. That is a
+different feature — redaction, with a statement about what survives — and not an export flag.
+
+---
+
+### D38 — Scoped export, and merging an import into an existing project ⏸ DEFERRED 2026-11-22 (M10)
+
+**Decided: neither in M10.** Proposal item A7.
+
+**Per-school export** — one school out of a project that holds several — is deferred because a
+school is not a closed set. Buildings, rooms and resources are shared across campuses and so
+across schools ([adr/0013](adr/0013-buildings-shared-across-campuses.md),
+[0014](adr/0014-rooms-shared-across-campuses.md), [0022](adr/0022-resources-shared-across-campuses.md)),
+teachers are project-level identities with per-school membership
+([0021](adr/0021-project-level-people-and-school-membership.md)), and a qualification survives
+membership being withdrawn ([0025](adr/0025-teacher-qualifications-across-school-owned-subjects.md)).
+So "export Northgate" has no single correct answer about the shared half, and every answer
+changes what the receiving installation can do with it. It needs a decision about shared
+entities first, not an export flag.
+
+**Merge-into-existing** is deferred for a stronger reason: **Evara cannot merge two copies of
+one project**, and nothing in the model would let it. Rows carry `rev` and a change feed, but
+there is no conflict resolution, no causal ordering between two installations' feeds and no way
+to decide which of two edits to one row is current. An import that silently picked would be
+inventing an answer to a question the data cannot answer.
+
+So the remedy for two copies is **disclosure**, which is what
+[D13](M10-PROJECT-TRANSFER-PROPOSAL.md#d13--identity-is-preserved-and-duplication-is-disclosed)
+implements: the import warns before staging, the Replace sentence is sharper when the
+destination is the same project, and the recent list marks entries that share an identity.
+
+**What would reopen it:** a synchronisation design, which is a milestone rather than a feature.
+The schema has been kept sync-ready since [adr/0003](adr/0003-sqlite-document-model.md) — every
+mutable table carries `created_at`, `updated_at`, `rev` and a change-log trigger — so the
+groundwork is not lost.
+
+---
+
 ## Technical risks
 
 ### R1 — Incremental scoring correctness (highest)
@@ -928,12 +988,41 @@ without incrementing a single revision, in the same stage that made the revision
 precondition. The remedy — clearing a subject's department — is an ordinary edit through a
 real update, so each row's revision stays truthful.
 
-### R8 — Single-file SQLite on synced folders — *detection and warning shipped*
+### R8 — Single-file SQLite on synced folders — ✅ **DISCHARGED 2026-11-22 (M10)**, with one limitation
 
 Users will put project files in OneDrive, iCloud Drive or Dropbox. WAL-mode SQLite on a
 cloud-synced folder is a known corruption source. **Mitigation:** detect common synced
 paths and warn on open; make `.evara` export the blessed way to move a project; document
 it. Worth deciding in Phase 1, not Phase 11.
+
+**All three parts of that mitigation have shipped.**
+
+| Part | Where |
+| --- | --- |
+| detect common synced paths and warn on open | `evara_db::cloud_sync::detect`, surfaced as `ProjectView.syncedFolder` and shown as a title-bar banner — Phase 1B |
+| make `.evara` export the blessed way to move a project | M10. One portable file, verified, written once and closed — [PROJECT-FORMAT.md](PROJECT-FORMAT.md) |
+| document it | [PROJECT-FORMAT.md](PROJECT-FORMAT.md), and the banner's own wording |
+
+The export is the part that discharges the risk rather than merely warning about it. An
+`.evara` is written once and closed, so it carries none of the WAL hazard: copying *that* into
+a synced folder, or sending it, is now the supported way to move a project between machines —
+which is exactly what this risk asked for.
+
+**One limitation, stated rather than left implicit.** The advisory fires **when a project is
+opened**, not while an arbitrary destination is being chosen. So a user importing a project
+*into* a synced folder is warned the first time they open it — which is when a continuously
+written database is actually at risk — and not at the moment they pick the path. Neither
+transfer dialogue can warn earlier, because Stage 4 exposes no command that answers
+`cloud_sync::detect` for an arbitrary path, and reimplementing the detector in TypeScript is
+forbidden by [CLAUDE.md](../CLAUDE.md) §2. A `project_synced_folder(path)` command would close
+it; it is a few lines and nobody has needed it yet.
+
+An export *destination* in a synced folder is deliberately **not** warned about: an archive is
+written once and closed, so putting one there is the mitigation and not an instance of the
+hazard.
+
+**Related:** [R12](#r12--macos-allows-a-rename-over-a-file-another-process-holds-open) is the
+narrower case of two installations reaching one project file.
 
 ### R9 — Fixture realism without real data
 
@@ -962,3 +1051,58 @@ needs 20 of its 30 slots, no teacher carries more than 8 occurrences — so it e
 and not difficulty. A genuinely tight fixture is still wanted, and is best written once a
 solver exists to be beaten by it, because until then nobody can tell a hard fixture from an
 impossible one. Phase 6, with the score baselines.
+
+---
+
+### R11 — A transferred archive is unsigned: corruption is detected, authenticity is not
+
+A `.evara` arrives from somebody else — by email, on a USB stick, from a shared drive — and its
+digests prove only that the bytes are internally consistent. **Anyone can rewrite the manifest
+and recompute every digest below it**, so the archive establishes nothing about who produced
+it.
+
+There is no signature, and that is a decision rather than an omission: a signature needs key
+distribution — a keyserver, a trust root, a revocation story — and [adr/0001](adr/0001-local-first-desktop.md)
+forbids the service that would provide any of them.
+[adr/0059](adr/0059-archive-integrity-is-corruption-not-authenticity.md) records the reasoning
+in full.
+
+**Mitigation — say so, in the product, at the moment of decision.** The sentence is a constant
+in Rust (`INTEGRITY_NOTICE`), so there is one source of the wording, and it is shown every time
+by `evara inspect` and by the desktop import dialogue, before either says whether the archive
+can be read. Behind it sits the layered audit of the payload itself
+([adr/0056](adr/0056-a-payload-is-audited-against-a-generated-reference.md)): a hostile archive
+is refused for shape, size, version, capability, digest, structural integrity, referential
+integrity and schema conformance before a row is read from it.
+
+**Not closed, and not closable as stated.** This is a product limitation of a local-first tool
+with no accounts, not a defect with a fix pending. A signed-archive design would be a milestone
+with a trust model in it.
+
+---
+
+### R12 — macOS allows a rename over a file another process holds open
+
+Replacement reduces each side to one file and asserts the destination is clean immediately
+before the rename ([adr/0058](adr/0058-replacement-is-journalled-and-non-destructive.md) §5).
+What it cannot do is detect a **second installation** of Evara holding the project it is about
+to replace: on macOS, `rename` over a file another process has open succeeds, and the holder
+keeps reading the file it no longer has a name for.
+
+Windows refuses the rename, which produces an honest error. The asymmetry is the risk.
+
+**Mitigation — the kept copy.** The replaced project is kept as
+`<stem>.replaced-<stamp>.evaraproj` and no code path in Evara deletes it, so a second
+installation's work is still on disk under a name a user can be told about. The command layer
+additionally refuses a destination that is the project *this* installation has open
+([adr/0057](adr/0057-an-import-is-staged-verified-and-renamed.md) §5), which covers the common
+case of one user with one application.
+
+**Why not a lock file.** An advisory lock in the settings database would be per-installation,
+and the case this risk is about is two installations; a lock file beside the project would be
+a new file in the user's folder whose stale state becomes its own support problem, and it
+cannot be made authoritative without a daemon — which ADR 0001 forbids.
+
+**Residual.** Two installations writing one project file concurrently is already outside what
+single-file SQLite supports (R8's territory), and this risk is a narrower instance of it: the
+transfer path makes the collision *silent* on one platform rather than creating it.

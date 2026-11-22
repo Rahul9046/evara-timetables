@@ -825,56 +825,168 @@ rather than dynamically re-ranked; and `IncrementalScorer` lives in `evara-const
 
 ---
 
-## Phase 9 — Project transfer
+## Phase 9 — Project transfer ✅ complete (M10)
+
+A project moves between installations as one portable file. Export writes a verified snapshot
+into a `.evara`; import stages it, audits it, migrates it and renames it into place, keeping
+whatever it replaced. Reachable from the CLI and from the desktop application.
 
 Architecture: [M10-PROJECT-TRANSFER-PROPOSAL.md](M10-PROJECT-TRANSFER-PROPOSAL.md), revision
-2.3. Its §0.2 is the authoritative replacement specification and its §8 the stage order.
-**Note that [PROJECT-FORMAT.md](PROJECT-FORMAT.md) describes the design M10 rejected** and is
-rewritten in Stage 6; its banner says which three passages are known-wrong.
+2.3 — its §0.2 is the authoritative replacement specification and its §8 the stage order. The
+format is [PROJECT-FORMAT.md](PROJECT-FORMAT.md), rewritten in Stage 6 against what shipped,
+and the decisions are [adr/0053](adr/0053-the-payload-is-a-verified-sqlite-snapshot.md)–[0059](adr/0059-archive-integrity-is-corruption-not-authenticity.md).
 
 | Stage | Scope | Status |
 | --- | --- | --- |
 | **P** | `zip >= 9`, `calamine 0.37`, `rust_xlsxwriter 0.102`; three RUSTSEC advisories out of the tree | ✅ PR #35 |
 | **1** | `evara-db::transfer`: the hardened V0 boundary, `snapshot_into`, conformance against a generated reference, the replacement journal and its settings migration, and the S1/S2/S3 primitives | ✅ PR #37 |
-| **2** | `evara-project`: the `.evara` container, its reader, the staging lifecycle, D11 as amended by §0.2, recovery; `transfer::stage`, `table_census`, the `fixtures` feature; **T-60, T-83 and §7.2's inflation figure measured** | ✅ this stage |
-| **3** | `evara export` / `import` / `inspect`, on §4.4's syntax and its three exit codes | ✅ this stage — **except T-41's generated historical matrix**, which is not built; see below |
+| **2** | `evara-project`: the `.evara` container, its reader, the staging lifecycle, D11 as amended by §0.2, recovery; `transfer::stage`, `table_census`, the `fixtures` feature; **T-60, T-83 and §7.2's inflation figure measured** | ✅ PR #41 |
+| **3** | `evara export` / `import` / `inspect`, on §4.4's syntax and its three exit codes | ✅ PR #44 |
 | **4** | Eleven Tauri commands, `TransferSessions`, the generalised `CoalescingSink`, `transfer://` events, identity disclosure (D13), typegen | ✅ PR #47 |
-| **5** | The Export and Import screens | ✅ this stage |
-| **6** | Rewrite `PROJECT-FORMAT.md`; ADRs 0053–0059; amend `TIMETABLE-PERSISTENCE.md` §7 and ADR 0042 §C4; discharge R8; add D37, D38, R11, R12 | |
+| **4b** | T-41's historical matrix; the CLI's export destination claimed atomically rather than checked | ✅ PR #46, PR #48 |
+| **5** | The Export and Import screens | ✅ PR #49 |
+| **6** | Rewrite `PROJECT-FORMAT.md`; ADRs 0053–0059; amend `TIMETABLE-PERSISTENCE.md` §7 and ADR 0042 §C4; discharge R8; add D37, D38, R11, R12 | ✅ this stage |
 
-What Stage 2 settled, so a reader does not have to re-derive it: the change feed is **26.2%**
-of a realistic project's occupied pages (so A6 stays deferred, now with a figure); a stepped
+### What each stage settled, so a reader does not re-derive it
+
+**Stage 2** measured the three figures the design was waiting on: the change feed is **26.2%**
+of a realistic project's occupied pages (so A6 stays deferred, now with a number); a stepped
 backup holds the workspace lock for **~46 ms** against a ≤ 500 ms budget, and ~50 ms under a
 concurrent writer; and a snapshot is **+6.9%** over a vacuumed copy, of which the archive
-absorbs 88.7% — so **no compaction pass is added**. §C.10 has the fixture and the method.
+absorbs 88.7% — so **no compaction pass is added**. §C.10 has the fixture and the method. It
+also corrected one security claim: `SQLITE_OPEN_URI` is not a control in this build, because
+the bundled engine is compiled with `-DSQLITE_USE_URI` (finding F-2,
+[adr/0055](adr/0055-an-archive-is-read-by-name-and-never-extracted.md) §4).
 
-What Stage 3 settled: the three commands are the **first callers** of Stage 2's API and add
-no protocol of their own, which is the property that lets Stage 4's Tauri commands be a second
-caller with no shared code to keep in step. `export` is read-only on the source and refuses an
-occupied archive — `seal` itself renames over whatever is at the destination, so that guard is
-the caller's and **Stage 4 needs its own**. `import` opens the installation's real settings
-database for the journal and the `site_id`, recovers any interrupted replacement first, and is
-tested through the same `cfg(test)` seam PR #39 built for `save`.
+**Stage 3** made the three commands the **first callers** of Stage 2's API, with no protocol of
+their own — which is the property that lets Stage 4's Tauri commands be a second caller with no
+shared code to keep in step.
 
-**T-41 is not built, and Stage 3's exit criterion is therefore not met.** The generated
-V1…V18 matrix needs `migrations::run_up_to` reachable from outside `evara-db` (it is
-`pub(crate)`) and a per-version fill routine, because today's repository API cannot write to a
-V3 schema — the tables are not there yet. That is a stage's worth of work rather than a test,
-and it is recorded here rather than quietly dropped: the compatibility claim "a V1 export opens
-in a V18 build" still has no test behind it, exactly as §1.4.6 says.
+**Stage 4** added the eleven commands, the session registry, the two `transfer://` events and
+D13's disclosure. It also closed the export-destination window with a `create_new` claim, and
+PR #48 did the same for the CLI and promoted the device to one shared implementation
+([adr/0058](adr/0058-replacement-is-journalled-and-non-destructive.md) §1).
 
-What Stage 5 settled: the two actions are in **different places**, and that is D9 in the
-interface rather than a layout preference. Export is a title-bar action, because it is about
-the open campus file; import is a start-screen action, because it finishes by offering to open
-what it made — and offering that from inside an open campus file would close one and discard
-its edit session as a side effect of a click in a dialogue. One shared session hook holds the
-state machine for both, including the start race (a small campus can finish before React's
-subscribe effect runs, so the effect polls the status once) and the epoch pin (the first event
-seen for a run fixes the epoch, and a later disagreement is dropped). Every refusal on screen
-is the backend's own `message`; the screens choose the *offer* — another name, Replace, a fresh
-copy, update Evara — and never the wording.
+**Stage 5** put the two actions in **different places**, and that is D9 in the interface rather
+than a layout preference: export is a title-bar action because it is about the open campus
+file, and import is a start-screen action because it finishes by offering to open what it made
+— which from inside an open campus file would close one and discard its edit session. One
+shared session hook holds the state machine for both, including the start race (a small campus
+can finish before React's subscribe effect runs, so the effect polls the status once) and the
+epoch pin (the first event seen for a run fixes the epoch, and a later disagreement is
+dropped). Every refusal on screen is the backend's own `message`; the screens choose the
+*offer* — another name, Replace, a fresh copy, update Evara — and never the wording.
 
-**Closes M1-17, M1-18** — the user can now reach project transfer.
+### Acceptance criteria
+
+| Criterion | Status | Evidence |
+| --- | --- | --- |
+| A project exports to one portable file | ✅ | `evara export`, `project_export_start`, the Export dialogue; round-trip tests over both fixture shapes |
+| An export never modifies the source | ✅ | `open_for_inspection` — no migration, no trigger recreation, no stamp. `an_export_leaves_the_source_project_byte_for_byte_unchanged` also asserts no `-wal`/`-shm` appears |
+| Everything travels: schools, timetables, locks, manual edits, lineage, findings, change feed | ✅ | page-level snapshot ([adr/0053](adr/0053-the-payload-is-a-verified-sqlite-snapshot.md)); census comparison per table, plus `timetable_history_locks_and_repair_lineage_travel` |
+| An archive describes itself and can be inspected without importing | ✅ | `evara inspect`, `project_import_inspect`. Reads the manifest and digest record and **not** the payload |
+| A corrupt or tampered archive is refused and writes nothing | ✅ | `tests_refusal`: truncation, flipped byte, bad digest, missing manifest, not-a-ZIP — each leaves no project behind |
+| A hostile archive cannot escape its staging directory | ✅ | three entries by exact name, no `extract`, payload streamed to a path Evara chose ([adr/0055](adr/0055-an-archive-is-read-by-name-and-never-extracted.md)) |
+| An untrusted payload is audited before anything writes to it | ✅ | V0/V1/V2 with capabilities down ([adr/0056](adr/0056-a-payload-is-audited-against-a-generated-reference.md)). **Not a sandbox** — see the limitations below |
+| An archive this build cannot read is refused with a reason | ✅ | two version axes, one refusal each ([adr/0054](adr/0054-two-version-axes-one-refusal-each.md)); an unknown capability refuses by name |
+| An import never destroys an existing project | ✅ | the destination is claimed, not checked; the replaced project is kept as `<stem>.replaced-<stamp>.evaraproj` and **no code path deletes it** ([adr/0058](adr/0058-replacement-is-journalled-and-non-destructive.md)) |
+| An interrupted import is recoverable | ✅ | journalled phases, startup recovery reconciling **observed** facts; every reachable state has a case, and an ambiguous one is reported and acted on by nothing |
+| A cancellation leaves nothing behind | ✅ | no archive, no `.part`, no placeholder, no project, no staging — asserted in `evara-project`, `evara-cli` and the command layer |
+| Project identity survives, and duplication is disclosed | ✅ | `project_id` and `created_by_site_id` never regenerated; D13's three sentences, plus the recent list's own marker |
+| A historical project opens in this build | ✅ | **V1…V18**, `tests_historical::every_version_opens_and_migrates_in_this_build`. See the T-41 note below |
+| A historical *archive* imports into this build | ⚠️ **reinterpreted** | covered for every schema version a manifest can describe, which is `[18]`. See the T-41 note below |
+| The whole feature works offline | ✅ | no network code path exists; `cargo deny` sources clean |
+| Reachable by a user | ✅ | Stage 5's two dialogues, and three CLI commands |
+
+### T-41 — what the historical matrix proves, and the half that cannot exist
+
+T-41 asked for: *for each `n` in V1…V18, build a project at `n`, fill it, **export**, import
+into the current build, assert.* PR #46 built the generator and both matrices. One half is
+complete; the other **cannot exist as specified**, and the reason is structural rather than a
+limitation to work around.
+
+**The project half is complete and is the half the compatibility claim is about.**
+`every_version_opens_and_migrates_in_this_build` covers **V1…V18** in full, through
+`Database::open_existing` — the one call a user makes by opening their own file, and the path
+every existing project will actually take. It found a real defect:
+`backup::before_schema_rebuild` counted `SELECT COUNT(*) FROM school` unconditionally for any
+project below V12, and `school` arrives with V3 — so a V1 or V2 project could not be opened at
+all. Fixed in the same change.
+
+**The archive half is bounded at `[18]`, for two independent reasons.**
+
+1. Today's build **refuses to open a historical project** read-only:
+   `open_for_inspection` returns `SchemaUpgradeRequired`, deliberately, because `CLAUDE.md`
+   makes that refusal the user's decision and forbids reaching for the mutating path to dodge
+   it. A test helper stands in for the release that owned the file. This one is surmountable.
+2. **A manifest can only describe a project at the current schema version.** It is built from
+   `facts_of`, which reads today's model — `constraint_instance` (V16), `timetable` and
+   `timetable_entry` (V17), and the binding one, the `lineage:repair` probe
+   `SELECT 1 FROM timetable WHERE based_on_timetable_id IS NOT NULL`, whose column arrives with
+   **V18**. So `facts_of` fails on every earlier version and no archive can be assembled for
+   one.
+
+**The revised acceptance interpretation, recorded explicitly:** the archive matrix covers every
+schema version a manifest can *describe*, and asserts that the current version is always among
+them. That is not a weaker claim about reality — it is the honest one. A `formatVersion 1`
+archive can only have been written by a build that **had** the transfer feature, and transfer
+arrives with M10 at V18, so **no real archive carries an older payload**. There is no file in
+the world the missing rows would have covered.
+
+The test keeps its value as a guard rather than as coverage: it fails if `facts_of` ever drifts
+until it cannot describe a project its own build has written —
+`every_describable_schema_version_exports_and_imports_into_this_build`, which reports
+`covered [18]` today and extends itself when V19 lands, because both matrices iterate
+`every_version()` rather than a list.
+
+**What a passing archive row proves** is more than it looks: `import` is not a copy, so
+reaching `Ok` means the digest matched, V0's audit and conformance passed, the migration ran,
+V2's re-verification passed and the census matched.
+
+### Limitations, carried forward rather than closed
+
+1. **No real-window GUI smoke test.** Stage 5's dialogues are tested against a mocked IPC
+   boundary, and `ipc/transfer.test.ts` asserts the command names and argument keys — but
+   nothing in CI drives the actual Tauri window. This is the gap M9A opened; Stage 5 did not
+   widen it and did not close it.
+2. **The synced-folder advisory fires on open, not on choosing a destination.** The existing
+   warning appears when a project in a synced folder is opened — which is when a continuously
+   written WAL database is actually at risk — but there is no command that answers
+   `cloud_sync::detect` for an arbitrary path, so neither transfer dialogue can warn while a
+   destination is being picked. Reimplementing the detector in TypeScript is forbidden by
+   `CLAUDE.md` §2. A `project_synced_folder(path)` command would close it. See **R8** below.
+3. **Large-transfer behaviour in the window is unmeasured.** §7.3's figures are the protocol's,
+   measured in Rust. Nobody has sat through a multi-hundred-megabyte import in the real
+   application.
+4. **Archive integrity is not authenticity.** Corruption is detected; authorship is not
+   established, and there is no signature because ADR 0001 forbids the key distribution one
+   needs. [adr/0059](adr/0059-archive-integrity-is-corruption-not-authenticity.md), and
+   **R11**.
+5. **A duplicate project identity is disclosed, not resolved.** Evara cannot merge two copies,
+   so the remedy is disclosure at three points — the import warning, the Replace sentence and
+   the recent list. Nothing regenerates a UUID or deduplicates the list. **D38** holds merge.
+6. **The staged payload is a file from elsewhere opened with SQLite.** The controls are real,
+   layered and proven available, and they do not make the engine's parser infallible. The
+   highest-ranked residual risk of the feature, stated in
+   [adr/0056](adr/0056-a-payload-is-audited-against-a-generated-reference.md) and §6.2.
+7. **Replacement durability is crash-recoverable, not crash-proof** — and a second installation
+   holding the replaced project open cannot be detected on macOS, which is **R12**. The kept
+   copy is the mitigation.
+
+**Closes M1-17 and M1-18.** The product brief's verbatim text for those two items is not in
+this repository, so the interpretation is recorded rather than assumed: they are the two
+transfer items this phase was always said to close — *export the whole project* and *import it
+into another installation* (the wording [README.md](../README.md) uses in "What Milestone 1
+delivers"). Both are satisfied by the acceptance table above: a user can export the open
+project to a portable file and import one on another installation, from the application or the
+CLI, with every row preserved and nothing destroyed. If the brief's wording turns out to
+require the real-window smoke test in limitation 1, that limitation is the one thing standing
+between these two items and unqualified closure.
+
+**M10 does not touch the project schema.** V18 is the schema, and transfer reads and copies it.
+The one migration it adds is the installation's own `V2__pending_replacement.sql` for the
+replacement journal — a settings migration, not a project one. A stage that found itself
+wanting a project column would have been a signal the design went wrong.
 
 ---
 

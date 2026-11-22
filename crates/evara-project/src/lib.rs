@@ -57,11 +57,16 @@
 //! - [`import`] — the replacement protocol, and the three safeguards that were conditions of
 //!   the design's approval. **Nothing in Evara deletes the project it replaced.**
 //!
-//! # Status — M10 Stage 2
+//! # Status — complete, and this crate is the one implementation
 //!
 //! The format, the writer, the reader, the staging lifecycle, the replacement protocol and its
-//! recovery. **No CLI command, no Tauri command and no screen** — those are Stages 3, 4 and 5,
-//! and this crate's API is what they call.
+//! recovery. Three callers consume that API and **none of them reimplements any of it**:
+//! `evara-cli`'s `export` / `inspect` / `import`, the desktop layer's eleven transfer commands,
+//! and the two screens over them. There is no second archive writer and no second import path,
+//! which is what lets the two callers share nothing but this crate.
+//!
+//! [`PROJECT-FORMAT.md`](../../../docs/PROJECT-FORMAT.md) documents the format; the decisions
+//! are ADRs 0053–0059.
 
 pub mod checksums;
 pub mod claim;

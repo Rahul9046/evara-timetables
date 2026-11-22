@@ -100,7 +100,7 @@ destroy the one thing a timetabler compares against.
 | `timetable_entry` | ✅ | Phase 8 edits these directly; `is_manual` exists to record that a human placed one |
 | `solve_run` | ✅ | provenance. ADR 0040's own argument reaches it: *"a table whose rows carry a school's configuration decisions is exactly a table a future synchronisation has to reconcile"* |
 | `timetable_evaluation` | ✅ | not the findings, but the record that a scoring happened and what it concluded. Replacing the current one is a change a reader of the feed should see |
-| `violation`, `violation_ref` | `NON_ENTITY_TABLES` | derived. `PROJECT-FORMAT.md` §3 already calls them *"derived data … rebuilt on first score"*, and re-running `evaluate` reproduces them |
+| `violation`, `violation_ref` | `NON_ENTITY_TABLES` | derived *in this sense*: re-running `evaluate` reproduces them for the inputs as they now stand, so they need no change-log entry of their own. **Not** in the sense of being left out of an export — they travel; §C4 corrects that |
 | `solve_run_unscheduled` | `NON_ENTITY_TABLES` | written once, never updated, removed only with its run. No independent lifecycle and no `rev` to race on |
 
 Two schema-coverage tests discover tables from the live schema and fail for any that is neither
@@ -250,16 +250,32 @@ manual edit.
 ### C4 — Export of unscheduled causes
 
 `solve_run_unscheduled` is **historical generation information, not derived**: once the inputs
-move, nothing can reconstruct which lessons a past run failed on or why. So the planned export
-contract is:
+move, nothing can reconstruct which lessons a past run failed on or why. That reasoning stands
+and is why this note exists.
+
+**Corrected in M10 Stage 6: every one of these tables travels.** The export contract as
+implemented is:
 
 | Table | Exported? |
 | --- | --- |
 | `timetable`, `timetable_entry`, `solve_run`, `timetable_evaluation` | **yes** |
 | `solve_run_unscheduled` | **yes** — historical, not reconstructible |
-| `violation`, `violation_ref` | **no** — derived, rebuilt by an evaluation |
+| `violation`, `violation_ref` | **yes** |
 
-Recorded in `PROJECT-FORMAT.md` §3 and **not implemented**: export is Phase 9's.
+Two reasons the last row changed, and the second is this record's own doing:
+
+- A `.evara` payload is a **page-level copy of the whole database**
+  ([ADR 0053](0053-the-payload-is-a-verified-sqlite-snapshot.md)), so there is no per-table
+  export decision left to make. Excluding a table would mean post-processing a verified
+  snapshot.
+- *"Rebuilt by an evaluation"* could not be honoured anyway. §5 of this record makes a
+  `GENERATION` scoring **immutable**, and re-scoring writes a `REVALIDATION`; findings that did
+  not travel could therefore never be put back beside the generation score that produced them.
+  Every transferred timetable would show a generation score next to an empty findings list,
+  permanently. [ADR 0057](0057-an-import-is-staged-verified-and-renamed.md) §3.
+
+The decision this record makes is untouched: only its export contract is corrected.
+[PROJECT-FORMAT.md](../PROJECT-FORMAT.md) documents what ships.
 
 ## 4. The mutation inventory
 
