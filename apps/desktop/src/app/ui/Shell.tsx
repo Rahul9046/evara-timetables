@@ -194,15 +194,83 @@ export function DataTable<T extends { id: string }>(props: {
 }
 
 /**
- * Confirmation before something irreversible.
+ * A modal `<dialog>`, opened and closed by a prop.
  *
  * A real `<dialog>` rather than `window.confirm`, for two reasons. A native dialog blocks
  * the WebView and, per the project's own notes, can wedge the automation bridge; and
  * `confirm` cannot show a list — which the orphan release has to, because "delete 12
  * timeslots" is not enough information to agree to.
  *
- * Focus moves to the dialogue on open and Escape cancels, both of which `showModal`
+ * Focus moves to the dialogue on open and Escape fires `onCancel`, both of which `showModal`
  * gives us.
+ *
+ * Extracted from {@link ConfirmDialog} when the transfer flows needed the same element with a
+ * different footer: a multi-step export or import is not a confirm/cancel pair, and copying
+ * the `showModal` handling into a second component would have been two answers to one
+ * question about focus and about Escape.
+ */
+export function Modal(props: {
+  open: boolean;
+  /** The element the dialogue is named by, for `aria-labelledby`. */
+  labelledBy: string;
+  /** Extra classes beside `confirm`, which carries the shared chrome. */
+  className?: string;
+  /** Escape, or the backdrop's own cancel. Never assumed to mean "close". */
+  onCancel: () => void;
+  children: ReactNode;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+
+    if (props.open && !dialog.open) {
+      // `showModal` is what gives focus capture, Escape-to-cancel and the backdrop. It
+      // is not universally implemented — jsdom, which the tests run in, has `<dialog>`
+      // but not `showModal` — so fall back to the `open` attribute. Without the
+      // fallback the element stays out of the accessibility tree entirely, which means
+      // a screen reader on such a runtime would not announce the dialogue at all.
+      // Degrading to a visible, non-modal dialogue is much better than degrading to an
+      // invisible one.
+      if (typeof dialog.showModal === "function") {
+        dialog.showModal();
+      } else {
+        dialog.open = true;
+      }
+    }
+
+    if (!props.open && dialog.open) {
+      if (typeof dialog.close === "function") {
+        dialog.close();
+      } else {
+        dialog.open = false;
+      }
+    }
+  }, [props.open]);
+
+  if (!props.open) return null;
+
+  return (
+    <dialog
+      ref={ref}
+      className={props.className === undefined ? "confirm" : `confirm ${props.className}`}
+      aria-labelledby={props.labelledBy}
+      onCancel={(e) => {
+        e.preventDefault();
+        props.onCancel();
+      }}
+    >
+      {props.children}
+    </dialog>
+  );
+}
+
+/**
+ * Confirmation before something irreversible.
+ *
+ * The {@link Modal} element, with the confirm/cancel footer every destructive action in
+ * School Setup uses.
  */
 export function ConfirmDialog(props: {
   open: boolean;
@@ -235,48 +303,8 @@ export function ConfirmDialog(props: {
   onConfirm: () => void;
   onCancel: () => void;
 }) {
-  const ref = useRef<HTMLDialogElement>(null);
-
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!dialog) return;
-
-    if (props.open && !dialog.open) {
-      // `showModal` is what gives focus capture, Escape-to-cancel and the backdrop. It
-      // is not universally implemented — jsdom, which the tests run in, has `<dialog>`
-      // but not `showModal` — so fall back to the `open` attribute. Without the
-      // fallback the element stays out of the accessibility tree entirely, which means
-      // a screen reader on such a runtime would not announce the confirmation at all.
-      // Degrading to a visible, non-modal dialogue is much better than degrading to an
-      // invisible one.
-      if (typeof dialog.showModal === "function") {
-        dialog.showModal();
-      } else {
-        dialog.open = true;
-      }
-    }
-
-    if (!props.open && dialog.open) {
-      if (typeof dialog.close === "function") {
-        dialog.close();
-      } else {
-        dialog.open = false;
-      }
-    }
-  }, [props.open]);
-
-  if (!props.open) return null;
-
   return (
-    <dialog
-      ref={ref}
-      className="confirm"
-      aria-labelledby="confirmTitle"
-      onCancel={(e) => {
-        e.preventDefault();
-        props.onCancel();
-      }}
-    >
+    <Modal open={props.open} labelledBy="confirmTitle" onCancel={props.onCancel}>
       <h3 id="confirmTitle">{props.title}</h3>
       <div className="confirmBody">{props.children}</div>
       <div className="actions">
@@ -295,7 +323,7 @@ export function ConfirmDialog(props: {
           {props.blocked === true ? "Close" : "Cancel"}
         </button>
       </div>
-    </dialog>
+    </Modal>
   );
 }
 

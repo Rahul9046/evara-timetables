@@ -838,8 +838,8 @@ rewritten in Stage 6; its banner says which three passages are known-wrong.
 | **1** | `evara-db::transfer`: the hardened V0 boundary, `snapshot_into`, conformance against a generated reference, the replacement journal and its settings migration, and the S1/S2/S3 primitives | ✅ PR #37 |
 | **2** | `evara-project`: the `.evara` container, its reader, the staging lifecycle, D11 as amended by §0.2, recovery; `transfer::stage`, `table_census`, the `fixtures` feature; **T-60, T-83 and §7.2's inflation figure measured** | ✅ this stage |
 | **3** | `evara export` / `import` / `inspect`, on §4.4's syntax and its three exit codes | ✅ this stage — **except T-41's generated historical matrix**, which is not built; see below |
-| **4** | Eleven Tauri commands, `TransferSessions`, the generalised `CoalescingSink`, `transfer://` events, identity disclosure (D13), typegen | |
-| **5** | The Export and Import screens | |
+| **4** | Eleven Tauri commands, `TransferSessions`, the generalised `CoalescingSink`, `transfer://` events, identity disclosure (D13), typegen | ✅ PR #47 |
+| **5** | The Export and Import screens | ✅ this stage |
 | **6** | Rewrite `PROJECT-FORMAT.md`; ADRs 0053–0059; amend `TIMETABLE-PERSISTENCE.md` §7 and ADR 0042 §C4; discharge R8; add D37, D38, R11, R12 | |
 
 What Stage 2 settled, so a reader does not have to re-derive it: the change feed is **26.2%**
@@ -863,7 +863,18 @@ V3 schema — the tables are not there yet. That is a stage's worth of work rath
 and it is recorded here rather than quietly dropped: the compatibility claim "a V1 export opens
 in a V18 build" still has no test behind it, exactly as §1.4.6 says.
 
-**Closes M1-17, M1-18** — at the end of Stage 5, when the user can reach it.
+What Stage 5 settled: the two actions are in **different places**, and that is D9 in the
+interface rather than a layout preference. Export is a title-bar action, because it is about
+the open campus file; import is a start-screen action, because it finishes by offering to open
+what it made — and offering that from inside an open campus file would close one and discard
+its edit session as a side effect of a click in a dialogue. One shared session hook holds the
+state machine for both, including the start race (a small campus can finish before React's
+subscribe effect runs, so the effect polls the status once) and the epoch pin (the first event
+seen for a run fixes the epoch, and a later disagreement is dropped). Every refusal on screen
+is the backend's own `message`; the screens choose the *offer* — another name, Replace, a fresh
+copy, update Evara — and never the wording.
+
+**Closes M1-17, M1-18** — the user can now reach project transfer.
 
 ---
 

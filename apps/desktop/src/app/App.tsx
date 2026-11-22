@@ -29,7 +29,18 @@
  *   selected".
  *
  * Anything added later that names the file while a campus entity is visible should follow
- * the second rule.
+ * the second rule. "Export campus file…" in the title bar is the first thing added under it.
+ *
+ * ## The two transfer actions, and why they are in different places
+ *
+ * **Export** is about the open campus file, so it is a title-bar action. **Import** produces a
+ * new campus file and finishes by offering to open it — which would close whatever is open and
+ * discard its edit session — so it is a start-screen action, where nothing is open. That is
+ * D9's rule ("an import does not open what it imported, and does not disturb what is open")
+ * made true of the interface rather than only of the backend.
+ *
+ * Neither writes anything itself: both are thin screens over the eleven Tauri transfer
+ * commands, and the archive is read and written in Rust.
  */
 import { useCallback, useEffect, useState } from "react";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -51,6 +62,9 @@ import { SchoolSetup } from "./setup/SchoolSetup";
 import { TimetableArea } from "./timetables/TimetableArea";
 import { LogoMark, evaraBrand, resolveLogo, useSchoolLogo } from "./branding";
 import { Banner } from "./ui/Shell";
+import { ExportCampus } from "./transfer/ExportCampus";
+import { ImportCampus } from "./transfer/ImportCampus";
+import { RecoveryNotices } from "./transfer/RecoveryNotices";
 
 export function App() {
   const [project, setProject] = useState<Project | null>(null);
@@ -58,6 +72,17 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
+  /**
+   * Which transfer dialogue is open, if either.
+   *
+   * The two live at opposite ends of the lifecycle on purpose. An **export** is about the
+   * open campus file, so it belongs in the title bar; an **import** produces a new one and
+   * finishes by offering to open it, which would close whatever is open — so it belongs on
+   * the start screen, where nothing is. That keeps D9's rule ("an import does not open what
+   * it imported, and does not disturb what is open") true of the interface and not only of
+   * the backend.
+   */
+  const [transfer, setTransfer] = useState<"export" | "import" | null>(null);
 
   const refresh = useCallback(async () => {
     const [open, list] = await Promise.all([currentProject(), recentProjects()]);
@@ -135,8 +160,15 @@ export function App() {
           error={error}
           onNew={handleNew}
           onOpen={handleOpen}
+          onImport={() => setTransfer("import")}
           onOpenRecent={(path) => run(() => openProject(path))}
           onForget={(path) => run(() => forgetRecentProject(path))}
+        />
+        <ImportCampus
+          open={transfer === "import"}
+          onClose={() => setTransfer(null)}
+          onImported={() => void refresh().catch(() => undefined)}
+          onOpenImported={(path) => run(() => openProject(path))}
         />
       </main>
     );
@@ -149,11 +181,21 @@ export function App() {
         busy={busy}
         error={error}
         onClose={() => run(closeProject)}
+        onExport={() => setTransfer("export")}
         onDismissError={() => setError(null)}
       />
       {/* Keyed by project so switching projects resets every area's state rather
           than showing the previous project's selections against the new one. */}
       <Workspace key={project.projectId} />
+      {/* Keyed by the open file as well: closing one campus and opening another unmounts
+          the dialogue, which unsubscribes its listeners and forgets a finished session
+          rather than leaving a report about a file nobody has open any more. */}
+      <ExportCampus
+        key={`export-${project.projectId}`}
+        open={transfer === "export"}
+        campusName={project.displayName}
+        onClose={() => setTransfer(null)}
+      />
     </div>
   );
 }
@@ -225,9 +267,10 @@ function TitleBar(props: {
   busy: boolean;
   error: string | null;
   onClose: () => void;
+  onExport: () => void;
   onDismissError: () => void;
 }) {
-  const { project, busy, error, onClose, onDismissError } = props;
+  const { project, busy, error, onClose, onExport, onDismissError } = props;
   const { logo } = useSchoolLogo();
 
   return (
@@ -246,6 +289,17 @@ function TitleBar(props: {
       </div>
 
       <div className="titleBarActions">
+        <button
+          type="button"
+          className="secondary"
+          onClick={onExport}
+          disabled={busy}
+          // "campus file", not "campus": a "Campuses and buildings" section is one click
+          // away, and this exports the file rather than one of those.
+          title="Write this campus file to a portable file you can copy or send"
+        >
+          Export campus file…
+        </button>
         <button
           type="button"
           className="secondary"
@@ -287,10 +341,11 @@ function StartScreen(props: {
   error: string | null;
   onNew: () => void;
   onOpen: () => void;
+  onImport: () => void;
   onOpenRecent: (path: string) => void;
   onForget: (path: string) => void;
 }) {
-  const { recents, busy, error, onNew, onOpen, onOpenRecent, onForget } = props;
+  const { recents, busy, error, onNew, onOpen, onImport, onOpenRecent, onForget } = props;
 
   return (
     <section className="panel">
@@ -311,9 +366,16 @@ function StartScreen(props: {
         <button type="button" className="secondary" onClick={onOpen} disabled={busy}>
           Open campus…
         </button>
+        <button type="button" className="secondary" onClick={onImport} disabled={busy}>
+          Import campus…
+        </button>
       </div>
 
       {error && <Banner tone="error">{error}</Banner>}
+
+      {/* What startup recovery did about an interrupted import, if anything. It blocks none
+          of the three actions above: an interrupted import is about one path. */}
+      <RecoveryNotices />
 
       <h2 className="sectionHead">Recent campuses</h2>
       {recents.length === 0 ? (
@@ -332,7 +394,16 @@ function StartScreen(props: {
                 title={entry.path}
               >
                 <strong>{entry.displayName}</strong>
-                <span>{entry.exists ? entry.folder : "File not found"}</span>
+                <span>
+                  {entry.exists ? entry.folder : "File not found"}
+                  {/* D13: two entries carrying one identity are the same campus, copied or
+                      imported twice. Said here as well as at the moment of import, because
+                      that is where somebody is choosing between them — and Evara cannot
+                      merge them, so disclosure is the whole remedy. */}
+                  {entry.duplicateIdentity && (
+                    <em className="recentTwin"> · another copy of this campus is listed</em>
+                  )}
+                </span>
               </button>
               <button
                 type="button"

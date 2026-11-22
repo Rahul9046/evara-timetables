@@ -19,7 +19,7 @@
  * test that holds that line.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import type { Project, RecentProject } from "../ipc/project";
@@ -54,6 +54,30 @@ const openDialog = vi.fn<(options: unknown) => Promise<string | null>>();
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   save: (options: unknown) => saveDialog(options),
   open: (options: unknown) => openDialog(options),
+}));
+
+// The two transfer dialogues have their own tests, which drive the real components against a
+// mocked IPC boundary. Here the shell only has to put them on screen and tell them when, so
+// the boundary is stubbed to the three calls a mounted dialogue makes before anything is
+// clicked: the recovery report, and the listeners a session would subscribe.
+const recoveryReport = vi.fn<() => Promise<unknown[]>>();
+vi.mock("../ipc/transfer", () => ({
+  recoveryReport: () => recoveryReport(),
+  archiveExtension: () => Promise.resolve("evara"),
+  startExport: vi.fn(),
+  exportStatus: vi.fn(),
+  cancelExport: vi.fn(),
+  discardExport: vi.fn(),
+  inspectArchive: vi.fn(),
+  startImport: vi.fn(),
+  importStatus: vi.fn(),
+  cancelImport: vi.fn(),
+  discardImport: vi.fn(),
+  onTransferProgress: () => Promise.resolve(() => undefined),
+  onTransferFinished: () => Promise.resolve(() => undefined),
+  isDestinationConflict: () => false,
+  isTooOldToRead: () => false,
+  isArchiveDamaged: () => false,
 }));
 
 // School Setup has its own tests and needs a backend of its own; the shell only has to
@@ -106,6 +130,7 @@ beforeEach(() => {
   defaultProjectFolder.mockResolvedValue("C:/Schools");
   closeProject.mockResolvedValue(true);
   forgetRecentProject.mockResolvedValue(true);
+  recoveryReport.mockResolvedValue([]);
 });
 
 /** The start screen, once the first read has landed. */
@@ -350,6 +375,94 @@ describe("an open campus", () => {
     expect(screen.getByText(/An open Evara/).textContent).toMatch(
       /campus is a database written continuously/,
     );
+  });
+});
+
+describe("portable campus transfer", () => {
+  it("offers Import on the start screen, where nothing is open", async () => {
+    const user = userEvent.setup();
+    await startScreen();
+
+    const importAction = screen.getByRole("button", { name: "Import campus…" });
+    await user.click(importAction);
+
+    // The dialogue, which does its own work from here. What matters at this level is that
+    // the shell opened it and that nothing was imported by the click itself.
+    expect(await screen.findByRole("heading", { name: "Import a campus" })).toBeTruthy();
+    expect(openDialog).not.toHaveBeenCalled();
+  });
+
+  it("offers Export from the title bar, where a campus file is open", async () => {
+    const user = userEvent.setup();
+    await opened();
+
+    const exportAction = screen.getByRole("button", { name: "Export campus file…" });
+    // "campus file", because School Setup's list of the school's own campuses is one click
+    // away and the tooltip has to say which thing is being exported.
+    expect(exportAction.getAttribute("title")).toBe(
+      "Write this campus file to a portable file you can copy or send",
+    );
+
+    await user.click(exportAction);
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: "Export campus" })).toBeTruthy();
+    // The dialogue names the file it is about: the title bar is behind it and says the
+    // same name, which is why this is scoped to the dialogue.
+    expect(within(dialog).getByText(/Northgate Secondary/)).toBeTruthy();
+  });
+
+  it("keeps Export out of the start screen and Import out of the title bar", async () => {
+    // The two are deliberately in different places: an import finishes by offering to open
+    // what it made, which would close whatever is open — D9's rule, in the interface.
+    await startScreen();
+    expect(screen.queryByRole("button", { name: /^Export/ })).toBeNull();
+
+    cleanup();
+    await opened();
+    expect(screen.queryByRole("button", { name: /^Import/ })).toBeNull();
+  });
+
+  it("says when two recent entries are the same campus, and offers nothing that merges them", async () => {
+    recentProjects.mockResolvedValue([
+      { ...recent("Northgate"), projectId: "p-1", duplicateIdentity: true },
+      {
+        ...recent("Northgate copy"),
+        path: "C:/Backups/Northgate copy.evaraproj",
+        projectId: "p-1",
+        duplicateIdentity: true,
+      },
+    ]);
+    await startScreen();
+
+    // D13: disclosure is the whole remedy. Evara cannot merge two copies, so it never
+    // offers to — and never renumbers one or hides it from the list.
+    const disclosures = screen.getAllByText(/another copy of this campus is listed/);
+    expect(disclosures).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: /merge/i })).toBeNull();
+    expect(recentOpener("Northgate copy")).toBeTruthy();
+  });
+
+  it("shows an unresolved interrupted import without blocking anything else", async () => {
+    recoveryReport.mockResolvedValue([
+      {
+        destination: "C:/Schools/Southmoor.evaraproj",
+        fileName: "Southmoor.evaraproj",
+        outcome: "something Evara did not write is at that path",
+        resolved: false,
+      },
+    ]);
+    await startScreen();
+
+    expect(await screen.findByText(/something Evara did not write/)).toBeTruthy();
+    // An interrupted import is about one path, not about the application.
+    expect((screen.getByRole("button", { name: "New campus" }) as HTMLButtonElement).disabled)
+      .toBe(false);
+    expect((screen.getByRole("button", { name: "Open campus…" }) as HTMLButtonElement).disabled)
+      .toBe(false);
+    expect(
+      (screen.getByRole("button", { name: "Import campus…" }) as HTMLButtonElement).disabled,
+    ).toBe(false);
   });
 });
 
