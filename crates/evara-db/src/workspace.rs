@@ -381,6 +381,94 @@ impl Workspace {
     pub fn forget_recent_project(&mut self, path: &Path) -> Result<bool> {
         self.settings.forget_project(path)
     }
+
+    // ------------------------------------------------------- M10 project transfer (D9/D13)
+
+    /// Records a project in the recent list **without opening it**.
+    ///
+    /// D9: an import must not open what it imported. Auto-opening would close whatever the
+    /// user had open, discarding an edit session, a generation and a repair as a side effect
+    /// of an import — so the interface offers *"Open now"* and the decision stays the
+    /// user's. This is what puts the imported campus somewhere they can find it in the
+    /// meantime.
+    ///
+    /// Takes the identity as a value rather than an `Option`, unlike
+    /// [`Settings::remember_project`]: an import always knows the identity, because the
+    /// payload was opened and read before the destination existed. A caller that does not
+    /// know one has not finished importing.
+    ///
+    /// # Errors
+    ///
+    /// Propagates settings-database failures.
+    pub fn remember_imported_project(&mut self, path: &Path, project_id: Uuid) -> Result<()> {
+        self.settings.remember_project(path, Some(project_id))
+    }
+
+    /// Recent entries already carrying this project identity — D13.
+    ///
+    /// # Errors
+    ///
+    /// Propagates settings-database failures.
+    pub fn projects_with_identity(&self, project_id: Uuid) -> Result<Vec<RecentProject>> {
+        self.settings.projects_with_identity(project_id)
+    }
+
+    /// Where this installation's settings database lives.
+    ///
+    /// Exposed for the transfer protocol, which needs the **replacement journal** for the
+    /// whole of a long import and cannot hold this workspace's lock for it. A worker opens
+    /// its own handle at this path rather than borrowing one across a thread boundary, which
+    /// is the same arrangement the headless CLI has — one journal, one file, two short-lived
+    /// handles, serialised by SQLite's own busy timeout.
+    #[must_use]
+    pub fn settings_path(&self) -> &Path {
+        self.settings.path()
+    }
+
+    /// Whether `path` names the project this workspace currently has open.
+    ///
+    /// Compared by the settings database's own normalisation — absolute, separator- and
+    /// case-folded on Windows — so `C:\Work\School.evaraproj` and
+    /// `c:/work/school.evaraproj` are one project rather than two. A string comparison here
+    /// would be a second answer to a question `evara-db` already answers once.
+    ///
+    /// D13 case 3: an import that would replace the open project is refused, because
+    /// replacing a file SQLite still holds open is how a destination ends up paired with a
+    /// live `-wal` belonging to a database that no longer exists.
+    #[must_use]
+    pub fn is_open_project(&self, path: &Path) -> bool {
+        self.current_project()
+            .is_some_and(|open| crate::settings::same_project_path(&open.path, path))
+    }
+
+    /// Takes a verified snapshot of the open project into `directory`.
+    ///
+    /// Hands back an owned [`Snapshot`](crate::transfer::Snapshot) that holds **no
+    /// connection**, which is what lets the caller release this workspace's lock before
+    /// sealing it into an archive — D8, and the same arrangement `Assembly` has
+    /// (`ARCHITECTURE.md` §3.3).
+    ///
+    /// Writes nothing to the project: the backup API copies pages out inside a read
+    /// transaction, and the watermark, every `rev` and the file's modification time are
+    /// unchanged (T-44).
+    ///
+    /// # Errors
+    ///
+    /// - [`DbError::NoProjectOpen`] if nothing is open.
+    /// - [`DbError::SnapshotCancelled`] if the caller stopped it, in which case no file
+    ///   remains in `directory`.
+    /// - [`DbError::BackupRefused`] if the copy could not be written or verified.
+    pub fn snapshot_open_project(
+        &self,
+        directory: &Path,
+        cancel: &dyn evara_core::scheduling::Cancel,
+        progress: &mut dyn FnMut(crate::transfer::SnapshotProgress),
+    ) -> Result<crate::transfer::Snapshot> {
+        self.open
+            .as_ref()
+            .ok_or(DbError::NoProjectOpen)?
+            .snapshot_into(directory, cancel, progress)
+    }
 }
 
 /// Rejects a path that is not a `.evaraproj` file.

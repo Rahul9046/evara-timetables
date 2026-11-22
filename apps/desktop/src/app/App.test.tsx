@@ -91,6 +91,10 @@ function recent(name: string, exists = true): RecentProject {
     displayName: name,
     lastOpenedAt: "2026-01-01T00:00:00.000Z",
     exists,
+    // Recorded since M10 Stage 4. `duplicateIdentity` is derived in `evara-db` by grouping
+    // the whole recent list, so a single entry is never a duplicate of anything.
+    projectId: null,
+    duplicateIdentity: false,
   };
 }
 

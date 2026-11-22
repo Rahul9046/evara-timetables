@@ -72,6 +72,8 @@ use crate::staging::{ReplacementJournal, Staging, unused_keep_name};
 /// What to do about an occupied destination.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
+// No `#[ts(export)]`, for the reason `progress::Phase` carries.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum OnConflict {
     /// Refuse, naming the file. The interface then offers another name, or Replace.
     Refuse,

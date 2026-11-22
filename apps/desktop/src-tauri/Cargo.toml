@@ -20,7 +20,7 @@ workspace = true
 # Enabled by `evara-typegen` so the IPC DTOs defined in this crate — the setup error
 # contract — are generated alongside the ones from `evara-db`. Off in a release build:
 # the application never needs the generator at runtime. See ADR 0012.
-ts = ["dep:ts-rs", "evara-db/ts", "evara-core/ts", "evara-report/ts"]
+ts = ["dep:ts-rs", "evara-db/ts", "evara-core/ts", "evara-report/ts", "evara-project/ts"]
 
 # The library holds the app; main.rs is a two-line shim. This is the Tauri 2 layout and
 # it keeps the application testable and buildable for mobile targets later.
@@ -69,3 +69,15 @@ evara-db = { workspace = true }
 base64 = { workspace = true }
 evara-project = { workspace = true }
 evara-report = { workspace = true }
+# A transfer stages its snapshot in a directory beside the archive it is writing, so the
+# copy lives on the volume the user already chose and the directory goes away on every
+# path out -- including a `?`. Already in the tree through `evara-project` and `evara-cli`.
+tempfile = { workspace = true }
+
+[dev-dependencies]
+# The command tests run a real export and a real import over a synthetic campus, because the
+# wiring is what is only testable here and a mock of the protocol would assert about the mock.
+# `fixtures` is off by default, so nothing shipped carries it -- the same arrangement
+# `evara-project` has for its own round-trip tests.
+evara-db = { workspace = true, features = ["fixtures"] }
+tempfile = { workspace = true }

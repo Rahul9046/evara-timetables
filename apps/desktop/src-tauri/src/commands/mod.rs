@@ -15,6 +15,12 @@
 //! Stage D adds `import`, which is the spreadsheet roster import rather than the `io` row
 //! above: that one is `.evara`, Evara's own portable format, and is a different feature.
 //!
+//! M10 Stage 4 adds `transfer`, which **is** the `io` row: the eleven `.evara` export, inspect,
+//! import and recovery commands, with `transfer_session` holding the state they need between
+//! commands. The two import modules are deliberately not merged — a spreadsheet is somebody
+//! else's file read row by row into an existing campus, and a `.evara` is a verified snapshot
+//! of Evara's own model that becomes a campus file of its own.
+//!
 //! Phase 8 splits the `validate` row above in two: `edit` is the manual-editing surface — place,
 //! move, unschedule, lock, undo — and `edit_session` is the state it needs between commands.
 //!
@@ -39,6 +45,8 @@ pub mod session;
 pub mod solve;
 pub mod structure;
 pub mod time_model;
+pub mod transfer;
+pub mod transfer_session;
 pub mod views;
 
 use std::sync::MutexGuard;

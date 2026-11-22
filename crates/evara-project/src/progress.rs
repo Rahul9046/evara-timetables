@@ -17,7 +17,24 @@
 /// Named rather than a percentage, because the phases take wildly different times and a
 /// single bar that spends ninety per cent of its life in one phase tells a user less than a
 /// label does.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Serialised in camelCase and generated into TypeScript under the `ts` feature, because the
+/// desktop layer reports it on every `transfer://progress` event. Restating the seven names
+/// in the command crate would be a second vocabulary for one thing -- the duplication
+/// `CLAUDE.md` §2 is about -- so the words a user reads come from here.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "camelCase")]
+// No `#[ts(export)]`: that would make `cargo test` write TypeScript into the working tree.
+// `evara-typegen` names this type explicitly instead -- ADR 0009.
+//
+// Renamed on the wire, and only there. `Phase` is this crate's own word and is unambiguous
+// inside it; in a TypeScript barrel sitting beside `SessionPhase` and `RepairPhase` -- both
+// of which are a *session's* lifecycle rather than a unit of work -- a bare `Phase` would be
+// three things with one name. The desktop layer calls this field `step` for the same reason.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", ts(rename = "TransferStep"))]
 pub enum Phase {
     /// Taking the consistent copy, under the workspace lock.
     Snapshotting,

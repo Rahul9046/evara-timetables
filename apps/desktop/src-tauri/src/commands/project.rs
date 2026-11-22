@@ -63,6 +63,22 @@ pub struct AppState {
     /// stamp describing a file that is no longer open are worse than nothing, because the stamp
     /// would appear to guard something.
     pub repairs: crate::commands::repair_session::RepairSessions,
+    /// Every project transfer this process has started — M10 Stage 4, D9.
+    ///
+    /// Its own lock, for the reasons `generations`, `edits` and `repairs` have one: a
+    /// transfer session holds a path, a report and **no** connection, it outlives the command
+    /// that started it, and polling its progress must not block behind a write.
+    ///
+    /// Cleared when the project is created, opened or closed — see [`project_close`]. An
+    /// export's snapshot describes a campus the user has moved away from, and a session that
+    /// outlived its epoch could be neither read nor cancelled honestly.
+    pub transfers: crate::commands::transfer_session::TransferSessions,
+    /// What startup recovery did to interrupted replacements — D11.
+    ///
+    /// Computed once, before any project is open, and never again: the project that needs
+    /// recovering may be the one that will not open, so it cannot wait for a project to be
+    /// chosen. Read back by `project_recovery_report`.
+    pub recovery: Vec<crate::commands::transfer::RecoveredView>,
     /// Which project is open, as a monotonic counter.
     ///
     /// Bumped on every create, open and close. A generation session records the value it
@@ -76,8 +92,17 @@ pub struct AppState {
 /// Tagged so the frontend matches on `kind` instead of reading English. Every variant
 /// carries `message` so there is one source of wording, and it lives next to the rule
 /// that produced it.
-#[derive(Debug, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize)]
+// `rename_all_fields` as well as `rename_all`, for the reason `SetupError` carries it: a
+// variant's field names cross as JSON keys, and `CLAUDE.md` §3 requires camelCase on the
+// wire. Without it `DestinationIsOpen`'s `file_name` would arrive in snake_case — the one
+// shape a generated type cannot warn about, because it would be generated wrong too.
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum ProjectError {
     /// The project was written by a newer Evara.
     SchemaTooNew {
@@ -115,6 +140,110 @@ pub enum ProjectError {
         /// Message to show.
         message: String,
     },
+    // ------------------------------------------------- M10 project transfer (Stage 4)
+    //
+    // Transfer *is* project lifecycle, so these extend this enum rather than opening a third
+    // one. Each has its own kind because each has its own next step: "ask for a fresh export"
+    // and "this is not an Evara archive" are different sentences with different remedies, and
+    // an interface that could not tell them apart would offer the wrong one.
+    /// The file is not a readable `.evara` archive at all.
+    ///
+    /// Not an archive, no manifest, a manifest that will not parse, or a `format` this build
+    /// has never heard of. The remedy is *check you were sent the right file* — not *ask for
+    /// another copy*, which is [`ProjectError::ArchiveDamaged`]'s.
+    ArchiveUnreadable {
+        /// Message to show.
+        message: String,
+    },
+
+    /// The archive is an Evara archive and its contents do not match its own digests.
+    ///
+    /// Truncation, bit rot, a bad copy, a partially written archive, a substituted payload —
+    /// or a payload that is damaged, non-conforming or referentially broken once opened. The
+    /// remedy is always the same and is always available: ask for a fresh export.
+    ///
+    /// **This is corruption, not authenticity.** Anyone can rewrite a manifest and recompute
+    /// every digest below it, so a clean verification says the bytes arrived intact and says
+    /// nothing at all about who produced them — §6.2, and the import screen says so too.
+    ArchiveDamaged {
+        /// Message to show.
+        message: String,
+    },
+
+    /// The archive's **container** is newer than this build reads.
+    ///
+    /// The first of D2's two version axes, and distinct from [`ProjectError::SchemaTooNew`],
+    /// which is the second. One refusal each, and they are not interchangeable: a container
+    /// this build cannot open is a different problem from data it cannot interpret, and
+    /// collapsing them would tell the user to update for the wrong reason.
+    FormatTooNew {
+        /// Container version found in the archive.
+        found: u32,
+        /// Highest container version this build reads.
+        supported: u32,
+        /// Message to show.
+        message: String,
+    },
+
+    /// The archive needs something this build does not implement.
+    ///
+    /// D3: `capabilities` is derived from the data, so this names a rule the reader could not
+    /// evaluate. A refusal rather than a row quietly dropped — importing the rest would
+    /// produce a campus that looks complete and is not.
+    UnsupportedCapability {
+        /// The first capability not recognised.
+        capability: String,
+        /// Message to show.
+        message: String,
+    },
+
+    /// The destination is the campus this window currently has open.
+    ///
+    /// D13 case 3. Replacing a file SQLite still holds open is how a destination ends up
+    /// paired with a live `-wal` belonging to a database that no longer exists — which opens
+    /// cleanly and is wrong. Refused with the remedy named rather than attempted.
+    DestinationIsOpen {
+        /// The file, for the message and for a screen to highlight.
+        file_name: String,
+        /// Message to show.
+        message: String,
+    },
+
+    /// Evara will not write to that path.
+    ///
+    /// The destination itself is a link, or it is a URI rather than a path. A link in an
+    /// *ancestor* is fine and is deliberately allowed — that is how macOS reaches its own
+    /// temporary directory.
+    DestinationUnsafe {
+        /// The file, for the message.
+        file_name: String,
+        /// Message to show.
+        message: String,
+    },
+
+    /// Something is already using the destination, so the transfer cannot finish.
+    ///
+    /// A rename that could not complete after the bounded retry, a sidecar that could not be
+    /// released, or a replacement of the same destination already in flight. Every one of
+    /// them is answered by *close whatever has it open and try again*, and in each of them
+    /// **nothing has moved**.
+    TransferBlocked {
+        /// The file, for the message.
+        file_name: String,
+        /// Message to show.
+        message: String,
+    },
+
+    /// The transfer stopped because it was asked to.
+    ///
+    /// Its own kind and not [`ProjectError::Failed`]: the user pressed Cancel, nothing was
+    /// written, and presenting a working control as a fault is how a safe operation acquires
+    /// a reputation for being unreliable.
+    Cancelled {
+        /// Message to show.
+        message: String,
+    },
+
     /// Anything else: migration failure, a broken file, a disk problem.
     Failed {
         /// Message to show.
@@ -136,6 +265,13 @@ pub enum ProjectError {
 const NOT_A_CAMPUS: &str = "That file is not an Evara campus.";
 const WRONG_EXTENSION_PREFIX: &str = "An Evara campus must use the";
 const NONE_OPEN: &str = "No campus is open.";
+/// What a cancelled transfer is told, once, here.
+///
+/// Said as a completed fact rather than as a failure: the user pressed Cancel, nothing was
+/// written, and the protocol's guarantees are what make that sentence true rather than a
+/// hope — a cancelled export leaves no `.evara` and no `.part`, and a cancelled import
+/// leaves no campus file and no staging.
+const CANCELLED: &str = "That was stopped before it finished. Nothing was written.";
 
 impl From<DbError> for ProjectError {
     fn from(error: DbError) -> Self {
@@ -162,6 +298,41 @@ impl From<DbError> for ProjectError {
             DbError::NoProjectOpen => Self::NoProjectOpen {
                 message: NONE_OPEN.to_owned(),
             },
+
+            // --------------------------------------- M10 project transfer (Stage 4)
+            //
+            // Mapped here rather than in `commands::transfer`, so there is **one** place a
+            // `DbError` becomes a `ProjectError`. An export reaches these directly from
+            // `snapshot_open_project`; an import reaches them wrapped in
+            // `TransferError::Database`, and that wrapper is unwrapped onto this impl rather
+            // than classified a second time.
+            DbError::SnapshotCancelled => Self::Cancelled {
+                message: CANCELLED.to_owned(),
+            },
+            // The archive is a database and a project and is still unusable. One sentence,
+            // one remedy, and the remedy is always available: ask for a fresh export. The
+            // `detail` and the version are forwarded because they are the library's own
+            // words about the data, not engine wording about SQLite.
+            //
+            // `UnknownSchemaVersion` joins them: the payload claims a version this build has
+            // no migration for, which means the archive was not assembled by Evara — damage
+            // in the only sense a user can act on.
+            DbError::PayloadCorrupt { .. }
+            | DbError::ReferentialDamage { .. }
+            | DbError::SchemaDoesNotConform { .. }
+            | DbError::UnknownSchemaVersion { .. } => Self::ArchiveDamaged { message },
+            DbError::RenameBlocked { name, .. } => Self::TransferBlocked {
+                file_name: name.clone(),
+                message,
+            },
+            DbError::DestinationPathUnsafe { name, .. } => Self::DestinationUnsafe {
+                file_name: name.clone(),
+                message,
+            },
+            // `BackupRefused` is deliberately **not** listed: the safety copy a schema
+            // rebuild needs could not be made, so nothing was changed, and its own wording
+            // already says exactly that while naming no path and no engine detail. The
+            // wildcard below forwards it, which is the behaviour wanted.
             // Everything else is an internal failure. These carry engine detail in their
             // source chain, so their own wording is replaced rather than forwarded.
             DbError::Open { .. } | DbError::Internal(_) | DbError::Migration(_) => Self::Failed {
@@ -175,8 +346,9 @@ impl From<DbError> for ProjectError {
 }
 
 /// A project as the interface sees it.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ProjectView {
     /// Stable project identifier.
     pub project_id: String,
@@ -213,8 +385,9 @@ impl From<ProjectSummary> for ProjectView {
 }
 
 /// An entry in the recent-project list.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct RecentProjectView {
     /// Full path, needed to reopen it.
     pub path: String,
@@ -227,6 +400,17 @@ pub struct RecentProjectView {
     /// Whether the file is still there. A missing entry stays listed so the user can
     /// decide to forget it.
     pub exists: bool,
+    /// The project's identity, where this installation recorded one.
+    ///
+    /// `null` for an entry remembered before identities were recorded. Carried so a screen
+    /// can say *which* campus two entries are, rather than only that they are the same one.
+    pub project_id: Option<String>,
+    /// Whether another remembered entry carries the same identity — D13.
+    ///
+    /// Derived in `evara-db` by grouping the whole list, never stored. Evara cannot merge two
+    /// copies of one campus, so the remedy for a duplicate is disclosure, and the disclosure
+    /// belongs in the recent list itself rather than only at the moment of import.
+    pub duplicate_identity: bool,
 }
 
 impl From<RecentProject> for RecentProjectView {
@@ -241,14 +425,27 @@ impl From<RecentProject> for RecentProjectView {
             display_name: recent.display_name,
             last_opened_at: recent.last_opened_at,
             exists: recent.exists,
+            project_id: recent.project_id.map(|id| id.to_string()),
+            duplicate_identity: recent.duplicate_identity,
         }
     }
 }
 
-type CommandResult<T> = Result<T, ProjectError>;
+pub(crate) type CommandResult<T> = Result<T, ProjectError>;
 
 /// Locks the workspace, failing loudly if a previous command panicked while holding it.
-fn lock<'a>(state: &'a State<'_, AppState>) -> CommandResult<std::sync::MutexGuard<'a, Workspace>> {
+pub(crate) fn lock<'a>(
+    state: &'a State<'_, AppState>,
+) -> CommandResult<std::sync::MutexGuard<'a, Workspace>> {
+    lock_state(state)
+}
+
+/// Locks the workspace of a plain [`AppState`].
+///
+/// The body of [`lock`], reached without a Tauri `State` guard so the transfer commands'
+/// logic can be driven in a test. `State` derefs to its inner value, so the two are the same
+/// lock and there is no second poisoning policy.
+pub(crate) fn lock_state(state: &AppState) -> CommandResult<std::sync::MutexGuard<'_, Workspace>> {
     state.workspace.lock().map_err(|_| ProjectError::Failed {
         message: "Evara is in an inconsistent state. Please restart the application.".to_owned(),
     })
@@ -263,6 +460,7 @@ pub fn project_create(state: State<'_, AppState>, path: PathBuf) -> CommandResul
     state.generations.clear();
     state.edits.clear();
     state.repairs.clear();
+    state.transfers.clear();
     state.epoch.bump();
     let mut workspace = lock(&state)?;
     Ok(workspace.create_project(&path)?.into())
@@ -274,6 +472,7 @@ pub fn project_open(state: State<'_, AppState>, path: PathBuf) -> CommandResult<
     state.generations.clear();
     state.edits.clear();
     state.repairs.clear();
+    state.transfers.clear();
     state.epoch.bump();
     let mut workspace = lock(&state)?;
     Ok(workspace.open_project(&path)?.into())
@@ -294,6 +493,7 @@ pub fn project_close(state: State<'_, AppState>) -> CommandResult<bool> {
     state.generations.clear();
     state.edits.clear();
     state.repairs.clear();
+    state.transfers.clear();
     state.epoch.bump();
     let mut workspace = lock(&state)?;
     Ok(workspace.close_project())
