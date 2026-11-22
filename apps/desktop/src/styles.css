@@ -2241,3 +2241,122 @@ dialog.confirm h3 {
 .importPromises strong {
   color: var(--text);
 }
+
+/* ---- portable campus transfer (M10 Stage 5) ------------------------------- */
+
+/*
+ * The export and import dialogues. Wider than a confirmation, because an archive's
+ * description is a `.facts` grid and a replacement decision needs the sentence that names
+ * the kept copy; and scrollable, because the import's details, identity warnings and
+ * integrity notice together can exceed a short window.
+ */
+dialog.confirm.xfer {
+  max-width: 680px;
+  max-height: min(86vh, 920px);
+  overflow-y: auto;
+}
+
+dialog.confirm.xfer .facts {
+  margin: 0 0 12px;
+  padding: 13px 15px;
+  gap: 11px;
+}
+
+dialog.confirm.xfer .banner {
+  margin: 0 0 10px;
+}
+
+dialog.confirm.xfer h4 {
+  font-size: 13.5px;
+  margin: 0 0 6px;
+}
+
+.xferProgress {
+  margin: 4px 0 12px;
+}
+
+/*
+ * The same seven pixels of bar the Generate screen uses, defined here rather than borrowed
+ * from `timetables.css`: the shell must not depend on the Timetables area's stylesheet for
+ * its own chrome. A shared progress primitive in `app/ui` would remove the repetition and is
+ * the right follow-up; it would also touch three timetable screens, which is not this
+ * stage's to do.
+ */
+.xferBar {
+  height: 7px;
+  border-radius: 4px;
+  background: var(--border-subtle);
+  overflow: hidden;
+}
+
+.xferBarFill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 120ms linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xferBarFill {
+    transition: none;
+  }
+}
+
+.xferBarText {
+  margin: 7px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The replacement decision, boxed so it reads as a question rather than as more detail. */
+.xferReplace,
+.xferConflicts {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.xferReplace p,
+.xferConflicts p {
+  margin: 0 0 6px;
+}
+
+.xferConflicts ul {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+
+.xferConflicts li {
+  margin: 2px 0;
+}
+
+/* ---- interrupted-import notices ------------------------------------------ */
+
+.xferRecovery {
+  margin: 18px 0 0;
+  text-align: left;
+}
+
+.xferRecovery .banner {
+  margin: 0 0 8px;
+}
+
+/* A resolved note and its Dismiss sit on one line; the note takes the room. */
+.xferRecoveryRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.xferRecoveryRow .banner {
+  flex: 1 1 auto;
+}
+
+/* The duplicate-identity disclosure in a recent row. */
+.recentTwin {
+  font-style: normal;
+  color: var(--text-faint);
+}

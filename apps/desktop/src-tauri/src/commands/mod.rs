@@ -93,7 +93,9 @@ pub fn app_info() -> Result<AppInfo, String> {
     Ok(AppInfo {
         version: env!("CARGO_PKG_VERSION"),
         debug: cfg!(debug_assertions),
-        phase: "8B — automated timetable repair and partial regeneration",
+        // Changed in M10 Stage 5, which is the stage a user can reach the phase's work
+        // from: Stages 1-4 were a library, a CLI and eleven commands with no screen.
+        phase: "9 — portable campus transfer",
     })
 }
 
