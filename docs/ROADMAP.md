@@ -1000,6 +1000,14 @@ wanting a project column would have been a signal the design went wrong.
 
 **Closes M1-19.**
 
+Architecture: [M11-TIMETABLE-OUTPUT-PROPOSAL.md](M11-TIMETABLE-OUTPUT-PROPOSAL.md) — **under
+review, nothing implemented.** It adds formatted `.xlsx` output and bulk exports to the three
+lines above, and it corrects two of them: the print stylesheet is **one** with per-scope
+modifiers rather than one per view, and the renderer trait covers the two formats Evara renders
+itself rather than all three. Its §7 is the one part worth reading before the stage starts —
+`window.print()` is **denied on macOS** in this repository today, because Tauri reroutes it to a
+command `core:default` does not permit.
+
 ---
 
 ## Phase 11 — Packaging
