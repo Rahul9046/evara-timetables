@@ -514,18 +514,21 @@ function Cell(props: {
             onDragStart={() => editing?.onPickUp(lesson.activityId)}
             onDragEnd={() => editing?.onPickUp(null)}
           >
-            <span className="ttLessonName">
-              {lesson.label === null ? lesson.sectionId : lesson.label.short}
-            </span>
-            {lesson.teachers.length > 0 ? (
-              <span className="ttLessonTeachers">{lesson.teachers.join(", ")}</span>
+            {/*
+              Every line below is `lesson.lines`, composed once in Rust. The screen used to
+              join the caption, the teacher list and the room name itself; since M11 Stage 1 it
+              reads the same `CellLines` the CSV, the workbook and the printed page read, so
+              "the screen says one thing and the printout says another" is not expressible.
+              §5.6 of the output proposal, and ADR 0044's rule that a label is composed once.
+            */}
+            <span className="ttLessonName">{lesson.lines.caption}</span>
+            {lesson.lines.teachers.length > 0 ? (
+              <span className="ttLessonTeachers">{lesson.lines.teachers.join(", ")}</span>
             ) : null}
-            {lesson.room === null ? null : (
-              <span className="ttLessonRoom">{lesson.room.name}</span>
+            {lesson.lines.room === null ? null : (
+              <span className="ttLessonRoom">{lesson.lines.room}</span>
             )}
-            <span className="ttLessonTime">
-              {lesson.startsAt}–{lesson.endsAt}
-            </span>
+            <span className="ttLessonTime">{lesson.lines.time}</span>
             {lesson.defect === null ? null : (
               <span className="ttLessonDefect">
                 <span aria-hidden="true">⚠</span> {describeDefect(lesson)}
@@ -623,9 +626,15 @@ function describeCell(
       : `${dayLabel}, ${periodLabel}`;
 
   const parts = held.map((lesson) => {
-    const name = lesson.label === null ? "an unnamed lesson" : lesson.label.short;
-    const who = lesson.teachers.length > 0 ? `, ${lesson.teachers.join(" and ")}` : "";
-    const room = lesson.room === null ? "" : `, ${lesson.room.name}`;
+    // The *names* are `lesson.lines`, so what is spoken and what is shown cannot drift. The
+    // *joins* are not: " and " and "to" are prose for a listener, where the visible cell uses
+    // a comma and an en dash. A screen reader reading a UUID aloud is noise, so an unlabelled
+    // section is still announced as unnamed while the cell shows its identifier — the same
+    // split the component had before M11.
+    const name = lesson.label === null ? "an unnamed lesson" : lesson.lines.caption;
+    const who =
+      lesson.lines.teachers.length > 0 ? `, ${lesson.lines.teachers.join(" and ")}` : "";
+    const room = lesson.lines.room === null ? "" : `, ${lesson.lines.room}`;
     const defect = lesson.defect === null ? "" : `. ${describeDefect(lesson)}`;
     return `${name}${who}${room}, ${lesson.startsAt} to ${lesson.endsAt}${defect}`;
   });

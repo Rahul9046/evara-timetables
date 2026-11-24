@@ -643,6 +643,39 @@ impl UnplacedCause {
             Self::InputRejected => "input-rejected",
         }
     }
+
+    /// Every cause, in the order the variants are declared.
+    ///
+    /// Declared once so that [`UnplacedCause::from_key`] and a test that pins the vocabulary
+    /// read the same list, rather than two that can disagree about a cause added later.
+    #[must_use]
+    pub const fn all() -> &'static [Self] {
+        &[
+            Self::NoResolvedBellSchedule,
+            Self::NoContiguousRun,
+            Self::NoCandidateRoom,
+            Self::AllCandidatesUnavailable,
+            Self::BlockedByPlacements,
+            Self::NotReached,
+            Self::InputRejected,
+        ]
+    }
+
+    /// The cause one stored key names, or `None` where this build does not know it.
+    ///
+    /// The inverse of [`UnplacedCause::key`], and the **one** implementation of it: a stored
+    /// key reaches `evara-db`'s `UnscheduledRecord::is_impossible` and
+    /// `evara-report`'s unscheduled appendix, and a second list in either would be a second
+    /// place for *"is this impossible?"* to answer differently.
+    ///
+    /// `None` is deliberately **not** impossibility. A key written by a newer build is
+    /// unrecognised, and reporting an unrecognised cause as proof that no timetable can place
+    /// the occurrence is exactly the overclaiming this type's header refuses — see
+    /// [`UnplacedCause::is_impossible`].
+    #[must_use]
+    pub fn from_key(key: &str) -> Option<Self> {
+        Self::all().iter().copied().find(|cause| cause.key() == key)
+    }
 }
 
 #[cfg(test)]
@@ -858,20 +891,41 @@ mod tests {
 
     #[test]
     fn unplaced_cause_keys_are_distinct() {
-        let all = [
-            UnplacedCause::NoResolvedBellSchedule,
-            UnplacedCause::NoContiguousRun,
-            UnplacedCause::NoCandidateRoom,
-            UnplacedCause::AllCandidatesUnavailable,
-            UnplacedCause::BlockedByPlacements,
-            UnplacedCause::NotReached,
-            UnplacedCause::InputRejected,
-        ];
-        let mut keys: Vec<&str> = all.iter().map(|c| c.key()).collect();
+        let mut keys: Vec<&str> = UnplacedCause::all().iter().map(|c| c.key()).collect();
         let before = keys.len();
         keys.sort_unstable();
         keys.dedup();
         assert_eq!(keys.len(), before);
+    }
+
+    #[test]
+    fn every_cause_is_in_the_declared_list() {
+        // The list `from_key` reads. A cause added to the enum and not to `all()` would be
+        // unrecognised by every reader of a stored key, which is a silent hole rather than a
+        // compile error — so the count is pinned here.
+        assert_eq!(
+            UnplacedCause::all().len(),
+            7,
+            "add a new cause to `UnplacedCause::all()` as well as to the enum"
+        );
+    }
+
+    #[test]
+    fn a_cause_key_round_trips() {
+        for cause in UnplacedCause::all() {
+            assert_eq!(UnplacedCause::from_key(cause.key()), Some(*cause));
+        }
+    }
+
+    #[test]
+    fn an_unrecognised_key_is_not_reported_as_impossible() {
+        // A key written by a newer build. Reporting it as impossibility would claim that no
+        // timetable can place the occurrence, on no evidence at all.
+        assert_eq!(UnplacedCause::from_key("a-cause-from-a-newer-build"), None);
+        assert!(
+            !UnplacedCause::from_key("a-cause-from-a-newer-build")
+                .is_some_and(UnplacedCause::is_impossible)
+        );
     }
 
     #[test]

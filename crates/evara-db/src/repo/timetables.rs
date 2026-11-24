@@ -241,9 +241,14 @@ impl UnscheduledRecord {
     /// answer is a pure function of the cause, and a stored copy is a second place for it to
     /// disagree. An unrecognised key — written by a newer build — is **not** reported as
     /// impossible, because overclaiming is the failure this distinction exists to prevent.
+    ///
+    /// [`UnplacedCause::from_key`] is the one implementation of the lookup, in `evara-core`
+    /// beside [`UnplacedCause::key`] that wrote the string — `evara-report`'s unscheduled
+    /// appendix asks the same question, and a second list here would be a second place for it
+    /// to answer differently.
     #[must_use]
     pub fn is_impossible(&self) -> bool {
-        cause_from_key(&self.cause).is_some_and(UnplacedCause::is_impossible)
+        UnplacedCause::from_key(&self.cause).is_some_and(UnplacedCause::is_impossible)
     }
 }
 
@@ -1048,21 +1053,6 @@ struct UnscheduledProjection {
     activity_id: Uuid,
     cause: String,
     diagnostic_code: Option<String>,
-}
-
-/// The cause a stored key names.
-fn cause_from_key(key: &str) -> Option<UnplacedCause> {
-    [
-        UnplacedCause::NoResolvedBellSchedule,
-        UnplacedCause::NoContiguousRun,
-        UnplacedCause::NoCandidateRoom,
-        UnplacedCause::AllCandidatesUnavailable,
-        UnplacedCause::BlockedByPlacements,
-        UnplacedCause::NotReached,
-        UnplacedCause::InputRejected,
-    ]
-    .into_iter()
-    .find(|cause| cause.key() == key)
 }
 
 /// A dense index that resolves to no stored row.

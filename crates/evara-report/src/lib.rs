@@ -19,6 +19,7 @@
 //! | --- | --- |
 //! | [`projection`] | *what occupies Day A period 2, and in which grids?* |
 //! | [`findings`] | *what is wrong with this arrangement, in words the rule chose?* |
+//! | [`output`] | *what goes into a file, and what must a reader be told?* (M11) |
 //!
 //! # One projection, two callers
 //!
@@ -39,22 +40,38 @@
 //!
 //! # Not here, and when
 //!
-//! The renderer trait and the HTML, CSV and PDF backends are ROADMAP Phase 10. A trait with
-//! one implementation and no second caller is a guess about the second, so the projections
-//! are shaped to be rendered without being shaped by a renderer — which is what the original
-//! header promised and what Phase 10 collects on.
+//! Phase 10 is what the header above was written for, and M11 collects on it in stages. The
+//! shared artefact arrived first: [`output::OutputDocument`] is composed once and read by
+//! every format, and [`output::DocumentRenderer`] is declared over the two formats Evara
+//! renders itself. **Neither renderer is written yet** — the CSV and XLSX backends, the print
+//! stylesheet and the print view are M11 Stage 2 and Stage 3. A trait with one implementation
+//! and no second caller is a guess about the second, and a placeholder implementation added to
+//! demonstrate a trait is the same guess with a test beside it, so the trait ships with none.
+//!
+//! What still does not live here, and will not: a file. A renderer returns **bytes**. Judging
+//! a destination, claiming it and renaming onto it belongs to the command layer and the CLI,
+//! which is where `DestinationClaim` already is.
 
 pub mod findings;
+pub mod output;
 pub mod projection;
 pub mod repair;
 
 pub use findings::{
     FindingCounts, FindingEntity, FindingSource, FindingView, StoredFinding, explain_all,
 };
+pub use output::{
+    CellLesson, CompositionInput, ConflictLine, DefectLine, Disclosure, DisclosureCode,
+    DisclosureEntity, DocumentFinding, DocumentHeader, DocumentIdentity, DocumentLogo,
+    DocumentRenderer, Orientation, OutputCell, OutputCellKind, OutputDocument, OutputError,
+    OutputFormat, OutputOptions, OutputPanel, OutputSheet, PageSetup, PaperSize, RunProvenance,
+    UnscheduledLine, UnscheduledOccurrence, compose,
+};
 pub use projection::{
-    CellContent, GridConflict, GridPanel, LessonFlags, PinReason, ProjectedCellRef, ProjectedDay,
-    ProjectedLesson, ProjectedPeriod, ProjectionInput, ProjectionScope, ScheduleAxis, ScopeGrid,
-    ScopeKind, TimetableCell, TimetableProjection, in_scope, lay_out, no_flags, project,
+    CellContent, CellDetail, CellLines, GridConflict, GridPanel, LessonFlags, PinReason,
+    ProjectedCellRef, ProjectedDay, ProjectedLesson, ProjectedPeriod, ProjectionInput,
+    ProjectionScope, ScheduleAxis, ScopeGrid, ScopeKind, StudentIndex, TimetableCell,
+    TimetableProjection, in_scope, in_scope_indexed, lay_out, lay_out_many, no_flags, project,
 };
 pub use repair::{
     Attribution, ChangeCounts, ChangeKind, MovedParts, OccurrenceChange, PlacementView, RepairDiff,

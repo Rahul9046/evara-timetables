@@ -29,6 +29,7 @@ export type { CandidateCell } from "./CandidateCell";
 export type { CandidateGrid } from "./CandidateGrid";
 export type { CandidateRoom } from "./CandidateRoom";
 export type { CellContent } from "./CellContent";
+export type { CellLines } from "./CellLines";
 export type { ChangeCounts } from "./ChangeCounts";
 export type { ChangeKind } from "./ChangeKind";
 export type { Choice } from "./Choice";
