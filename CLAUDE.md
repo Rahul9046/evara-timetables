@@ -391,32 +391,37 @@ disagree about whether a placement is legal, the product is broken.
   rule in the next four bullets is specified in
   [M10-PROJECT-TRANSFER-PROPOSAL.md](docs/M10-PROJECT-TRANSFER-PROPOSAL.md), whose §0.2 is the
   authoritative replacement specification and whose §C.10 records what Stage 2 built, measured
-  and corrected. ADRs 0053–0059 are Stage 6's and are named here as *to come* rather than
-  linked, so no reference dangles. The
+  and corrected; [PROJECT-FORMAT.md](docs/PROJECT-FORMAT.md) documents the format as shipped
+  and [adr/0053](docs/adr/0053-the-payload-is-a-verified-sqlite-snapshot.md)–[0059](docs/adr/0059-archive-integrity-is-corruption-not-authenticity.md)
+  are the decisions. The
   archive is exactly three entries — `manifest.json`, `checksums.json`,
   `payload/project.evaraproj` — opened by **exact name**, never by iterating the directory and
   never through an extract-to-directory API, so a traversal is unexpressible rather than
-  defended against (D6, and ADR 0055 when Stage 6 writes it). The payload
+  defended against (D6, [adr/0055](docs/adr/0055-an-archive-is-read-by-name-and-never-extracted.md)).
+  The payload
   streams to a path **Evara chose**, and no byte of archive content contributes to any path.
   The integrity model is **two levels with one root** and the manifest is the deliberately
   unverified one: these digests detect **corruption, not authenticity** — anyone can rewrite a
   manifest and recompute every digest below it — and the interface says so at the point of
-  import. Two version axes, one refusal each: `formatVersion` is the container,
+  import ([adr/0059](docs/adr/0059-archive-integrity-is-corruption-not-authenticity.md)).
+  Two version axes, one refusal each: `formatVersion` is the container,
   `payload.schemaVersion` is the data, and a disagreement between the manifest and the payload
-  is a refusal because it means the archive was not assembled by Evara. `capabilities` is
+  is a refusal because it means the archive was not assembled by Evara
+  ([adr/0054](docs/adr/0054-two-version-axes-one-refusal-each.md)). `capabilities` is
   **derived from the data**, so a rule a reader cannot evaluate is a refusal naming it and
   never a row quietly dropped.
 - **An import stages, verifies, migrates and renames — and the project it replaces is kept.**
   Verification runs V0 (hardened read-only audit, then schema conformance against a reference
   **this binary generates**, and only then the identity read), V1 (migrate), V2 (verify what
   migration produced), in that order, first failure stopping everything
-  (D10, §6.1, and ADR 0056 to come). An import **rebuilds nothing** and takes no safety backup
-  of the staged file, because the archive is a checksummed copy of the source (D7, ADR 0057 to
-  come). A destination is only
+  (D10, §6.1, [adr/0056](docs/adr/0056-a-payload-is-audited-against-a-generated-reference.md)).
+  An import **rebuilds nothing** and takes no safety backup
+  of the staged file, because the archive is a checksummed copy of the source
+  (D7, [adr/0057](docs/adr/0057-an-import-is-staged-verified-and-renamed.md)). A destination is only
   ever written **by a rename**; staging is a sibling of it so no rename crosses a volume; and
   `<stem>.replaced-<stamp>.evaraproj` is **never deleted by any code path**, success or failure
-  (D11 **as amended by §0.2's three safeguards — never its superseded text**, and ADR 0058 to
-  come). An existing
+  (D11 **as amended by §0.2's three safeguards — never its superseded text**,
+  [adr/0058](docs/adr/0058-replacement-is-journalled-and-non-destructive.md)). An existing
   zero-length destination is **occupied**, not creatable — deliberately unlike
   `Database::create` — and an import never opens what it imported.
 - **Deciding what is at a path must not change it.** Whether a file is a project is answered
@@ -490,6 +495,6 @@ that into a red build rather than a wrong timetable.
 | `cargo run -p evara-cli -- evaluate --project <path> --timetable <id>` | Score a **stored** timetable against the inputs as they now stand; writes nothing |
 | `cargo run -p evara-cli -- validate --project <path> --list` | What schools, cycles and terms a `.evaraproj` holds, with their identifiers |
 | `cargo run -p evara-cli -- validate --project <path> --school <id> --cycle <id>` | Pre-solve validation of a **real project**, read-only — migrates nothing, writes nothing |
-| `cargo run -p evara-cli -- export --project <path> --to <archive.evara>` | Write a portable `.evara`. Read-only on the source; **refuses an existing archive** rather than overwriting it |
+| `cargo run -p evara-cli -- export --project <path> --to <archive.evara>` | Write a portable `.evara`. Read-only on the source; **claims the destination atomically**, so an existing archive — a zero-length one included — is refused rather than overwritten |
 | `cargo run -p evara-cli -- inspect <archive.evara>` | What an archive says about itself and whether this build can read it. Writes nothing, imports nothing |
 | `cargo run -p evara-cli -- import <archive.evara> --to <path.evaraproj> [--replace]` | Read an archive into a project file. Refuses an occupied destination without `--replace`, and **never deletes the project it replaced** |

@@ -1,7 +1,32 @@
 # ADR 0004 — `*.evara` is a versioned ZIP of JSON, separate from external interchange
 
-- Status: **Accepted**
+- Status: **Accepted** — the **container decision is superseded in part** by
+  [ADR 0053](0053-the-payload-is-a-verified-sqlite-snapshot.md) and the version axes are made
+  precise by [ADR 0054](0054-two-version-axes-one-refusal-each.md)
 - Date: 2026-10-06
+
+> ## What of this record still stands
+>
+> **The container's contents changed; nothing else did.** `*.evara` is still a versioned ZIP
+> with a `manifest.json` and a `checksums.json`, still separate from external interchange, and
+> every clause below about `formatVersion`'s inviolable meaning, `capabilities`, UUID and
+> provenance preservation, the atomic finalise by rename, and additive-versus-breaking changes
+> survives unaltered.
+>
+> Four clauses are superseded, each by a record that says why:
+>
+> | Here | Actually | Record |
+> | --- | --- | --- |
+> | a `data/` directory of JSON sections, and optional `attachments/` | one entry, `payload/project.evaraproj`, carrying a verified SQLite snapshot. `attachments/` is removed from v1 and reserved by name — a school logo is a `school_logo` row (ADR 0016) | [0053](0053-the-payload-is-a-verified-sqlite-snapshot.md) |
+> | *"`change_log` is not exported"* | **it travels complete.** Excluding it from a page-level copy would mean post-processing a verified snapshot, giving up the property the snapshot is for. Measured at 26.2% of a realistic project's occupied pages | [0053](0053-the-payload-is-a-verified-sqlite-snapshot.md) §1 |
+> | a chain of pure `formatVersion` migrations, then inserts into a fresh database in one transaction | the payload is migrated **in staging** by the project's own migration chain, then **renamed** into place. Nothing is inserted row by row | [0057](0057-an-import-is-staged-verified-and-renamed.md) |
+> | *"rebuild derived state (timeslot integrity, score, violations)"* | **an import rebuilds nothing.** Re-scoring needs a compiled `Problem`, which can legitimately fail for a school mid-setup, and it would write a `REVALIDATION` row where the archive carries an immutable `GENERATION` one. Stored findings travel in the payload | [0057](0057-an-import-is-staged-verified-and-renamed.md) §3 |
+>
+> The *"Alternatives considered"* entry that rejected a SQLite snapshot is the one ADR 0053
+> argues with directly: the migration burden it names is one `CLAUDE.md` §3 already requires
+> the product to carry, so it is not inherited by this choice.
+>
+> [PROJECT-FORMAT.md](../PROJECT-FORMAT.md) documents the implemented format.
 
 ## Context
 

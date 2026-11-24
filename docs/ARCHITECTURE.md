@@ -63,13 +63,23 @@ dependency edge is `-> core, constraints` rather than `-> core` alone, which
 **rule's own** `explain()`, because wording composed in a report would drift from the check that
 produced it. It still opens nothing — no SQLite, no file, no network — and judges nothing. The
 renderers the name promises are Phase 10's.
-`evara-cli` is a headless binary used for tests, fixtures and solver benchmarking. Two of
-its subcommands exist. `evara fixture` writes a synthetic scheduling problem as JSON: **test
-data and not a timetable**, read from no project. `evara validate` runs pre-solve validation
-over a fixture, or — since M4 — over a real `.evaraproj`, through
-`Database::open_for_inspection`, which runs no migration, recreates no trigger, stamps no
-metadata and hands back a connection SQLite refuses every write through. Neither subcommand
-generates a timetable; nothing in Evara does yet.
+Since M10 `evara-project` is real: it owns the portable `.evara` format — the container, its
+reader and the order that reader verifies in, the staging lifecycle, the replacement protocol
+and its recovery. Its dependency edge is `-> core, db`, because the payload **is** a project
+database and standing one up means migrating it; the format is `evara-project`'s and the engine
+that opens a database is `evara-db`'s, which is the split M10's D12 records. It links `zip`,
+and nothing else in the tree links `zip`. **No driver type crosses its public API**: no `zip`
+type and no `rusqlite` type appears in any public signature or in `TransferError`, asserted the
+way `evara-db` asserts the same rule — by not having the dev-dependency, so a test could not
+name one. See [PROJECT-FORMAT.md](PROJECT-FORMAT.md).
+
+`evara-cli` is a headless binary used for tests, fixtures, solver benchmarking and headless
+transfer. Eight subcommands exist: `fixture` (writes a synthetic scheduling problem as JSON —
+**test data and not a timetable**, read from no project), `validate`, `evaluate`, `generate`,
+`save`, and M10's `export` / `inspect` / `import`. Everything that reads somebody's live
+project without intending to change it goes through `Database::open_for_inspection`, which runs
+no migration, recreates no trigger, stamps no metadata and hands back a connection SQLite
+refuses every write through. `save` and `import` are the two that write, and they say so.
 
 `evara-import` is the one with a dependency set nothing else should inherit — `calamine`,
 `csv`, `rust_xlsxwriter` — which is why it is its own crate rather than a module of
@@ -113,7 +123,11 @@ never a second hand-maintained model.
    also owns the **scheduling vocabulary** — `scheduling::Problem` and its facts, `Placement`,
    `Assignment`, the three-state `Overlap`, `ExpectedAttendance`, the availability index, the
    diagnostic codes and `SolveOutcome` — for the reason the layering already implies: four
-   crates have to agree on those types, so they sit underneath all four. The deterministic
+   crates have to agree on those types, so they sit underneath all four. Since M10 it also owns
+   **`Cancel`**, which `evara-solver` re-exports: a transfer is cancellable and
+   `evara-project` may not depend on the solver, so the trait that expresses *"has the user
+   asked to stop?"* sits under both. There is provably one trait rather than two that look
+   alike — a single `impl` satisfies both paths. The deterministic
    synthetic-school generator sits beside them behind a `fixtures` feature the desktop binary
    does not enable. No rule is evaluated and nothing is solved there;
    [SCHEDULING-FIXTURES.md](SCHEDULING-FIXTURES.md) §1 says what each later milestone adds.
@@ -148,10 +162,22 @@ never a second hand-maintained model.
    and a name — the name only to choose a parser.
 6. `evara-integrations` may depend on `evara-core` and nothing else. Import adapters
    produce core types; the core never references a vendor.
-7. `src-tauri` orchestrates. Business logic does not live in command handlers.
+7. `evara-project` depends on `evara-core` + `evara-db`. It owns the portable `.evara` format
+   and nothing else: the container, the reader's verification order, the entry policy and the
+   byte caps, the staging lifecycle, the replacement protocol and its recovery. It is
+   deliberately **not** the place for other vendors' formats — that is `evara-integrations`,
+   and conflating the two is the mistake the split exists to prevent. Three rules bind it. It
+   **opens no project for a caller**: `seal` takes an owned `Snapshot` by value, which is what
+   lets a command thread hold the workspace lock for the snapshot alone and release it before
+   a byte is compressed. It **forms no opinion the reader owns** — no digest comparison, no
+   schema judgement and no capability decision happens anywhere else, because an opinion
+   formed twice could tell a user an archive was fine that the import then refused. And it
+   **never derives a filesystem path from an archive**
+   ([adr/0055](adr/0055-an-archive-is-read-by-name-and-never-extracted.md)).
+8. `src-tauri` orchestrates. Business logic does not live in command handlers.
 
-A rule in the UI, SQL in the solver, or a vendor name in the core are all architecture
-bugs.
+A rule in the UI, SQL in the solver, a vendor name in the core, or an archive's bytes reaching
+a filesystem path are all architecture bugs.
 
 ### The write contract is one of these rules
 

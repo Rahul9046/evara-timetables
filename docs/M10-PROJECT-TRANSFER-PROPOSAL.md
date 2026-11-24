@@ -3,11 +3,15 @@
 - Status: **Revision 2 — APPROVED FOR IMPLEMENTATION**, 2026-10-29, subject to the three
   mandatory safeguards in [§0.2](#02-mandatory-safeguards-from-the-second-review). Approvals
   **A1–A5 granted**; **A6 and A7 deferred**.
-- Stage progress: **Stage P complete** (PR #35), **Stage 1 complete** (PR #37),
-  **Stage 2 complete** — the `.evara` container, its reader, the replacement protocol and its
-  recovery, with T-60, T-83 and §7.2's inflation figure **measured**
-  ([§C.10](#c10-stage-2-what-was-built-measured-and-corrected)). Stages 3–6 not started: no
-  CLI command, no Tauri command and no screen.
+- Stage progress: ✅ **every stage complete.** P (PR #35), 1 (PR #37), 2 (PR #41, with T-60,
+  T-83 and §7.2's inflation figure **measured** —
+  [§C.10](#c10-stage-2-what-was-built-measured-and-corrected)), 3 (PR #44), 4 (PR #47),
+  T-41's historical matrix (PR #46), the CLI's atomic export claim (PR #48), 5 (PR #49) and
+  6 — the documents, ADRs 0053–0059 and Phase 9's closure. **Phase 9 is complete**; see
+  [ROADMAP.md](ROADMAP.md) Phase 9 for the acceptance criteria, the revised T-41
+  interpretation and the seven limitations carried forward. The format as shipped is
+  [PROJECT-FORMAT.md](PROJECT-FORMAT.md); **this document remains the design record** and is
+  not rewritten to match it.
 - Phase: [ROADMAP.md](ROADMAP.md) Phase 9. Closes **M1-17** and **M1-18**.
 - Branch: `docs/m10-project-transfer-plan`, from `origin/develop` at `0faff47` — the merge of
   PR #35 (Stage P), verified present: `Cargo.toml` carries `calamine 0.37` and

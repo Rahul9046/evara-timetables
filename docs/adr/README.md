@@ -9,11 +9,11 @@ tempted to undo it without knowing why.
 | [0001](0001-local-first-desktop.md) | Local-first Tauri desktop app, no server, no authentication | Accepted |
 | [0002](0002-rust-in-process-solver.md) | Rust in-process solver; do not adopt Timefold or a solver service | Accepted |
 | [0003](0003-sqlite-document-model.md) | SQLite canonical store, one file per project, sync-ready schema | Accepted — *"multiple schools means multiple files"* superseded by [0019](0019-multiple-schools-in-one-project.md) |
-| [0004](0004-evara-project-format.md) | `*.evara` is a versioned ZIP of JSON, separate from external interchange | Accepted |
+| [0004](0004-evara-project-format.md) | `*.evara` is a versioned ZIP, separate from external interchange | Accepted — **container decision superseded by [0053](0053-the-payload-is-a-verified-sqlite-snapshot.md)** (the payload is a SQLite snapshot, not JSON sections) and amended by [0054](0054-two-version-axes-one-refusal-each.md); every other clause survives |
 | [0005](0005-constraints-as-data.md) | Constraints are data; code provides an evaluator registry | Accepted |
 | [0006](0006-group-based-scheduling-first.md) | Group-based scheduling first; request/sectioning schema preserved | Accepted |
 | [0007](0007-rusqlite-refinery.md) | rusqlite + refinery, bundled SQLite, one connection factory | Accepted |
-| [0008](0008-installation-identity-and-project-lifecycle.md) | Installation identity, settings database, `.evaraproj` | Accepted |
+| [0008](0008-installation-identity-and-project-lifecycle.md) | Installation identity, settings database, `.evaraproj` | Accepted — [0057](0057-an-import-is-staged-verified-and-renamed.md) §2 records one respect in which the transfer import departs from it: no `before_schema_rebuild` safety copy, because the archive is one |
 | [0009](0009-typescript-type-generation.md) | `ts-rs` for generated TypeScript types | Accepted |
 | [0010](0010-structure-deletion-semantics.md) | RESTRICT ownership, SET NULL classification; opaque driver errors | Accepted — one deliberate departure, for `subject.department_id`, in [0025](0025-teacher-qualifications-across-school-owned-subjects.md) §6; [0029](0029-a-lesson-is-a-course-a-section-and-its-occurrences.md) §7 applies the rule unchanged to `V15` and says why that departure does not carry over |
 | [0011](0011-stable-timeslot-identity.md) | Timeslot logical identity; materialisation never deletes | Accepted |
@@ -58,6 +58,13 @@ tempted to undo it without knowing why.
 | [0050](0050-a-repair-produces-a-new-version.md) | A repair inserts a new timetable and is never applied in place; `V18` is additive and lineage is `RESTRICT` with a typed refusal | Accepted — extends [0042](0042-a-stored-timetable-is-a-version-and-a-save-refuses-stale-inputs.md) |
 | [0051](0051-baseline-preference-is-candidate-ordering.md) | Baseline preference is candidate ordering, not a constraint; `minimise-disruption` waits for local search | Accepted — amends `SOLVER.md` §7's second mechanism |
 | [0052](0052-an-unexpressible-lock-blocks-a-repair.md) | An unexpressible lock blocks a repair and only warns an edit, because the compiled problem cannot represent it | Accepted |
+| [0053](0053-the-payload-is-a-verified-sqlite-snapshot.md) | A transfer archive carries a verified SQLite snapshot, not a directory of JSON | Accepted — **supersedes [0004](0004-evara-project-format.md)'s container decision**; every other clause of 0004 survives |
+| [0054](0054-two-version-axes-one-refusal-each.md) | Two version axes — the container and the data — and each refuses on its own terms | Accepted — amends [0004](0004-evara-project-format.md) |
+| [0055](0055-an-archive-is-read-by-name-and-never-extracted.md) | An archive is read by exact name and never extracted to a path, so traversal is unexpressible | Accepted |
+| [0056](0056-a-payload-is-audited-against-a-generated-reference.md) | A payload is audited against a generated reference before anything writes to it, and its identity is read last | Accepted |
+| [0057](0057-an-import-is-staged-verified-and-renamed.md) | An import stages, verifies and renames; the archive is its own safety copy and nothing derived is rebuilt | Accepted — amends [0008](0008-installation-identity-and-project-lifecycle.md) in one respect |
+| [0058](0058-replacement-is-journalled-and-non-destructive.md) | Replacement is journalled and non-destructive; the destination is claimed, recovery reads the filesystem, and the replaced project is kept | Accepted |
+| [0059](0059-archive-integrity-is-corruption-not-authenticity.md) | An archive's integrity is a two-level tree with one unverified root; it proves corruption, not authenticity | Accepted |
 
 Statuses: **Proposed** (awaiting a decision), **Accepted**, **Superseded by NNNN**,
 **Deprecated**. Accepted records are not edited to reflect a change of mind — a new

@@ -202,23 +202,36 @@ opening, and a reader that refused would leave the user unable to see what to fi
 
 ## 7. What survives a restart, and what survives an export
 
-| | Restart | Export (Phase 9) |
+| | Restart | Export (Phase 9 — shipped in M10) |
 | --- | --- | --- |
 | `timetable`, `timetable_entry` | ✅ stored | ✅ exported |
 | `solve_run`, `timetable_evaluation` | ✅ stored | ✅ exported |
 | `solve_run_unscheduled` | ✅ stored | ✅ **exported** |
-| `violation`, `violation_ref` | ✅ stored | ❌ rebuilt by an evaluation |
+| `violation`, `violation_ref` | ✅ stored | ✅ **exported** — corrected in M10 |
 
-The third row is the one worth explaining. An unplaced cause is **historical generation
+The third row is worth explaining on its own terms. An unplaced cause is **historical generation
 information, not derived**: once the inputs move, nothing can reconstruct which lessons a past run
-failed on or why. Violations *are* derived — re-running `evaluate` reproduces them exactly, which
-is why `PROJECT-FORMAT.md` §3 has always called them *"rebuilt on first score"*.
+failed on or why.
 
-Stored violations still earn their place in the database: they let a view render findings
-**without** loading a `Problem` at all, which Phase 7's score health panel needs.
+**The fourth row was wrong and is corrected.** It said violations were rebuilt by an evaluation
+rather than exported, which fails twice:
 
-**Export is not implemented in M7.** The contract above is recorded in `PROJECT-FORMAT.md` §3 for
-Phase 9.
+- A `.evara` payload is a **page-level copy of the whole database**
+  ([adr/0053](adr/0053-the-payload-is-a-verified-sqlite-snapshot.md)), so no table is selected in
+  or out. There is no mechanism by which a table could be left behind.
+- Even with one, §4's rule that a `GENERATION` scoring is **immutable** means findings that did
+  not travel could never be put back beside the score that produced them. Every transferred
+  timetable would show a generation score next to an empty findings list, for ever.
+
+Violations are still *derivable* in the sense that matters elsewhere — `evaluate` reproduces them
+for the inputs as they now stand, which is what a revalidation does. That is a different act from
+restoring what a past generation found.
+
+Stored violations also earn their place in the database for the original reason: they let a view
+render findings **without** loading a `Problem` at all, which Phase 7's score health panel needs.
+
+**Export shipped in M10.** The format is [PROJECT-FORMAT.md](PROJECT-FORMAT.md); an import
+rebuilds nothing, which is [adr/0057](adr/0057-an-import-is-staged-verified-and-renamed.md) §3.
 
 ### The unplaced cause, and the sentence that is not stored
 
@@ -371,7 +384,7 @@ Named assertions worth knowing:
 | ~~**No manual editing.** `is_locked` and `is_manual` are columns the generator writes as 0~~ | ✅ **done in M9A**, with **no migration** — `V17` already held both columns, both uniqueness rules, the cross-cycle trigger, all three indexes and the change-log triggers. An edit carries an `ArrangementStamp` beside its `expectedRev`, because a second window moving a *different* entry passes a revision check ([adr/0047](adr/0047-a-cross-session-guard-is-an-exact-placement-list.md)) | [TIMETABLE-EDITING.md](TIMETABLE-EDITING.md) |
 | **No published/archived lifecycle** | out of the MVP (§6 of the M1 record) | a later `status` column |
 | ~~**No scenario lineage.** `based_on_timetable_id` is not in `V17`~~ | **Paid by M9B.** `V18` adds it, `ON DELETE RESTRICT`, with a typed `DbError::HasDescendants` refusal rather than an opaque foreign-key failure | [adr/0050](adr/0050-a-repair-produces-a-new-version.md) |
-| **No export.** The contract is recorded, not built | Phase 9 | `PROJECT-FORMAT.md` §3 |
+| ~~**No export.** The contract is recorded, not built~~ | ✅ **done in M10.** The payload is a page-level snapshot, so every table in §7 travels — including `violation` and `violation_ref`, which §7's table said were rebuilt and are not | [PROJECT-FORMAT.md](PROJECT-FORMAT.md) |
 | **A watermark refuses on an unrelated edit** | safe-by-default classification — §4 | narrowable later, with evidence |
 | **No "current timetable" pointer.** The UI lists by `generated_at` | that is a selection a screen remembers — and since M8 the Generate screen remembers it by opening what it just saved | settled; no pointer was added |
 | **Revalidation keeps one snapshot, not a history** | a history of scorings grows without bound and nothing asks for one | if a reason appears |
