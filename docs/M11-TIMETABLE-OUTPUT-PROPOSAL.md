@@ -1880,6 +1880,18 @@ the string, with a test pinning the count. One implementation where there were o
   window. The `CellLines` switch in `TimetableGrid.tsx` is covered by component tests and by
   `tsc`, and by nothing that renders it on a screen a person looked at.
 
+#### Verified on both platforms
+
+`npm run check` is green locally and in CI on **windows-latest** and **macos-latest**
+(PR #53, run `45437678393`), alongside `cargo deny check` — advisories, bans, licences and
+sources all clean, with no new dependency and an unmoved `Cargo.lock`. The two-platform run is
+what the budget tests and the membership measurements are asserted on, and it is also what
+caught the one convention point Stage 1 had to settle: a compiled doctest fails to link on
+Windows MSVC anywhere in this workspace, because `tauri-build` writes an 82-byte `msvcrt.lib`
+into `evara-desktop`'s `OUT_DIR` and rustdoc puts that directory on a doctest's link path. The
+helpers' examples are therefore `text` blocks with their assertions pinned as unit tests, which
+is what every other code example in this workspace already is.
+
 ### Stage 2 — CSV and Excel
 
 - `output::csv` to §6.1's column contract; `output::xlsx` to §6.2.
