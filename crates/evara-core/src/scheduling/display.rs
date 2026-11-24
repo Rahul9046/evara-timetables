@@ -172,6 +172,19 @@ impl LabelSet {
         self.rooms.iter().map(|r| (r.room_id, r)).collect()
     }
 
+    /// An index from student identifier to label.
+    ///
+    /// The third sibling, and the one whose absence had a measurable cost: *"is this student
+    /// in this lesson?"* is asked once per lesson per student grid, so answering it by
+    /// scanning [`LabelSet::students`] makes laying out one student's timetable
+    /// `O(students x lessons)` and laying out every student's `O(students^2 x lessons)`. A
+    /// bulk output of 3 000 students over 2 000 lessons is the first caller to multiply it.
+    /// `M11-TIMETABLE-OUTPUT-PROPOSAL.md` §14.2.
+    #[must_use]
+    pub fn student_index(&self) -> BTreeMap<Uuid, &StudentLabel> {
+        self.students.iter().map(|s| (s.student_id, s)).collect()
+    }
+
     /// The label of one section, or `None` where the set does not hold it.
     #[must_use]
     pub fn section(&self, section_id: Uuid) -> Option<&SectionLabel> {
@@ -271,5 +284,41 @@ mod tests {
         let set = LabelSet::default();
         assert!(set.section(an_id(3)).is_none());
         assert!(set.room(an_id(3)).is_none());
+    }
+
+    #[test]
+    fn the_three_indexes_hold_every_label_they_were_built_from() {
+        let set = LabelSet {
+            sections: vec![SectionLabel {
+                section_id: an_id(1),
+                subject: "Art".to_owned(),
+                course: "Art Year 9".to_owned(),
+                section: "A".to_owned(),
+                year_level: Some("9".to_owned()),
+                campus: None,
+                short: SectionLabel::compose_short(Some("9"), "Art", "A"),
+            }],
+            rooms: vec![RoomLabel {
+                room_id: an_id(2),
+                name: "Studio".to_owned(),
+                building: None,
+            }],
+            students: vec![StudentLabel {
+                student_id: an_id(3),
+                name: "A. Student".to_owned(),
+                code: None,
+                sections: vec![an_id(1)],
+            }],
+        };
+        assert_eq!(set.section_index().len(), 1);
+        assert_eq!(set.room_index().len(), 1);
+        let students = set.student_index();
+        assert_eq!(students.len(), 1);
+        assert_eq!(
+            students.get(&an_id(3)).map(|s| s.sections.as_slice()),
+            Some([an_id(1)].as_slice()),
+            "the index answers the enrolment question the linear scan answered"
+        );
+        assert!(!students.contains_key(&an_id(9)));
     }
 }

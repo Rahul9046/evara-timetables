@@ -108,6 +108,16 @@ const LESSON: ProjectedLesson = {
   durationPeriods: 1,
   defect: null,
   flags: { isLocked: false, isManual: false },
+  // Composed in Rust since M11 Stage 1 and read by the grid, so the screen and every output
+  // format say one thing. The composition is asserted in `evara-report`; this mirrors it.
+  lines: {
+    caption: "9 Mathematics B",
+    activityName: null,
+    teachers: ["A. Okafor"],
+    groups: ["9B"],
+    room: "Room B12",
+    time: "09:00–10:00",
+  },
 };
 
 const SUMMARY: TimetableSummary = {

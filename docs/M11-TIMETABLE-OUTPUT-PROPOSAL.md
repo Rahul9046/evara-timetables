@@ -1,9 +1,16 @@
 # M11 — Timetable Output · Architecture proposal
 
-**Status:** proposal, awaiting review. Nothing in it is implemented.
-**Phase:** 10 — Output. **Closes:** M1-19.
+**Status:** **approved** — A1 to A12, with the sequencing qualification in §20.
+**Implemented:** Stage 1 (§16). Stages 2, 3 and 4 are open; **Stage 0 is deferred to before
+Stage 3**, and nothing about native printing has been verified by running it.
+**Phase:** 10 — Output. **Closes:** M1-19 — not closed by Stage 1, which renders nothing.
 **Branch:** `docs/m11-timetable-output-proposal`. **Base:** `origin/develop` at `b12fdb2`
 (PR #50, M10 Stage 6, merged 2026-11-24).
+
+This document stays the design record. §16 carries each stage's status and, for Stage 1, the
+places the implementation departed from the shape proposed here and why. Everything labelled
+**ASSUMPTION** is still an assumption: the print-pipeline work that would settle §7.3's two is
+Stage 0, and it has not been run.
 
 ---
 
@@ -1539,6 +1546,14 @@ The last row is what makes bulk output tractable at all: 400 teacher grids is 40
 per lesson — about 0.2–0.4 MB at 2 000 lessons — which is the only cost M11 adds to a path that
 already exists, and it is below the noise of the IPC payload that path already sends.
 
+**Measured in Stage 1**, so the estimate above is now a figure: a 2 000-lesson projection
+serialises to **2 305 646 bytes** of JSON, of which **289 745 bytes — 144 per lesson, 12.6% of
+the payload** — are the shared captions. Inside the estimate, and inside R-9's 300 KB threshold,
+so `lines` stays an unconditional field: *"a conditional field is worse than 300 KB and should
+not be reached for first."* The budget test asserts a ceiling of 400 bytes per lesson, loose
+enough not to be a maintenance burden and tight enough that the field growing by an order of
+magnitude is a red build.
+
 ### 14.2 The one real performance defect found — and it blocks bulk students
 
 `projection::in_scope` (`projection.rs:812-840`) for a student scope:
@@ -1560,17 +1575,49 @@ comparisons — minutes to hours, not a slow export. `LabelSet::section()` and `
 Today this is invisible: the desktop lays out **one** scope at a time. Bulk output is the first
 caller that would multiply it.
 
-**PROPOSED, Stage 1:**
+**PROPOSED, Stage 1** — and **BUILT**, as proposed, in Stage 1:
 
-1. A `StudentIndex` built once from the `LabelSet` — `BTreeMap<Uuid, &StudentLabel>` on the model
-   of the existing `section_index()` / `room_index()` — and an `in_scope_indexed` that takes it.
-   `in_scope` stays as the one definition of membership and delegates, so there is still exactly
-   one implementation of *"is this lesson in this scope?"*.
-2. `lay_out_many(&projection, &[ProjectionScope], &labels)` building the index once for the whole
-   batch. Bulk becomes `O(students × lessons)` overall.
-3. A regression test in `projection::budget` asserting that laying out **every** scope of a
-   2 000-occurrence, 3 000-student school completes within a hang-detector bound, and printing the
-   figure the way the existing budget test does.
+1. ✅ A `StudentIndex` built once from the `LabelSet` — `BTreeMap<Uuid, &StudentLabel>` on the
+   model of the existing `section_index()` / `room_index()`, added beside them as
+   `LabelSet::student_index()` — and an `in_scope_indexed` that takes it. `in_scope` stays as the
+   one definition of membership and **delegates** to `in_scope_indexed`, building an index per
+   call, so there is still exactly one implementation of *"is this lesson in this scope?"* and a
+   caller with one question need not know about the index.
+2. ✅ `lay_out_many(&projection, &[ProjectionScope], &labels)` building the index once for the
+   whole batch. Both it and `lay_out` run one body, `lay_out_indexed`, so a bulk document and a
+   screen grid cannot disagree.
+3. ✅ Four regression tests in `projection::budget`, and one more than was proposed:
+   `build_scopes` was quadratic too, in a way the finding did not name. It answered every
+   entity's `lesson_count` with its **own** pass over the lessons — 3 620 passes of 2 000
+   lessons at R5's upper end, of which 3 000 were the roster's — and resolved its section and
+   room labels through the linear `LabelSet::section()` / `room()`. It now walks the lessons
+   **once** into count maps and reads the two indexes. A student's count is the sum of their
+   enrolled sections' counts, with the sections deduplicated first, because `contains` could not
+   double-count a roster naming one section twice and a sum can.
+
+**Measured** (Windows 11, `dev` profile — which this workspace builds with optimisations, so
+these are not debug-build figures; `cargo test -p evara-report -- --nocapture projection::budget`
+reproduces them):
+
+| Case | Figure |
+| --- | --- |
+| project 2 000 occurrences, 3 000-student roster | **5.2 ms** |
+| `lay_out_many` over **all 3 000** student scopes (120 000 cells) | **342 ms** |
+| membership, 300 students × 2 000 occurrences — scan vs index | 46 ms vs **21 ms** |
+| the same at 600 students | 202 ms vs **48 ms** |
+| the same at 1 200 students | 893 ms vs **104 ms** |
+
+The three rows at the foot are the finding rather than the absolute numbers: the scan **×4.4**
+per doubling and the index **×2.2**, which is quadratic against linear, measured. Extrapolating
+the scan to R5's 3 000-student roster gives roughly **5.6 s** of membership comparisons alone
+against the index's measured 342 ms for the whole layout.
+
+Two corrections to this section's own arithmetic, now that it has been measured. The *"minutes
+to hours"* above overstates it for this build: `find` short-circuits at half the roster on
+average, so the real figure is ~9 × 10⁹ comparisons rather than 1.8 × 10¹⁰, and an optimised
+build does them in seconds. The conclusion is unchanged and the reason it is unchanged is the
+**shape**: a school twice R5's roster pays four times the cost, and that is the property a bulk
+export cannot live with.
 
 ### 14.3 Estimated output sizes — **targets to be measured, not measurements**
 
@@ -1727,9 +1774,29 @@ window — is unchanged by M11, and M11 must not narrow it by implication.
 The brief's four stages survive, with **one insertion** and **two moves**, each explained. The
 brief invites a better dependency order where inspection reveals one.
 
-### Stage 0 — Print feasibility spike *(inserted)*
+### Stage 0 — Print feasibility spike *(inserted)* · ⏸ **deferred to before Stage 3**
 
-The §7.5 spike, before Stage 1. **Why it moves ahead of everything:** §7.3's two assumptions are
+**Approved as a stage, with its position changed.** It was proposed to run before Stage 1; the
+approval defers it to **before Stage 3**, and Stages 1 and 2 were explicitly not blocked on it.
+The reasoning behind the original position still holds and is recorded rather than removed: if
+§7.3's assumptions fail, Stage 1's document model may need a page-break vocabulary it does not
+carry today. What the deferral costs is therefore a **possible limited change to the document
+model in Stage 3** rather than a rebuild — Stage 1 is additive to `evara-report` and no renderer
+depends on the document's shape yet, so a page-break field added in Stage 3 reaches two
+consumers rather than four.
+
+Two things follow and are stated here so no later stage reads past them:
+
+- **Nothing in this repository may say native printing is verified** until M-1 to M-5 of §15.5
+  have been run and recorded. Stage 1 verified nothing about printing, because Stage 1 touched
+  no print path at all.
+- **§7's VERIFIED claims are unaffected.** They were read out of the vendored source of the
+  pinned versions and are still true; what is *not* verified is what happens when the call is
+  made in a real window, which is §7.3's two **ASSUMPTION**s and R-1 and R-2.
+
+The spike itself is unchanged:
+
+The §7.5 spike, before Stage 3. **Why it was proposed ahead of everything:** §7.3's two assumptions are
 the only ones in this document that can change the architecture rather than the implementation. If
 `@page` and repeated headers do not survive WebKit, Stage 3 becomes §7.6's comparison instead of a
 stylesheet, and Stage 1's document model may need a page-break vocabulary it would otherwise not
@@ -1738,21 +1805,92 @@ carry. Discovering that in Stage 3 means rebuilding Stage 1.
 Deliverable: the five answers written into §7 of this document, and the permission line proven
 necessary and sufficient. A day or two, mostly manual. No production code.
 
-### Stage 1 — Output foundation
+### Stage 1 — Output foundation · ✅ **complete**
 
-- `evara_report::output`: `OutputDocument` and its types, `OutputOptions`, `OutputError`,
-  `DocumentRenderer`.
-- `output::compose`, with §4.4's two rules and §4.2's six judgements.
-- `CellLines`, and `ProjectedLesson::lines` populated by `project` (§5.6).
-- **The §14.2 index fix** and `lay_out_many`, with the regression test. *Moved into Stage 1 from
-  "Performance verification" in Stage 2*, because it is not a performance improvement — bulk
-  output of students does not function without it.
-- `output::guard::defuse_formula` and `output::names::safe_file_stem`, with their test matrices.
-  *Moved into Stage 1 from Stage 2's "File safety"*, because both are pure functions that the
-  renderers call and both want their tables green before a renderer exists.
-- T-1, T-2, T-3, T-28, T-31, and the Stage 1 halves of T-12/T-13, T-16, T-17.
+- ✅ `evara_report::output`: `OutputDocument` and its types, `OutputOptions`, `OutputError`,
+  `DocumentRenderer`. The trait ships with **no implementation**, which is what `lib.rs` asked
+  for — a placeholder added to demonstrate a trait is the same guess about the second caller
+  that the trait was withheld to avoid.
+- ✅ `output::compose`, with §4.4's two rules and §4.2's six judgements.
+- ✅ `CellLines`, and `ProjectedLesson::lines` populated by `project` (§5.6). `TimetableGrid.tsx`
+  reads it; measured at **144 bytes per lesson** and 283 KB of a 2.3 MB projection payload,
+  inside §14.1's 100–200 byte estimate, so R-9's conditional field was not reached for.
+- ✅ **The §14.2 index fix** and `lay_out_many`, with the regression tests. *Moved into Stage 1
+  from "Performance verification" in Stage 2*, because it is not a performance improvement —
+  bulk output of students does not function without it.
+- ✅ `output::guard::defuse_formula` and `output::names::safe_file_stem` — plus
+  `safe_sheet_name`, `dedupe_sheet_names` and `is_acceptable_sheet_name`, which §6.2's rules 1
+  to 7 need and which are pure. Their test matrices are green; **they have no caller**, so
+  spreadsheet safety is a property of the helpers and not yet of a file.
+- ✅ T-1, T-2, T-3, T-28, T-31, the Stage 1 halves of T-12 and T-16/T-17, and the §14.2
+  regression tests. **T-13's mutation check is Stage 2's**: removing the guard cannot turn a
+  format's test red while no format calls it, and asserting it on the helper alone would be a
+  test of the helper's own test.
 
-Exit: a document composes for all 24 fixtures, conservation holds, nothing renders yet.
+Exit, met: **a document composes for all 24 fixtures at every scope kind they offer,
+conservation holds as a per-fixture property, and nothing renders.**
+
+#### Nine departures, and the reason for each
+
+The first three change a type the document model carries; the rest are additive.
+
+| # | Proposed | Built | Why |
+| --- | --- | --- | --- |
+| 1 | `OutputSheet::conflicts: Vec<GridConflict>` (§5.1) | `Vec<ConflictLine>`, naming occurrences by **stored identifier** | `GridConflict::lessons` is a list of indexes into `TimetableProjection::lessons`, and a document is rendered without the projection beside it and crosses IPC to the print view. *"An index has no meaning outside the problem that assigned it"* is the rule `findings::FindingView` already follows for exactly this reason |
+| 2 | `findings: Vec<FindingLine>` (§5.1) | `Vec<DocumentFinding>` | `FindingLine` is taken — `commands::solve::FindingLine` is a **pre-solve diagnostic** and is already in the typegen contract. Two different things cannot share a generated file name |
+| 3 | `OutputOptions::format: OutputFormat` (§5.3) | `Option<OutputFormat>` | Reconciles §5.3 with §12.2, whose `ReportRequest.format` is already `Option<String>` with *"None for the print document"*. The print path takes the document and no format, and forcing a fake one would make `compose` carry a value it must not read |
+| 4 | Five `OutputError` variants (§5.4) | Seven: `+ UnknownDay`, `+ NoEnrolments` | A day filter naming a day the cycle does not hold must be refused, not silently dropped — the mirror of `UnknownSchedule`. And T-26 requires a per-student document with no enrolment rows to be *refused with a sentence*; `EmptySelection` would have said "you filtered everything out", which is a different and wrong thing to tell somebody |
+| 5 | `CellLesson` per §5.1 | `+ label: Option<SectionLabel>`, `+ room: Option<RoomLabel>` | §6.1's column contract wants `subject`, `course`, `section`, `year_level` and `building` **unjoined**, and `CellLines` carries only the joined forms. Both forms, one composition |
+| 6 | `header` supplied by the caller | `DocumentIdentity` supplied, header **composed** | The school, cycle and term come from the projection, so a caller cannot name one school's timetable with another's heading. The seven fields a projection cannot answer — `generated_at` above all, because this crate reads no clock — are what crosses |
+| 7 | `compose` takes a projection | takes the `Problem` as well | Only for `TeacherFact::also_at` / `RoomFact::also_at`: the fact that another school holds the same identity lives nowhere else, and §9.3's disclosure is mandatory. Nothing else is read from it |
+| 8 | `disclosures` on the document | **and** on each sheet | §9.3 asks for the sentence on the sheet *and* on the cover. A deliberate duplication, deduplicated by `(code, entity)` on the cover |
+| 9 | — | `OutputSheet::omitted_lesson_count`, `DisclosureCode::{LessonsOmitted, DaysOmitted, PanelsOmitted, NonTeachingOmitted, UnscheduledOmitted, FindingsOmitted}` | §4.4 forbids silent omission and §6.1 permits explicit filtering. Counting what a filter excluded is what keeps those two from contradicting each other: a short document says *why* it is short |
+
+Three smaller decisions worth recording, each one a place a reasonable implementation goes wrong:
+
+- **A non-teaching row is omitted only when it is entirely empty.** `include_non_teaching: false`
+  looks like a row filter, but a stored timetable whose bell schedule moved can hold an
+  occurrence in a period that is now a break, and a span can *cover* such a row. Dropping it
+  would lose a placement and break the merge that crossed it. So the filter omits only a row
+  whose every cell is `Empty`, and the count it dropped is disclosed.
+- **A `Continuation` cell carries the occurrence that covers it**, found by reading the panel's
+  own span decision upwards rather than by rebuilding an occupancy map. A flat format needs one
+  row per occupied slot, and a second derivation of the span could disagree with the first.
+- **`part` and `parts` come from `ProjectedLesson::occupies`, not from `rows`.** They are equal
+  for a cell that earned a span and different for a broken run, which is the case that matters:
+  a run with a hole in it has parts and no span.
+
+#### One change outside `evara-report`, and why it is a reduction
+
+`UnplacedCause::from_key` was added to `evara-core` and `evara-db`'s private `cause_from_key`
+now calls it. The unscheduled appendix has to ask *"does this stored cause prove
+impossibility?"*, and `evara-db` was answering it from a hand-written list of the seven
+variants. A second list in `evara-report` would have been a second place for the answer to
+differ, so the list moved to `evara-core::scheduling::outcome` beside the `key()` that writes
+the string, with a test pinning the count. One implementation where there were one and a half.
+
+#### What Stage 1 did not establish
+
+- **No renderer, therefore no end-to-end safety claim.** `defuse_formula` is correct and
+  uncalled. T-13's mutation check and T-29's cross-format tuple comparison are Stage 2's.
+- **The §14.4 gate is undecided**, because rendering cost is unknown. Stage 1 measured
+  composition, not output.
+- **Nothing about printing.** §7.3, R-1 and R-2 stand exactly as written.
+- **No GUI was driven.** M10 Stage 5's limitation 1 is unchanged: no CI test drives a real Tauri
+  window. The `CellLines` switch in `TimetableGrid.tsx` is covered by component tests and by
+  `tsc`, and by nothing that renders it on a screen a person looked at.
+
+#### Verified on both platforms
+
+`npm run check` is green locally and in CI on **windows-latest** and **macos-latest**
+(PR #53, run `45437678393`), alongside `cargo deny check` — advisories, bans, licences and
+sources all clean, with no new dependency and an unmoved `Cargo.lock`. The two-platform run is
+what the budget tests and the membership measurements are asserted on, and it is also what
+caught the one convention point Stage 1 had to settle: a compiled doctest fails to link on
+Windows MSVC anywhere in this workspace, because `tauri-build` writes an 82-byte `msvcrt.lib`
+into `evara-desktop`'s `OUT_DIR` and rustdoc puts that directory on a doctest's link path. The
+helpers' examples are therefore `text` blocks with their assertions pinned as unit tests, which
+is what every other code example in this workspace already is.
 
 ### Stage 2 — CSV and Excel
 
@@ -1877,7 +2015,8 @@ is Phase 9's treatment of M1-17/M1-18: the interpretation is recorded, not assum
 | **R-6** | `Scheduling::load` is still unmeasured (R5's open figure) and is now on a bulk export's critical path | medium | a bulk export's cost is dominated by a figure nobody has | measure it in Stage 2's budget test — M11 is the milestone with the clearest reason to, and it closes R5's last row |
 | **R-7** | The **CSV column contract** turns out wrong after schools use it | medium | either a breaking change or a bad format kept forever | append-only from the start, documented as such, `view_entity_id`/`activity_id` present so a consumer never keys on a name. The contract is a document (`CSV-OUTPUT-FORMAT.md`), not a comment |
 | **R-8** | Adding `core:webview:allow-print` **widens the window's capability surface** | low | a page could invoke print | the page is ours, `script-src 'self'` admits no third-party script, and the capability enables a print dialog and nothing else. Recorded in ADR 0064 rather than adopted silently |
-| **R-9** | `CellLines` on `ProjectedLesson` grows the IPC payload for every existing screen | low | ~0.2–0.4 MB at the upper end | measured in Stage 1; if it matters, `lines` becomes a flag on `ProjectionInput` — but a conditional field is worse than 300 KB and should not be reached for first |
+| **R-9** | `CellLines` on `ProjectedLesson` grows the IPC payload for every existing screen | low | ~0.2–0.4 MB at the upper end | **Settled in Stage 1: 283 KB at the upper end, 144 bytes per lesson, 12.6% of the payload** (§14.1). Inside the estimate and inside the threshold, so `lines` is unconditional and no flag was added. A budget test holds the ceiling |
+| **R-11** | **Stage 0 is deferred to before Stage 3**, so Stage 1's document model was built without §7.3's answers | medium | a page-break vocabulary the document model does not carry, discovered in Stage 3 | Accepted at approval, with the position stated: a page-break field added in Stage 3 reaches two consumers (the two renderers) rather than four, because Stage 1's document has no renderer depending on its shape. If the spike fails harder than that, §7.6's ladder is the response and its first rung — one panel per page — is a layout change, not a model change |
 | **R-10** | **A printed timetable is mistaken for a teacher's whole week** when they work at two campuses | medium | a real scheduling mistake in a real school | §9.3's disclosure is mandatory and unsuppressible; T-22 asserts it |
 
 ### Alternatives considered and rejected
@@ -1899,6 +2038,29 @@ is Phase 9's treatment of M1-17/M1-18: the interpretation is recorded, not assum
 
 Twelve. The first four change the plan's shape; the rest are confirmations that are cheap now and
 expensive after Stage 2.
+
+### Approved, 2026-11-24
+
+**All twelve, A1 to A12, with one qualification affecting two of them.**
+
+| # | Approved as | Qualification |
+| --- | --- | --- |
+| **A1** | the Stage 0 spike is approved **as a stage**, and **deferred to before Stage 3** | Stages 1 and 2 are explicitly **not** blocked on it. The cost of deferring is carried in §16's Stage 0 entry: a possible limited change to the document model in Stage 3, not a rebuild |
+| **A4** | approved **conditional on actual platform verification**, which has not happened | Native webview printing remains the preferred approach. **No statement anywhere may say it is verified** until §15.5's M-1 to M-5 are run and recorded — §7's VERIFIED claims are about the vendored source, not about a window |
+| **A2, A3, A5–A12** | approved as recommended | — |
+
+Three consequences the stages are held to:
+
+1. §7.3's two **ASSUMPTION**s, and risks R-1 and R-2, are **unchanged**. Stage 1 touched no
+   print path and verified nothing about one.
+2. Phase 10, M1-19, D10 and R5's remaining performance items stay **open**. Stage 1 *measured*
+   §14.2's roster cost and the `CellLines` payload and wrote both figures down; it closed
+   nothing, and `OPEN-DECISIONS.md` is deliberately unamended until Stage 4.
+3. A5 to A12 were answerable during Stage 1 and are: Stage 1 built `OutputOptions` and the two
+   naming helpers to them, and the shapes A5, A6 and A7 govern belong to the Stage 2 renderers
+   that do not exist yet.
+
+### The decisions as proposed
 
 | # | Decision | Recommendation | If rejected |
 | --- | --- | --- | --- |

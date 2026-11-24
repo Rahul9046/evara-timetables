@@ -64,8 +64,18 @@ const PERIODS: ProjectedPeriod[] = [
   { periodId: "p3", ordinal: 4, label: "3", startsAt: "11:30", endsAt: "12:30", isTeaching: true },
 ];
 
+/**
+ * One projected lesson.
+ *
+ * `lines` is what the grid renders — since M11 Stage 1 the caption, the teacher list, the room
+ * and the clock span are composed **in Rust** and read here, so the screen and every output
+ * format say one thing. The composition itself is Rust's and is asserted there; this fixture
+ * mirrors it from the same fields so that a case overriding a teacher list or a room still
+ * describes a coherent lesson. Pass `lines` explicitly to assert that the screen reads it
+ * rather than recomposing from the parts.
+ */
 function aLesson(over: Partial<ProjectedLesson> = {}): ProjectedLesson {
-  return {
+  const base: Omit<ProjectedLesson, "lines"> = {
     activityId: "a1",
     sectionId: "s1",
     label: {
@@ -94,6 +104,18 @@ function aLesson(over: Partial<ProjectedLesson> = {}): ProjectedLesson {
     defect: null,
     flags: { isLocked: false, isManual: false },
     ...over,
+  };
+  return {
+    ...base,
+    lines:
+      over.lines ?? {
+        caption: base.label === null ? base.sectionId : base.label.short,
+        activityName: base.activityName,
+        teachers: base.teachers,
+        groups: base.groups,
+        room: base.room === null ? base.roomId : base.room.name,
+        time: `${base.startsAt}–${base.endsAt}`,
+      },
   };
 }
 
@@ -545,6 +567,115 @@ describe("stored flags", () => {
     render(<TimetableGrid grid={grid} lessons={[aLesson()]} />);
     expect(screen.queryByText("Locked")).toBeNull();
     expect(screen.queryByText("Placed by hand")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------- the shared caption
+
+/**
+ * M11 Stage 1 moved the cell's caption, teacher list, room name and clock span out of this
+ * component and into Rust, where one `CellLines` is read by the screen, the CSV, the workbook
+ * and the printed page. These cases assert the move actually happened: a fixture whose `lines`
+ * disagree with `label`, `teachers` and `room` must render `lines`, because a component that
+ * still composed from the parts would pass every other test in this file unchanged.
+ */
+describe("the cell caption", () => {
+  const ONE_LESSON = { "1-1": { kind: "lesson", lesson: 0, rows: 1 } as CellContent };
+
+  function renderOne(lesson: ProjectedLesson) {
+    const grid = aGrid({
+      panels: [aPanel({ cells: cells(PERIODS, DAYS, ONE_LESSON) })],
+    });
+    return render(<TimetableGrid grid={grid} lessons={[lesson]} />);
+  }
+
+  it("is the composed caption, not the label this component could have joined itself", () => {
+    renderOne(
+      aLesson({
+        lines: {
+          caption: "composed in Rust",
+          activityName: null,
+          teachers: ["composed teacher"],
+          groups: [],
+          room: "composed room",
+          time: "08:15–09:15",
+        },
+      }),
+    );
+    expect(screen.getByText("composed in Rust")).toBeTruthy();
+    expect(screen.getByText("composed teacher")).toBeTruthy();
+    expect(screen.getByText("composed room")).toBeTruthy();
+    expect(screen.getByText("08:15–09:15")).toBeTruthy();
+    // The parts are still on the lesson — a CSV column contract wants them unjoined — and the
+    // grid must not be reading them.
+    expect(screen.queryByText("9 Mathematics B")).toBeNull();
+    expect(screen.queryByText("A. Okafor")).toBeNull();
+    expect(screen.queryByText("Room B12")).toBeNull();
+  });
+
+  it("renders the same three lines it always did for an ordinary lesson", () => {
+    renderOne(aLesson());
+    const cell = screen.getByText("9 Mathematics B").closest("td");
+    expect(cell).not.toBeNull();
+    expect(within(cell!).getByText("A. Okafor")).toBeTruthy();
+    expect(within(cell!).getByText("Room B12")).toBeTruthy();
+    // Scoped to the cell, because the period gutter carries the same clock span and
+    // `getByText` would find two.
+    expect(within(cell!).getByText("09:00–10:00")).toBeTruthy();
+  });
+
+  it("joins several teachers with a comma, as it always did", () => {
+    renderOne(
+      aLesson({
+        teacherIds: ["t1", "t2"],
+        teachers: ["A. Okafor", "B. Fenwick"],
+      }),
+    );
+    expect(screen.getByText("A. Okafor, B. Fenwick")).toBeTruthy();
+  });
+
+  it("shows no teacher line at all where nobody is named", () => {
+    renderOne(aLesson({ teacherIds: [], teachers: [] }));
+    expect(screen.queryByText("A. Okafor")).toBeNull();
+    expect(screen.getByText("9 Mathematics B")).toBeTruthy();
+  });
+
+  it("shows no room line where no room was booked", () => {
+    renderOne(aLesson({ roomId: null, room: null }));
+    expect(screen.queryByText("Room B12")).toBeNull();
+    expect(screen.getByText("9 Mathematics B")).toBeTruthy();
+  });
+
+  it("names an unlabelled section by its identifier rather than a placeholder", () => {
+    renderOne(aLesson({ label: null }));
+    expect(screen.getByText("s1")).toBeTruthy();
+    expect(screen.queryByText(/Unknown|Untitled|unnamed/)).toBeNull();
+  });
+
+  it("speaks the composed names, so what is heard and what is shown agree", () => {
+    renderOne(
+      aLesson({
+        lines: {
+          caption: "composed in Rust",
+          activityName: null,
+          teachers: ["A. Okafor", "B. Fenwick"],
+          groups: [],
+          room: "composed room",
+          time: "08:15–09:15",
+        },
+      }),
+    );
+    const cell = screen.getByLabelText(/composed in Rust/);
+    // The names are the composed ones; the joins are prose for a listener rather than the
+    // comma and en dash the cell shows.
+    expect(cell.getAttribute("aria-label")).toContain("A. Okafor and B. Fenwick");
+    expect(cell.getAttribute("aria-label")).toContain("composed room");
+    expect(cell.getAttribute("aria-label")).toContain("09:00 to 10:00");
+  });
+
+  it("still announces an unlabelled section as unnamed rather than reading an identifier", () => {
+    renderOne(aLesson({ label: null }));
+    expect(screen.getByLabelText(/an unnamed lesson/)).toBeTruthy();
   });
 });
 

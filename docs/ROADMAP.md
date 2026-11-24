@@ -990,23 +990,51 @@ wanting a project column would have been a signal the design went wrong.
 
 ---
 
-## Phase 10 — Output
+## Phase 10 — Output · Stage 1 ✅ complete (M11 Stage 1) · Stages 2–4 open
 
 - Print-oriented HTML + a print stylesheet per view; print and "Save as PDF" through the
   webview's print pipeline. A Rust vector-PDF renderer is a later refinement, not an M1
-  requirement — see [OPEN-DECISIONS.md](OPEN-DECISIONS.md) D10.
-- CSV export per view.
-- A renderer trait so additional formats drop in without touching the projections.
+  requirement — see [OPEN-DECISIONS.md](OPEN-DECISIONS.md) D10. **Stage 3.**
+- CSV export per view. **Stage 2.**
+- A renderer trait so additional formats drop in without touching the projections. **Declared
+  in Stage 1** as `evara_report::output::DocumentRenderer`, over the two formats Evara renders
+  itself; its two implementations are Stage 2's.
 
-**Closes M1-19.**
+**Closes M1-19** — and M1-19 is **not** closed by Stage 1, which renders nothing.
 
-Architecture: [M11-TIMETABLE-OUTPUT-PROPOSAL.md](M11-TIMETABLE-OUTPUT-PROPOSAL.md) — **under
-review, nothing implemented.** It adds formatted `.xlsx` output and bulk exports to the three
-lines above, and it corrects two of them: the print stylesheet is **one** with per-scope
-modifiers rather than one per view, and the renderer trait covers the two formats Evara renders
-itself rather than all three. Its §7 is the one part worth reading before the stage starts —
-`window.print()` is **denied on macOS** in this repository today, because Tauri reroutes it to a
-command `core:default` does not permit.
+Architecture: [M11-TIMETABLE-OUTPUT-PROPOSAL.md](M11-TIMETABLE-OUTPUT-PROPOSAL.md) —
+**approved**, A1 to A12, with the sequencing qualification recorded in its §20. It adds
+formatted `.xlsx` output and bulk exports to the three lines above, and it corrects two of them:
+the print stylesheet is **one** with per-scope modifiers rather than one per view, and the
+renderer trait covers the two formats Evara renders itself rather than all three. Its §7 is the
+one part worth reading before Stage 3 starts — `window.print()` is **denied on macOS** in this
+repository today, because Tauri reroutes it to a command `core:default` does not permit, and
+**nothing about native printing has been verified by running it.**
+
+### Stage 1 — Output foundation ✅
+
+The shared artefact and the two pure helpers, with no renderer. What shipped:
+
+- `evara_report::output`: `OutputDocument` and its types, `OutputOptions`, `OutputError`,
+  `DocumentRenderer`, and `output::compose` making §4.2's six judgements once.
+- `CellLines`, composed by `project` and read by `TimetableGrid.tsx` — so the screen, the CSV,
+  the workbook and the printed page cannot drift about what a lesson is called. Measured at
+  **144 bytes per lesson**, 283 KB on a 2 000-lesson projection, which is inside §14.1's
+  estimate.
+- **§14.2's index fix**, which is why it is Stage 1 and not a Stage 2 optimisation: bulk student
+  output did not function without it. `LabelSet::student_index`, `StudentIndex`,
+  `in_scope_indexed` and `lay_out_many`, plus `build_scopes` counting in one pass instead of one
+  pass per entity. Laying out **every** student grid of a 3 000-student, 2 000-occurrence school
+  is now 342 ms; the scan it replaced grows quadratically (46 ms → 202 ms → 893 ms at 300, 600
+  and 1 200 students, against 21 ms → 48 ms → 104 ms indexed).
+- `output::guard::defuse_formula` and `output::names::{safe_file_stem, safe_sheet_name,
+  dedupe_sheet_names}`, with their test matrices green **before** a renderer exists. They have
+  no caller yet; Stage 2 is what makes spreadsheet safety an end-to-end claim.
+- A document composes for all **24** scheduling fixtures at every scope kind it offers, and
+  conservation is a per-fixture property test.
+
+Stage 1 deliberately ships **no** CSV, no Excel, no PDF, no print view, no Tauri command, no
+CLI subcommand and no file writing.
 
 ---
 

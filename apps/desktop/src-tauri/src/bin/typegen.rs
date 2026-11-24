@@ -649,7 +649,7 @@ fn timetables() -> (Vec<Generated>, Vec<String>, BTreeSet<(PathBuf, String)>) {
     };
     use evara_report::findings::{FindingCounts, FindingEntity, FindingSource, FindingView};
     use evara_report::projection::{
-        CellContent, GridConflict, GridPanel, LessonFlags, PinReason, ProjectedCellRef,
+        CellContent, CellLines, GridConflict, GridPanel, LessonFlags, PinReason, ProjectedCellRef,
         ProjectedDay, ProjectedLesson, ProjectedPeriod, ProjectionScope, ScheduleAxis, ScopeGrid,
         ScopeKind, TimetableCell, TimetableProjection,
     };
@@ -667,6 +667,9 @@ fn timetables() -> (Vec<Generated>, Vec<String>, BTreeSet<(PathBuf, String)>) {
         ProjectedPeriod,
         ProjectedLesson,
         ProjectedCellRef,
+        // The cell caption, composed in Rust so the screen and every output format read one
+        // text rather than each joining its own. M11 Stage 1, and §5.6 of the output proposal.
+        CellLines,
         LessonFlags,
         SpanDefect,
         ProjectionScope,

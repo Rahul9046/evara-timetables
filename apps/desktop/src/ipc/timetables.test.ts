@@ -252,6 +252,15 @@ describe("the scope lookup", () => {
       durationPeriods: 1,
       defect: null,
       flags: { isLocked: false, isManual: false },
+      // The scope lookup reads none of this; it is here because `ProjectedLesson` carries it.
+      lines: {
+        caption: "s1",
+        activityName: null,
+        teachers: [],
+        groups: [],
+        room: "r1",
+        time: "09:00–10:00",
+      },
       ...over,
     };
   }

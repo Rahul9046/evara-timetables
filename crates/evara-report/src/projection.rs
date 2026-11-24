@@ -52,7 +52,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use evara_core::scheduling::display::{LabelSet, RoomLabel, SectionLabel};
+use evara_core::scheduling::display::{LabelSet, RoomLabel, SectionLabel, StudentLabel};
 use evara_core::scheduling::span::{SpanDefect, resolve_activity_span};
 use evara_core::scheduling::{ActivityIx, Assignment, PeriodKind, Problem};
 use serde::{Deserialize, Serialize};
@@ -122,6 +122,132 @@ pub struct LessonFlags {
     pub is_manual: bool,
 }
 
+/// How much of a cell's caption a reader wants.
+///
+/// Read by [`CellLines::one_line`] and carried on
+/// [`OutputOptions::detail`](crate::output::OutputOptions::detail). Three values rather than a
+/// free-form template: a report designer is out of scope
+/// (`M11-TIMETABLE-OUTPUT-PROPOSAL.md` §3.2), and the three are what the Download dialogue's
+/// *"Cell shows"* control offers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub enum CellDetail {
+    /// The caption alone — what fits in a narrow printed column.
+    Compact,
+    /// The caption, the teachers and the room. The screen's own cell, and the default.
+    #[default]
+    Standard,
+    /// Everything the lines hold, including the groups, the occurrence's name and the time.
+    Full,
+}
+
+impl CellDetail {
+    /// The stable key, for a command argument and a test that pins the vocabulary.
+    #[must_use]
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Compact => "compact",
+            Self::Standard => "standard",
+            Self::Full => "full",
+        }
+    }
+
+    /// Every value, in increasing order of detail.
+    #[must_use]
+    pub const fn all() -> &'static [Self] {
+        &[Self::Compact, Self::Standard, Self::Full]
+    }
+
+    /// The detail one key names, or `None` where it names nothing.
+    #[must_use]
+    pub fn from_key(key: &str) -> Option<Self> {
+        Self::all().iter().copied().find(|d| d.key() == key)
+    }
+}
+
+/// What a cell says about one occurrence, composed once.
+///
+/// # Why this exists, and what it replaces
+///
+/// Four consumers have to agree about what a lesson is called: the on-screen grid, the CSV,
+/// the workbook and the printed page. Before M11 the screen composed its own caption, teacher
+/// list and room name in TypeScript (`TimetableGrid.tsx`), which was three lines of joining
+/// and so not a scheduling rule in the view layer — but it was also the only composition, and
+/// *"the screen says one thing and the printout says another"* is the drift this milestone
+/// must not introduce. So the composition moves to Rust, where it is done once and read by all
+/// four. `M11-TIMETABLE-OUTPUT-PROPOSAL.md` §5.2 and §5.6.
+///
+/// # Nothing here is substituted
+///
+/// [`CellLines::caption`] is [`SectionLabel::short`] — composed by
+/// [`SectionLabel::compose_short`], which is already the one implementation — or the section's
+/// stored identifier where the label set does not hold a label. Never a placeholder name that
+/// a reader could mistake for data: `evara_core::scheduling::display`'s header is the rule, and
+/// an identifier is visibly an identifier.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct CellLines {
+    /// [`SectionLabel::short`], or the section identifier where the set holds no label.
+    pub caption: String,
+    /// The occurrence's own name, where one was given.
+    pub activity_name: Option<String>,
+    /// Every teacher, in the section's order. Never only the first.
+    pub teachers: Vec<String>,
+    /// Every attending student group, in the section's order.
+    pub groups: Vec<String>,
+    /// The room's name, where a room was booked.
+    ///
+    /// The identifier where a room was booked and the label set holds no label for it: a
+    /// booked room rendering as blank would be a placement silently omitted, which §4.4 of the
+    /// proposal forbids. `None` means **no room was booked**, which is a different fact.
+    pub room: Option<String>,
+    /// `'HH:MM–HH:MM'`, derived from the periods the occurrence covers.
+    ///
+    /// Copied from [`ProjectedLesson::starts_at`] and [`ProjectedLesson::ends_at`], which the
+    /// span resolver produced from the slots. Never a duration multiplied by a period length —
+    /// `CLAUDE.md` §3.
+    pub time: String,
+}
+
+impl CellLines {
+    /// The whole caption on one line, at the detail asked for.
+    ///
+    /// What a CSV field and a narrow workbook column use; the structured fields are what the
+    /// printed page and a wide cell use. One implementation, four consumers.
+    #[must_use]
+    pub fn one_line(&self, detail: CellDetail) -> String {
+        let teachers = self.teachers.join(", ");
+        let groups = self.groups.join(", ");
+        let mut parts: Vec<&str> = vec![self.caption.as_str()];
+        if detail == CellDetail::Full
+            && let Some(name) = self.activity_name.as_deref()
+        {
+            parts.push(name);
+        }
+        if detail != CellDetail::Compact {
+            parts.push(teachers.as_str());
+        }
+        if detail == CellDetail::Full {
+            parts.push(groups.as_str());
+        }
+        if detail != CellDetail::Compact
+            && let Some(room) = self.room.as_deref()
+        {
+            parts.push(room);
+        }
+        if detail == CellDetail::Full {
+            parts.push(self.time.as_str());
+        }
+        parts
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" \u{b7} ")
+    }
+}
+
 /// One placed occurrence, resolved and labelled.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -175,6 +301,12 @@ pub struct ProjectedLesson {
     pub defect: Option<SpanDefect>,
     /// Whether the entry is locked or manual.
     pub flags: LessonFlags,
+    /// What a cell says about it, composed once here and read by every consumer.
+    ///
+    /// Additive, and the fields it joins are all still carried beside it — a CSV column
+    /// contract wants `subject` and `course` unjoined and a grid wants them joined, so both
+    /// forms are present and only one of them is *composed*. §5.6 of the M11 proposal.
+    pub lines: CellLines,
 }
 
 /// Which kind of thing a grid is about.
@@ -683,26 +815,50 @@ pub fn project(input: ProjectionInput<'_>) -> TimetableProjection {
             .and_then(|ix| problem.rooms.get(ix.get()))
             .map(|room| room.id);
 
+        let label = sections.get(&section.id).map(|l| (*l).clone());
+        let room = room_id.and_then(|id| rooms.get(&id).map(|r| (*r).clone()));
+        let teacher_names: Vec<String> = teachers.iter().map(|t| t.name.clone()).collect();
+        let group_names: Vec<String> = groups.iter().map(|g| g.name.clone()).collect();
+        let starts_at = resolved.span.interval.start.to_string();
+        let ends_at = resolved.span.interval.end.to_string();
+        let lines = CellLines {
+            // The label's own short form, or the stored identifier. Never a placeholder.
+            caption: label
+                .as_ref()
+                .map_or_else(|| section.id.to_string(), |l| l.short.clone()),
+            activity_name: fact.name.clone(),
+            teachers: teacher_names.clone(),
+            groups: group_names.clone(),
+            // A booked room the label set does not name is named by its identifier rather
+            // than left blank: a blank reads as "no room was booked", a different fact.
+            room: room.as_ref().map_or_else(
+                || room_id.map(|id| id.to_string()),
+                |r| Some(r.name.clone()),
+            ),
+            time: format!("{starts_at}\u{2013}{ends_at}"),
+        };
+
         lessons.push(ProjectedLesson {
             activity_id: fact.id,
             section_id: section.id,
-            label: sections.get(&section.id).map(|l| (*l).clone()),
+            label,
             activity_name: fact.name.clone(),
             teacher_ids: teachers.iter().map(|t| t.id).collect(),
-            teachers: teachers.iter().map(|t| t.name.clone()).collect(),
+            teachers: teacher_names,
             group_ids: groups.iter().map(|g| g.id).collect(),
-            groups: groups.iter().map(|g| g.name.clone()).collect(),
+            groups: group_names,
             room_id,
-            room: room_id.and_then(|id| rooms.get(&id).map(|r| (*r).clone())),
+            room,
             schedule_id: schedule.id,
             cycle_day_id: day.id,
             day_ordinal: day.ordinal,
             occupies,
-            starts_at: resolved.span.interval.start.to_string(),
-            ends_at: resolved.span.interval.end.to_string(),
+            starts_at,
+            ends_at,
             duration_periods: u16::try_from(fact.duration.as_usize()).unwrap_or(u16::MAX),
             defect: Some(resolved.defect).filter(|d| !d.is_sound()),
             flags: flags.get(&fact.id).copied().unwrap_or_default(),
+            lines,
         });
     }
 
@@ -721,11 +877,42 @@ pub fn project(input: ProjectionInput<'_>) -> TimetableProjection {
 }
 
 /// Every grid a reader can select, in a deterministic order.
+///
+/// # Counted in one pass, not one pass per entity
+///
+/// Every `lesson_count` here is a count of the same flat list, so the obvious shape — a
+/// `filter().count()` per section, per teacher, per room and per student — is
+/// `O(entities × lessons)` on a path that runs on **every** projection. At the documented
+/// upper end (500 sections, 80 teachers, 40 rooms) that is millions of comparisons before a
+/// single grid is laid out, and the student loop is quadratic in the roster on its own. So the
+/// lessons are walked **once** into count maps and each entity reads its own number, and the
+/// label lookups go through [`LabelSet::section_index`] / [`LabelSet::room_index`] rather than
+/// through the linear `section()` / `room()`. `M11-TIMETABLE-OUTPUT-PROPOSAL.md` §14.2.
+///
+/// The output is unchanged: the same scopes, in the same order, with the same counts.
 fn build_scopes(
     problem: &Problem,
     labels: &LabelSet,
     lessons: &[ProjectedLesson],
 ) -> Vec<ProjectionScope> {
+    // One pass over the lessons, three tallies. `BTreeMap` because every output of this
+    // module has to be deterministic and nothing in this workspace iterates a hash map.
+    let mut by_section: BTreeMap<Uuid, usize> = BTreeMap::new();
+    let mut by_teacher: BTreeMap<Uuid, usize> = BTreeMap::new();
+    let mut by_room: BTreeMap<Uuid, usize> = BTreeMap::new();
+    for lesson in lessons {
+        *by_section.entry(lesson.section_id).or_default() += 1;
+        for teacher in &lesson.teacher_ids {
+            *by_teacher.entry(*teacher).or_default() += 1;
+        }
+        if let Some(room) = lesson.room_id {
+            *by_room.entry(room).or_default() += 1;
+        }
+    }
+
+    let sections = labels.section_index();
+    let rooms = labels.room_index();
+
     let mut scopes = vec![ProjectionScope {
         kind: ScopeKind::Master,
         id: None,
@@ -738,17 +925,13 @@ fn build_scopes(
     // Sections, in the loader's interning order, which is `subject, course, section` —
     // already the order a reader expects.
     for section in &problem.sections {
-        let count = lessons
-            .iter()
-            .filter(|l| l.section_id == section.id)
-            .count();
-        let label = labels.section(section.id);
+        let label = sections.get(&section.id).copied();
         scopes.push(ProjectionScope {
             kind: ScopeKind::Section,
             id: Some(section.id),
             name: label.map_or_else(|| section.name.clone(), |l| l.short.clone()),
             secondary: label.map(|l| l.course.clone()),
-            lesson_count: count,
+            lesson_count: by_section.get(&section.id).copied().unwrap_or(0),
             roster_derived: false,
         });
     }
@@ -759,25 +942,19 @@ fn build_scopes(
             id: Some(teacher.id),
             name: teacher.name.clone(),
             secondary: None,
-            lesson_count: lessons
-                .iter()
-                .filter(|l| l.teacher_ids.contains(&teacher.id))
-                .count(),
+            lesson_count: by_teacher.get(&teacher.id).copied().unwrap_or(0),
             roster_derived: false,
         });
     }
 
     for room in &problem.rooms {
-        let label = labels.room(room.id);
+        let label = rooms.get(&room.id).copied();
         scopes.push(ProjectionScope {
             kind: ScopeKind::Room,
             id: Some(room.id),
             name: room.name.clone(),
             secondary: label.and_then(|l| l.building.clone()),
-            lesson_count: lessons
-                .iter()
-                .filter(|l| l.room_id == Some(room.id))
-                .count(),
+            lesson_count: by_room.get(&room.id).copied().unwrap_or(0),
             roster_derived: false,
         });
     }
@@ -786,11 +963,19 @@ fn build_scopes(
     // `class_enrolment` row. A student with no row is absent rather than present with a blank
     // timetable: ADR 0006 makes the roster optional, so its absence is an ordinary state and
     // not a gap to be filled from a group's size.
+    //
+    // A student's count is the sum of their enrolled sections' counts — the same number the
+    // per-lesson scan produced, at `O(their sections)` rather than `O(lessons)`. The sections
+    // are deduplicated first, because a roster naming one section twice must not count its
+    // lessons twice; `contains` had that property and a sum does not.
     for student in &labels.students {
-        let count = lessons
+        let mut enrolled: Vec<Uuid> = student.sections.clone();
+        enrolled.sort_unstable();
+        enrolled.dedup();
+        let count = enrolled
             .iter()
-            .filter(|l| student.sections.contains(&l.section_id))
-            .count();
+            .filter_map(|section| by_section.get(section))
+            .sum();
         scopes.push(ProjectionScope {
             kind: ScopeKind::Student,
             id: Some(student.student_id),
@@ -804,12 +989,92 @@ fn build_scopes(
     scopes
 }
 
+/// The roster, indexed, so *"is this student in this lesson?"* is a map lookup.
+///
+/// # What it is for
+///
+/// Scope membership is asked once per lesson per grid. For the four scheduling scopes the
+/// answer is on the lesson itself — a section identifier, a teacher list, a room — but for a
+/// student it is in the **roster**, and answering it by scanning [`LabelSet::students`] makes
+/// one student's grid `O(students × lessons)` and every student's `O(students² × lessons)`.
+/// At 3 000 students and 2 000 lessons that is about 1.8 × 10¹⁰ comparisons: minutes to hours,
+/// not a slow export. `M11-TIMETABLE-OUTPUT-PROPOSAL.md` §14.2.
+///
+/// Built once per batch by [`lay_out_many`] and once per call by [`lay_out`] — which is the
+/// right trade for a single grid and the wrong one for four hundred, which is why both exist.
+///
+/// # Still one definition of membership
+///
+/// This type holds **no** rule. [`in_scope_indexed`] is the one implementation of *"does this
+/// lesson belong in this scope?"* and [`in_scope`] delegates to it, so a scope's grid and its
+/// lesson count cannot disagree however the roster is reached.
+#[derive(Debug, Clone)]
+pub struct StudentIndex<'a> {
+    /// Every student the label set holds, by identifier.
+    by_id: BTreeMap<Uuid, &'a StudentLabel>,
+}
+
+impl<'a> StudentIndex<'a> {
+    /// Indexes one label set's roster.
+    #[must_use]
+    pub fn of(labels: &'a LabelSet) -> Self {
+        Self {
+            by_id: labels.student_index(),
+        }
+    }
+
+    /// How many students the index holds.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.by_id.len()
+    }
+
+    /// Whether the index holds no student.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.by_id.is_empty()
+    }
+
+    /// Whether this student's enrolment names this section.
+    ///
+    /// Explicit enrolment and nothing else: never a group's membership, never a group's size.
+    /// A student the index does not hold is enrolled in nothing, which is already what a
+    /// `LabelSet` carrying only students with rows means.
+    #[must_use]
+    pub fn enrolled_in(&self, student_id: Uuid, section_id: Uuid) -> bool {
+        self.by_id
+            .get(&student_id)
+            .is_some_and(|student| student.sections.contains(&section_id))
+    }
+}
+
 /// Whether one lesson belongs in one scope.
 ///
 /// The **only** implementation of scope membership, so a scope's grid and its lesson count
 /// cannot disagree.
+///
+/// # Cost
+///
+/// Builds a [`StudentIndex`] per call, which is right for a single question and wrong inside a
+/// loop. [`lay_out`] and [`lay_out_many`] therefore call [`in_scope_indexed`] with an index
+/// they built once — this wrapper exists so a caller with a `LabelSet` and one question need
+/// not know about the index at all.
 #[must_use]
 pub fn in_scope(lesson: &ProjectedLesson, scope: &ProjectionScope, labels: &LabelSet) -> bool {
+    in_scope_indexed(lesson, scope, &StudentIndex::of(labels))
+}
+
+/// Whether one lesson belongs in one scope, against an index built once.
+///
+/// This is the body [`in_scope`] delegates to, and so the one definition of membership. The
+/// only difference is how the roster is reached: a map rather than a scan, which is what makes
+/// laying out every student's grid linear rather than quadratic (§14.2).
+#[must_use]
+pub fn in_scope_indexed(
+    lesson: &ProjectedLesson,
+    scope: &ProjectionScope,
+    students: &StudentIndex<'_>,
+) -> bool {
     match (scope.kind, scope.id) {
         (ScopeKind::Master, _) => true,
         (ScopeKind::Section, Some(id)) => lesson.section_id == id,
@@ -817,11 +1082,7 @@ pub fn in_scope(lesson: &ProjectedLesson, scope: &ProjectionScope, labels: &Labe
         (ScopeKind::Room, Some(id)) => lesson.room_id == Some(id),
         // Explicit enrolment and nothing else. Never a group's membership, never a group's
         // size: substituting either would present a guess as a child's confirmed schedule.
-        (ScopeKind::Student, Some(id)) => labels
-            .students
-            .iter()
-            .find(|s| s.student_id == id)
-            .is_some_and(|s| s.sections.contains(&lesson.section_id)),
+        (ScopeKind::Student, Some(id)) => students.enrolled_in(id, lesson.section_id),
         (_, None) => false,
     }
 }
@@ -843,11 +1104,49 @@ pub fn lay_out(
     scope: &ProjectionScope,
     labels: &LabelSet,
 ) -> ScopeGrid {
+    lay_out_indexed(projection, scope, &StudentIndex::of(labels))
+}
+
+/// Lays out many scopes from one projection, building the roster index once.
+///
+/// # Why this exists
+///
+/// It is the same function as [`lay_out`] applied to each scope, and it must stay that way —
+/// both go through [`lay_out_indexed`], so a bulk document and a single screen grid cannot
+/// disagree. What it saves is the index: [`lay_out`] builds a [`StudentIndex`] per call, so a
+/// bulk output of 3 000 students would build 3 000 of them, which is the second half of
+/// §14.2's cost. Here it is built once for the batch.
+///
+/// The result is in the caller's order, one [`ScopeGrid`] per scope given, including for a
+/// scope with nothing in it — an empty grid is a state and an absent one would read as *"this
+/// teacher was not exported"* (§8.4 of the proposal).
+#[must_use]
+pub fn lay_out_many(
+    projection: &TimetableProjection,
+    scopes: &[ProjectionScope],
+    labels: &LabelSet,
+) -> Vec<ScopeGrid> {
+    let students = StudentIndex::of(labels);
+    scopes
+        .iter()
+        .map(|scope| lay_out_indexed(projection, scope, &students))
+        .collect()
+}
+
+/// The body both [`lay_out`] and [`lay_out_many`] run.
+///
+/// One implementation, so the single-scope and bulk paths are the same path.
+#[must_use]
+fn lay_out_indexed(
+    projection: &TimetableProjection,
+    scope: &ProjectionScope,
+    students: &StudentIndex<'_>,
+) -> ScopeGrid {
     let mine: Vec<usize> = projection
         .lessons
         .iter()
         .enumerate()
-        .filter(|(_, lesson)| in_scope(lesson, scope, labels))
+        .filter(|(_, lesson)| in_scope_indexed(lesson, scope, students))
         .map(|(ix, _)| ix)
         .collect();
 
